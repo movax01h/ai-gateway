@@ -169,16 +169,26 @@ def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
 def _remove_deprecated_temperature_parameters(kwargs: Dict[str, Any]) -> None:
     """Claude Opus 4.7/4.8, Sonnet 5, Fable 5, Mythos 5, and Haiku 5.5 deprecated the temperature parameter.
 
-    Passing it causes a Bad Request response, so we drop it to avoid that.
+    Passing it causes a Bad Request response, so we drop it to avoid that. Identifiers that don't name the model, such
+    as Amazon Bedrock application inference profile ARNs, are learned from the provider's error instead. See
+    `_is_deprecated_temperature_error`.
 
     https://gitlab.com/gitlab-org/gitlab/-/work_items/601614
     """
     model = kwargs.get("model")
-    if not model or not is_deprecated_temperature_model(model):
+    if not model or not (
+        is_deprecated_temperature_model(model) or model in _TEMPERATURE_REJECTING_MODELS
+    ):
         return
     if kwargs.get("temperature") is None:
         return
     del kwargs["temperature"]
+
+
+# Identifiers whose provider rejected `temperature` as deprecated, learned at runtime so that later requests drop it up
+# front instead of failing first. Capped because identifiers come from request metadata.
+_TEMPERATURE_REJECTING_MODELS: set[str] = set()
+_TEMPERATURE_REJECTING_MODELS_MAX = 256
 
 
 def is_deprecated_temperature_model(model: str) -> bool:
@@ -206,6 +216,31 @@ def is_deprecated_temperature_model(model: str) -> bool:
             "haiku-5.5",
         )
     )
+
+
+def _is_deprecated_temperature_error(
+    kwargs: Dict[str, Any], error: litellm.BadRequestError
+) -> bool:
+    """Whether the provider rejected the `temperature` we sent because the model deprecated it.
+
+    `is_deprecated_temperature_model` can only match identifiers that name the model. An Amazon Bedrock application
+    inference profile ARN does not, so the request reaches the provider with `temperature` and is rejected.
+
+    https://gitlab.com/gitlab-org/gitlab/-/work_items/633025
+    """
+    if kwargs.get("temperature") is None:
+        return False
+    message = str(error).lower()
+    return "temperature" in message and "deprecated" in message
+
+
+def _remember_temperature_rejecting_model(model: Optional[str]) -> None:
+    if model and len(_TEMPERATURE_REJECTING_MODELS) < _TEMPERATURE_REJECTING_MODELS_MAX:
+        _TEMPERATURE_REJECTING_MODELS.add(model)
+
+
+def _without_temperature(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in kwargs.items() if k != "temperature"}
 
 
 # Claude families that still accept an assistant message as the final turn (prefill).
@@ -399,6 +434,17 @@ class ChatLiteLLM(_LChatLiteLLM):
                 run_manager=run_manager, **kwargs
             )
         except litellm.BadRequestError as error:
+            if _is_deprecated_temperature_error(kwargs, error):
+                log.warning(
+                    "Retrying without temperature: deprecated for this model",
+                    model=kwargs.get("model"),
+                    custom_llm_provider=kwargs.get("custom_llm_provider"),
+                    error=str(error),
+                )
+                _remember_temperature_rejecting_model(kwargs.get("model"))
+                return await super().acompletion_with_retry(
+                    run_manager=run_manager, **_without_temperature(kwargs)
+                )
             if kwargs.get(
                 "web_search_options"
             ) is None or not _is_web_search_policy_error(error):
