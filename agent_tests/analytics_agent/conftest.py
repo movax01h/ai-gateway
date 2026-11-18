@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -36,8 +37,8 @@ SCHEMA_TOOL_NAMES = {
 def pytest_generate_tests(metafunc):
     """Run each test once per version in its `flow_versions` marker.
 
-    Every test that uses `flow_version` (directly or via the agent fixtures) must carry
-    the marker; a missing or empty marker fails collection instead of quietly skipping.
+    Every test that uses `flow_version` (directly or via the agent fixtures) must carry the marker; a missing or empty
+    marker fails collection instead of quietly skipping.
     """
     if "flow_version" not in metafunc.fixturenames:
         return
@@ -108,9 +109,10 @@ def glql_schema_tool(flow_version, mock_gitlab_client):
 
     1.0.0 answers from a copy bundled in this repo and needs no client. 2.0.0
     reads the instance, so it gets a stubbed endpoint serving
-    `glql_schema_fake.json` - a trimmed down, representative version of the
-    full schema. The stub answers on path, so a tool added to the toolset later
-    cannot silently receive the schema for its own GET.
+    `glql_schema_fake.json` - a representative subset with the same structure
+    as the live schema, kept in step by `test_glql_schema_fake_structure.py`.
+    The stub answers on path, so a tool added to the toolset later cannot
+    silently receive the schema for its own GET.
     """
     from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
@@ -128,7 +130,11 @@ def glql_schema_tool(flow_version, mock_gitlab_client):
             FetchGlqlSchema,
         )
 
-        document = (Path(__file__).parent / "glql_schema_fake.json").read_text()
+        # The instance serves the schema compact, and the model reads it as served.
+        document = json.dumps(
+            json.loads((Path(__file__).parent / "glql_schema_fake.json").read_text()),
+            separators=(",", ":"),
+        )
 
         async def aget(path, **_kwargs):
             if path != SCHEMA_PATH:
