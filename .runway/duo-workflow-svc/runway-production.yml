@@ -13,6 +13,11 @@ spec:
     - asia-northeast1
     - europe-west2
   request_timeout: 3600
+  region_overrides:
+    us-east1:
+      request_based_billing: false
+    europe-west2:
+      request_based_billing: false
   load_balancing:
     external_load_balancer:
       backend_protocol: "HTTP2"

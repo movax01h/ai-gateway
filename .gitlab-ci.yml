@@ -169,7 +169,7 @@ include:
     inputs:
       runway_service_id: duo-workflow-svc
       image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
-      runway_version: v4.132.4
+      runway_version: v4.140.0
     rules: *skip-if-not-security
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/runway.yml"
