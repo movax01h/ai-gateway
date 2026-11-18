@@ -17,8 +17,6 @@
 # Duo Code Review flows, tools, and prompts
 /duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/response_schemas/definitions/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/response_schemas/definitions/risk_classification_claims/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Duo Code Review migration targets under ai/features/review/ (see work item 2853)
 /ai/features/review/ @kinsingh @wanpol @iamphill @marc_shaw
@@ -96,6 +94,10 @@
 /ai/features/security/secrets_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
 /ai/features/security/secret_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
 
+# Duo Code Review shared definitions. Keep below any /ai/shared/ rule,
+# because the last matching rule in a section wins.
+/ai/shared/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
+
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/duo-workflow-service
@@ -113,8 +115,6 @@
 # Duo Code Review flow configs, tools, and prompts
 /duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/response_schemas/definitions/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/response_schemas/definitions/risk_classification_claims/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Duo Code Review migration targets under ai/features/review/
 /ai/features/review/ @kinsingh @wanpol @iamphill @marc_shaw
@@ -191,6 +191,10 @@
 # Fix Pipeline prompts and response schemas
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 /ai_gateway/response_schemas/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
+
+# Duo Code Review shared definitions. Keep below any /ai/shared/ rule,
+# because the last matching rule in a section wins.
+/ai/shared/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
 
 ^[Model Configuration] @gitlab-org/maintainers/duo-workflow-service
 /ai_gateway/model_selection/models.yml @gitlab-org/fulfillment/utilization
