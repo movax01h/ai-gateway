@@ -50,7 +50,12 @@ components:
           curl -fsSL \
             "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_${ORAS_ARCH}.tar.gz" \
             -o "$ORAS_TGZ"
-          tar xz -C /tmp/bin -f "$ORAS_TGZ" oras
+          # --no-same-owner: the sandbox runs as root in a user namespace where the
+          # tarball's build uid/gid (1001/118) is unmapped, so tar's default
+          # ownership restore fails with EINVAL and exits 2, aborting the script
+          # under set -eu. oras keeps the tarball's 0755 mode, and its owner
+          # doesn't matter for running it.
+          tar xz --no-same-owner -C /tmp/bin -f "$ORAS_TGZ" oras
           rm -f "$ORAS_TGZ"
 
           # Pull skillguard + ast-grep from public registry.

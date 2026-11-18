@@ -172,6 +172,23 @@ class TestSkillguardScanSetupScriptIsPosixSafe:
             "file first, then extract"
         )
 
+    def test_tar_extraction_disables_ownership_restore(self):
+        # The sandbox runs as root in a user namespace where the ORAS tarball's
+        # build uid/gid is unmapped; tar's default ownership restore then fails
+        # with EINVAL and exits 2, aborting the install under set -eu. Every tar
+        # extraction must pass --no-same-owner to skip the chown.
+        tar_lines = [
+            line.strip()
+            for line in self._setup_code().splitlines()
+            if re.match(r"\s*tar\s", line) and re.search(r"\sx|\s-\w*x|--extract", line)
+        ]
+        assert tar_lines, "expected at least one tar extraction in the setup script"
+        for stripped in tar_lines:
+            assert "--no-same-owner" in stripped, (
+                f"tar extraction must use --no-same-owner to survive the "
+                f"sandbox user namespace: {stripped!r}"
+            )
+
 
 class TestSkillguardScanSupervisorsAreWired:
     """Guard 6 — each supervisor delegates to its subagent with a cap.
