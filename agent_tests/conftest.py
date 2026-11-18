@@ -542,10 +542,16 @@ def orbit_invoke_command_tool():
 
 _OUTCOMES: dict[str, str] = {}
 
+# Checks that run beside the agent tests but score no agent behaviour, so they stay out of the benchmark.
+_NOT_BENCHMARKED = ("test_glql_schema_fake_structure.py",)
+
 
 def pytest_runtest_logreport(report):
     """Record the final outcome of each agent test, ignoring reruns."""
     if report.outcome == "rerun" or not report.nodeid.startswith("agent_tests/"):
+        return
+
+    if report.nodeid.split("::", maxsplit=1)[0].endswith(_NOT_BENCHMARKED):
         return
 
     if report.when == "call":

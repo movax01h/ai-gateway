@@ -10,6 +10,7 @@
             "project",
             "group"
           ],
+          "multi_scope": false,
           "filter_fields": [
             {
               "name": "type",
@@ -259,6 +260,303 @@
                   ]
                 }
               ]
+            },
+            {
+              "name": "id",
+              "value_types": [
+                {
+                  "kind": "Number",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "Number"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "epic",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Number",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Null",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "EpicRef"
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    },
+                    {
+                      "kind": "Number"
+                    },
+                    {
+                      "kind": "Reference",
+                      "references": "EpicRef"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "parent",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Number",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "WorkItemRef"
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "EpicRef"
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    },
+                    {
+                      "kind": "Number"
+                    },
+                    {
+                      "kind": "Reference",
+                      "references": "WorkItemRef"
+                    },
+                    {
+                      "kind": "Reference",
+                      "references": "EpicRef"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "author",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "UserRef"
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    },
+                    {
+                      "kind": "Reference",
+                      "references": "UserRef"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "health",
+              "aliases": [
+                "healthstatus"
+              ],
+              "value_types": [
+                {
+                  "kind": "StringEnum",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "values": [
+                    "on track",
+                    "needs attention",
+                    "at risk"
+                  ]
+                },
+                {
+                  "kind": "Null",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "iteration",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "Number"
+                    },
+                    {
+                      "kind": "String"
+                    },
+                    {
+                      "kind": "Reference",
+                      "references": "IterationRef"
+                    }
+                  ]
+                },
+                {
+                  "kind": "Number",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Null",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "values": [
+                    "current"
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "IterationRef"
+                }
+              ]
+            },
+            {
+              "name": "cadence",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "Number"
+                    },
+                    {
+                      "kind": "String"
+                    }
+                  ]
+                },
+                {
+                  "kind": "Number",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "Null",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                }
+              ]
             }
           ],
           "wildcard_filter_fields": [
@@ -365,6 +663,7 @@
             "project",
             "group"
           ],
+          "multi_scope": false,
           "filter_fields": [
             {
               "name": "type",
@@ -530,6 +829,24 @@
               ]
             },
             {
+              "name": "deployed",
+              "aliases": [
+                "deployedat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
               "name": "draft",
               "value_types": [
                 {
@@ -577,6 +894,114 @@
                     "=",
                     "!="
                   ]
+                }
+              ]
+            },
+            {
+              "name": "reviewState",
+              "aliases": [
+                "reviewstates"
+              ],
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "values": [
+                    "unreviewed",
+                    "review_started",
+                    "reviewed",
+                    "requested_changes"
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "Enum",
+                      "values": [
+                        "unreviewed",
+                        "review_started",
+                        "reviewed",
+                        "requested_changes"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "approver",
+              "aliases": [
+                "approvers",
+                "approvedby"
+              ],
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "UserRef"
+                },
+                {
+                  "kind": "Null",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    },
+                    {
+                      "kind": "Reference",
+                      "references": "UserRef"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "merger",
+              "aliases": [
+                "mergedby",
+                "mergeuser"
+              ],
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "="
+                  ],
+                  "references": "UserRef"
                 }
               ]
             }
@@ -658,6 +1083,7 @@
             "project",
             "group"
           ],
+          "multi_scope": true,
           "filter_fields": [
             {
               "name": "type",
@@ -717,7 +1143,8 @@
                 {
                   "kind": "Enum",
                   "operators": [
-                    "="
+                    "=",
+                    "!="
                   ],
                   "values": [
                     "opened",
@@ -729,7 +1156,8 @@
                 {
                   "kind": "List",
                   "operators": [
-                    "in"
+                    "in",
+                    "not in"
                   ],
                   "items": [
                     {
@@ -754,18 +1182,32 @@
                 {
                   "kind": "String",
                   "operators": [
-                    "="
+                    "=",
+                    "!="
                   ]
                 },
                 {
                   "kind": "List",
                   "operators": [
-                    "in"
+                    "in",
+                    "not in"
                   ],
                   "items": [
                     {
                       "kind": "String"
                     }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "createdByDuo",
+              "value_types": [
+                {
+                  "kind": "Boolean",
+                  "operators": [
+                    "=",
+                    "!="
                   ]
                 }
               ]
@@ -796,13 +1238,24 @@
               "parameters": [
                 {
                   "name": "granularity",
-                  "kind": "Enum",
+                  "kind": "Granularity",
                   "values": [
                     "daily",
                     "weekly",
                     "monthly"
                   ],
+                  "min_days": 1,
+                  "max_days": 399,
                   "default": "weekly"
+                },
+                {
+                  "name": "origin",
+                  "kind": "Timestamp",
+                  "optional": true,
+                  "requires": {
+                    "parameter": "granularity",
+                    "value": "a fixed-day granularity such as `30d`, not a calendar bucket (`daily`, `weekly`, `monthly`)"
+                  }
                 }
               ]
             },
@@ -811,13 +1264,24 @@
               "parameters": [
                 {
                   "name": "granularity",
-                  "kind": "Enum",
+                  "kind": "Granularity",
                   "values": [
                     "daily",
                     "weekly",
                     "monthly"
                   ],
+                  "min_days": 1,
+                  "max_days": 399,
                   "default": "weekly"
+                },
+                {
+                  "name": "origin",
+                  "kind": "Timestamp",
+                  "optional": true,
+                  "requires": {
+                    "parameter": "granularity",
+                    "value": "a fixed-day granularity such as `30d`, not a calendar bucket (`daily`, `weekly`, `monthly`)"
+                  }
                 }
               ]
             },
@@ -846,6 +1310,7 @@
           "allowed_scopes": [
             "project"
           ],
+          "multi_scope": false,
           "filter_fields": [
             {
               "name": "type",
@@ -976,6 +1441,7 @@
             "project",
             "group"
           ],
+          "multi_scope": true,
           "filter_fields": [
             {
               "name": "type",
@@ -997,28 +1463,21 @@
                 {
                   "kind": "Enum",
                   "operators": [
-                    "="
+                    "=",
+                    "!="
                   ],
                   "values": [
                     "canceled",
                     "canceling",
                     "created",
-                    "failed",
-                    "manual",
-                    "pending",
-                    "preparing",
-                    "running",
-                    "scheduled",
-                    "skipped",
-                    "success",
-                    "waiting_for_callback",
-                    "waiting_for_resource"
+                    "failed"
                   ]
                 },
                 {
                   "kind": "List",
                   "operators": [
-                    "in"
+                    "in",
+                    "not in"
                   ],
                   "items": [
                     {
@@ -1027,16 +1486,7 @@
                         "canceled",
                         "canceling",
                         "created",
-                        "failed",
-                        "manual",
-                        "pending",
-                        "preparing",
-                        "running",
-                        "scheduled",
-                        "skipped",
-                        "success",
-                        "waiting_for_callback",
-                        "waiting_for_resource"
+                        "failed"
                       ]
                     }
                   ]
@@ -1049,13 +1499,15 @@
                 {
                   "kind": "String",
                   "operators": [
-                    "="
+                    "=",
+                    "!="
                   ]
                 },
                 {
                   "kind": "List",
                   "operators": [
-                    "in"
+                    "in",
+                    "not in"
                   ],
                   "items": [
                     {
@@ -1071,13 +1523,15 @@
                 {
                   "kind": "String",
                   "operators": [
-                    "="
+                    "=",
+                    "!="
                   ]
                 },
                 {
                   "kind": "List",
                   "operators": [
-                    "in"
+                    "in",
+                    "not in"
                   ],
                   "items": [
                     {
@@ -1150,13 +1604,24 @@
               "parameters": [
                 {
                   "name": "granularity",
-                  "kind": "Enum",
+                  "kind": "Granularity",
                   "values": [
                     "daily",
                     "weekly",
                     "monthly"
                   ],
+                  "min_days": 1,
+                  "max_days": 399,
                   "default": "weekly"
+                },
+                {
+                  "name": "origin",
+                  "kind": "Timestamp",
+                  "optional": true,
+                  "requires": {
+                    "parameter": "granularity",
+                    "value": "a fixed-day granularity such as `30d`, not a calendar bucket (`daily`, `weekly`, `monthly`)"
+                  }
                 }
               ]
             },
@@ -1165,13 +1630,24 @@
               "parameters": [
                 {
                   "name": "granularity",
-                  "kind": "Enum",
+                  "kind": "Granularity",
                   "values": [
                     "daily",
                     "weekly",
                     "monthly"
                   ],
+                  "min_days": 1,
+                  "max_days": 399,
                   "default": "weekly"
+                },
+                {
+                  "name": "origin",
+                  "kind": "Timestamp",
+                  "optional": true,
+                  "requires": {
+                    "parameter": "granularity",
+                    "value": "a fixed-day granularity such as `30d`, not a calendar bucket (`daily`, `weekly`, `monthly`)"
+                  }
                 }
               ]
             },
@@ -1200,6 +1676,7 @@
           "allowed_scopes": [
             "namespace"
           ],
+          "multi_scope": false,
           "filter_fields": [
             {
               "name": "type",
@@ -1308,6 +1785,7 @@
           "allowed_scopes": [
             "project"
           ],
+          "multi_scope": false,
           "filter_fields": [
             {
               "name": "type",
@@ -1430,6 +1908,7 @@
             "project",
             "group"
           ],
+          "multi_scope": true,
           "filter_fields": [
             {
               "name": "type",
@@ -1451,13 +1930,15 @@
                 {
                   "kind": "String",
                   "operators": [
-                    "="
+                    "=",
+                    "!="
                   ]
                 },
                 {
                   "kind": "List",
                   "operators": [
-                    "in"
+                    "in",
+                    "not in"
                   ],
                   "items": [
                     {
@@ -1473,13 +1954,15 @@
                 {
                   "kind": "String",
                   "operators": [
-                    "="
+                    "=",
+                    "!="
                   ]
                 },
                 {
                   "kind": "List",
                   "operators": [
-                    "in"
+                    "in",
+                    "not in"
                   ],
                   "items": [
                     {
@@ -1510,13 +1993,15 @@
                 {
                   "kind": "Number",
                   "operators": [
-                    "="
+                    "=",
+                    "!="
                   ]
                 },
                 {
                   "kind": "List",
                   "operators": [
-                    "in"
+                    "in",
+                    "not in"
                   ],
                   "items": [
                     {
@@ -1552,11 +2037,24 @@
               "parameters": [
                 {
                   "name": "granularity",
-                  "kind": "Enum",
+                  "kind": "Granularity",
                   "values": [
+                    "daily",
+                    "weekly",
                     "monthly"
                   ],
+                  "min_days": 1,
+                  "max_days": 399,
                   "default": "monthly"
+                },
+                {
+                  "name": "origin",
+                  "kind": "Timestamp",
+                  "optional": true,
+                  "requires": {
+                    "parameter": "granularity",
+                    "value": "a fixed-day granularity such as `30d`, not a calendar bucket (`daily`, `weekly`, `monthly`)"
+                  }
                 }
               ]
             }
@@ -1633,6 +2131,21 @@
                   ]
                 }
               ]
+            },
+            {
+              "name": "flowTypesUsed",
+              "value_types": [
+                {
+                  "kind": "Number",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
             }
           ],
           "sort_fields": [
@@ -1683,6 +2196,136 @@
                   }
                 }
               ]
+            },
+            {
+              "name": "userTier",
+              "parameters": [
+                {
+                  "name": "thresholds",
+                  "kind": "List",
+                  "items": [
+                    {
+                      "kind": "Number",
+                      "min": 1,
+                      "max": 2147483647
+                    }
+                  ],
+                  "min_length": 1,
+                  "max_length": 9,
+                  "strictly_ascending": true,
+                  "required": true
+                }
+              ]
+            },
+            {
+              "name": "totalCount",
+              "parameters": [
+                {
+                  "name": "status",
+                  "kind": "List",
+                  "items": [
+                    {
+                      "kind": "Enum",
+                      "values": [
+                        "created",
+                        "running",
+                        "paused",
+                        "finished"
+                      ]
+                    }
+                  ],
+                  "min_length": 0,
+                  "max_length": 10,
+                  "default": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AiUsageEvents",
+      "label": "AI usage events",
+      "modes": [
+        {
+          "mode": "Analytics",
+          "allowed_scopes": [
+            "project",
+            "group"
+          ],
+          "multi_scope": true,
+          "filter_fields": [
+            {
+              "name": "feature",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "not in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "featuresCount",
+              "value_types": [
+                {
+                  "kind": "Number",
+                  "operators": [
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            }
+          ],
+          "dimensions": [
+            "feature",
+            "event"
+          ],
+          "metrics": [
+            "totalCount",
+            "featuresCount"
+          ],
+          "sort_fields": [
+            "feature",
+            "event",
+            "totalCount",
+            "featuresCount"
+          ],
+          "parameterized_fields": [
+            {
+              "name": "totalCount",
+              "parameters": [
+                {
+                  "name": "event",
+                  "kind": "List",
+                  "items": [
+                    {
+                      "kind": "String"
+                    }
+                  ],
+                  "min_length": 0,
+                  "max_length": 100,
+                  "default": []
+                }
+              ]
             }
           ]
         }
@@ -1724,6 +2367,11 @@
       "symbol": "<=",
       "name": "LessThanEquals",
       "label": "less than or equal to"
+    },
+    {
+      "symbol": "not in",
+      "name": "NotIn",
+      "label": "is not one of"
     }
   ],
   "value_kinds": [
@@ -1848,7 +2496,7 @@
       "returns": "labels"
     }
   ],
-  "version": "0.34.0",
+  "version": "0.42.0",
   "display_types": [
     {
       "name": "list",
@@ -1869,8 +2517,13 @@
         {
           "dimensions": 0,
           "metrics": {
-            "min": 1,
-            "max": 1
+            "min": 1
+          }
+        },
+        {
+          "dimensions": 1,
+          "metrics": {
+            "min": 1
           }
         }
       ]
@@ -1940,6 +2593,58 @@
           "metrics": {
             "min": 1,
             "max": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "barList",
+      "description": "Horizontal bars, one per dimension value in descending order, or one per metric in query order when there is no dimension. By default each bar is sized and labeled as a share of the total. With two dimensions, each bar splits into stacked segments, one per value of the second dimension.",
+      "selections": [
+        {
+          "dimensions": 0,
+          "metrics": {
+            "min": 1
+          }
+        },
+        {
+          "dimensions": 1,
+          "metrics": {
+            "min": 1,
+            "max": 1
+          }
+        },
+        {
+          "dimensions": 2,
+          "metrics": {
+            "min": 1,
+            "max": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "heatMap",
+      "description": "A grid of shaded cells, one per pair of dimension values. The first dimension runs along the columns, the second down the rows.",
+      "selections": [
+        {
+          "dimensions": 2,
+          "metrics": {
+            "min": 1,
+            "max": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "divergingBarChart",
+      "description": "Two metrics mirrored around a shared category column, each scaled to its own largest bar.",
+      "selections": [
+        {
+          "dimensions": 1,
+          "metrics": {
+            "min": 2,
+            "max": 2
           }
         }
       ]
