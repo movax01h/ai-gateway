@@ -32,10 +32,9 @@ AIGW_BIND_TOOLS_CACHE__ENABLED: "false"
 # Answer HTTP 413 for request bodies over 16 MiB on the HTTP routes, except /v1/proxy/.
 # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3404
 AIGW_REQUEST_BODY_LIMIT__MAX_BYTES: "16777216"
-# Per-actor in-flight limits. Code suggestions run in log mode: serve every request and
-# record which ones the current limits would reject. Prompts run in enforce mode: answer
-# 429 when a limit is hit.
-AIGW_CODE_SUGGESTIONS__ACTOR_LIMIT_MODE: "log"
+# Per-actor in-flight limits. Code suggestions and prompts run in enforce mode: answer 429
+# when a limit is hit.
+AIGW_CODE_SUGGESTIONS__ACTOR_LIMIT_MODE: "enforce"
 AIGW_PROMPTS__ACTOR_LIMIT_MODE: "enforce"
 # Paid credit models gate, enforce: reject models marked requires_paid_credits for
 # self-managed trials without purchased GitLab Credits. Keep AI Gateway and DWS in sync.
