@@ -679,7 +679,7 @@ class AbstractWorkflow(ABC):
             return self._mcp_tools
 
         orbit_permitted = strips_client_mcp_trust()
-        return [
+        permitted = [
             tool
             for tool in self._mcp_tools
             if tool.get("first_party", False)
@@ -689,6 +689,17 @@ class AbstractWorkflow(ABC):
                 and _runs_without_external_mcp_setting(tool["llm_name"])
             )
         ]
+        withheld = [
+            tool["llm_name"] for tool in self._mcp_tools if tool not in permitted
+        ]
+        if withheld:
+            # Without this line the withheld tools leave no trace in the logs.
+            self.log.info(
+                "MCP tools withheld: duo_workflow_mcp_enabled is off for the root namespace",
+                withheld=len(withheld),
+                withheld_tools=sorted(withheld),
+            )
+        return permitted
 
     def _allow_client_injected_mcp_tools(self) -> bool:
         allowed = bool(

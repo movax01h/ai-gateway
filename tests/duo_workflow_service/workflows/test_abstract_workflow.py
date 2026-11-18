@@ -535,6 +535,49 @@ def test_permitted_mcp_tools(
 
 
 @pytest.mark.parametrize(
+    ("mcp_enabled", "tool_names", "expected_withheld"),
+    [
+        (
+            False,
+            ["orbit_invoke_command", "gitlab_search", "context7"],
+            [{"withheld": 2, "withheld_tools": ["context7", "gitlab_search"]}],
+        ),
+        (False, ["orbit_invoke_command"], []),
+        (False, [], []),
+        (True, ["gitlab_search"], []),
+    ],
+)
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.strips_client_mcp_trust",
+    return_value=True,
+)
+def test_permitted_mcp_tools_logs_what_the_namespace_withholds(
+    _mock_strips_client_mcp_trust, user, mcp_enabled, tool_names, expected_withheld
+):
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+        [
+            contract_pb2.McpTool(name=name, inputSchema="{}", trusted=True)
+            for name in tool_names
+        ],
+    )
+    workflow._workflow_config = {"mcp_enabled": mcp_enabled}
+
+    with capture_logs() as logs:
+        workflow._permitted_mcp_tools()
+
+    withheld = [
+        {key: log[key] for key in ("withheld", "withheld_tools")}
+        for log in logs
+        if "withheld" in log
+    ]
+    assert withheld == expected_withheld
+
+
+@pytest.mark.parametrize(
     ("workflow_config", "expected"),
     [
         ({"mcp_enabled": True}, True),
