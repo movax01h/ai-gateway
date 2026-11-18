@@ -7,6 +7,8 @@ from lib.context import client_capabilities, gitlab_version
 MIN_CAPABILITIES_VERSION = Version("18.7.0")
 
 # Sent by the CLI on every request of a turn the user runs in auto mode.
+# Deprecated: read `StartWorkflowRequest.agent_mode` instead. Kept as the fallback for
+# clients released before that field, and for a GitLab whose Workhorse drops it.
 AUTO_MODE_CAPABILITY = "auto_mode"
 
 

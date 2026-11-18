@@ -37,6 +37,7 @@ from lib.context.orbit import (
 from lib.context.request_metadata import (
     METADATA_LABELS,
     LLMFinishReason,
+    agent_mode,
     build_metadata_labels,
     client_capabilities,
     client_type,
@@ -67,6 +68,7 @@ from lib.context.workflow import (
 
 __all__ = [  # noqa: RUF022  # grouped by category, not alphabetical
     # request_metadata
+    "agent_mode",
     "client_capabilities",
     "client_type",
     "gitlab_instance_id",

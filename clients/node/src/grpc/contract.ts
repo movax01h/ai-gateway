@@ -24,6 +24,59 @@ import { Struct } from "./google/protobuf/struct";
 
 export const protobufPackage = "";
 
+/**
+ * AgentMode is the agent mode the client asserts for a turn, not a statement of what it can
+ * execute. An unknown value (e.g. from a newer client) is treated as AGENT_MODE_UNSPECIFIED.
+ */
+export enum AgentMode {
+  /** AGENT_MODE_UNSPECIFIED - AGENT_MODE_UNSPECIFIED means no mode was asserted, e.g. by a client older than this field. */
+  AGENT_MODE_UNSPECIFIED = 0,
+  /** AGENT_MODE_BUILD - AGENT_MODE_BUILD is the client's default mode. The service never promotes tools in this mode. */
+  AGENT_MODE_BUILD = 1,
+  /** AGENT_MODE_PLAN - AGENT_MODE_PLAN is the read-only mode. The service never promotes tools in this mode. */
+  AGENT_MODE_PLAN = 2,
+  /** AGENT_MODE_AUTO - AGENT_MODE_AUTO lets the service skip the prompt for tools GitLab marks as promotable. */
+  AGENT_MODE_AUTO = 3,
+  UNRECOGNIZED = -1,
+}
+
+export function agentModeFromJSON(object: any): AgentMode {
+  switch (object) {
+    case 0:
+    case "AGENT_MODE_UNSPECIFIED":
+      return AgentMode.AGENT_MODE_UNSPECIFIED;
+    case 1:
+    case "AGENT_MODE_BUILD":
+      return AgentMode.AGENT_MODE_BUILD;
+    case 2:
+    case "AGENT_MODE_PLAN":
+      return AgentMode.AGENT_MODE_PLAN;
+    case 3:
+    case "AGENT_MODE_AUTO":
+      return AgentMode.AGENT_MODE_AUTO;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return AgentMode.UNRECOGNIZED;
+  }
+}
+
+export function agentModeToJSON(object: AgentMode): string {
+  switch (object) {
+    case AgentMode.AGENT_MODE_UNSPECIFIED:
+      return "AGENT_MODE_UNSPECIFIED";
+    case AgentMode.AGENT_MODE_BUILD:
+      return "AGENT_MODE_BUILD";
+    case AgentMode.AGENT_MODE_PLAN:
+      return "AGENT_MODE_PLAN";
+    case AgentMode.AGENT_MODE_AUTO:
+      return "AGENT_MODE_AUTO";
+    case AgentMode.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 /** ClientEvent is a message sent from the client to the server during a workflow session. */
 export interface ClientEvent {
   /** startRequest initiates a new workflow execution. */
@@ -115,7 +168,15 @@ export interface StartWorkflowRequest {
    * GitLab and ignore flowConfig. Use it for a saved AI Catalog flow. It cannot be combined with
    * flowConfigId.
    */
-  fetch_flow_config?: boolean | undefined;
+  fetch_flow_config?:
+    | boolean
+    | undefined;
+  /**
+   * agent_mode is the client's asserted mode for this turn. It does not gate what auto mode
+   * may skip (the signed tool access policy does). When unspecified, the service falls back
+   * to the "auto_mode" entry in clientCapabilities.
+   */
+  agent_mode?: AgentMode | undefined;
 }
 
 /**
@@ -1051,6 +1112,7 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     resume_checkpoint_ts: undefined,
     catalog_items: undefined,
     fetch_flow_config: undefined,
+    agent_mode: undefined,
   };
 }
 
@@ -1109,6 +1171,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     if (message.fetch_flow_config !== undefined) {
       writer.uint32(152).bool(message.fetch_flow_config);
+    }
+    if (message.agent_mode !== undefined) {
+      writer.uint32(160).int32(message.agent_mode);
     }
     return writer;
   },
@@ -1264,6 +1329,14 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.fetch_flow_config = reader.bool();
           continue;
         }
+        case 20: {
+          if (tag !== 160) {
+            break;
+          }
+
+          message.agent_mode = reader.int32() as any;
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1303,6 +1376,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
         : undefined,
       catalog_items: isSet(object.catalog_items) ? CatalogItems.fromJSON(object.catalog_items) : undefined,
       fetch_flow_config: isSet(object.fetch_flow_config) ? globalThis.Boolean(object.fetch_flow_config) : undefined,
+      agent_mode: isSet(object.agent_mode) ? agentModeFromJSON(object.agent_mode) : undefined,
     };
   },
 
@@ -1362,6 +1436,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.fetch_flow_config !== undefined) {
       obj.fetch_flow_config = message.fetch_flow_config;
     }
+    if (message.agent_mode !== undefined) {
+      obj.agent_mode = agentModeToJSON(message.agent_mode);
+    }
     return obj;
   },
 
@@ -1392,6 +1469,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
       ? CatalogItems.fromPartial(object.catalog_items)
       : undefined;
     message.fetch_flow_config = object.fetch_flow_config ?? undefined;
+    message.agent_mode = object.agent_mode ?? undefined;
     return message;
   },
 };

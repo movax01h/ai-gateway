@@ -154,7 +154,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
 )
 from lib.billing_events import BillingEvent, ExecutionEnvironment
-from lib.context import client_capabilities
+from lib.context import agent_mode, client_capabilities
 from lib.context.model import (
     current_model_metadata_context,
     current_model_metadata_with_size_context,
@@ -1181,6 +1181,51 @@ async def test_execute_workflow_when_no_events_ends(
     assert extra["flow_name"] == "developer"
     assert extra["item_version"] == "2.0.0-interactive"
     assert extra["item_schema_version"] == "v1"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@pytest.mark.parametrize(
+    ("sent", "expected"),
+    [
+        (None, contract_pb2.AGENT_MODE_UNSPECIFIED),
+        (contract_pb2.AGENT_MODE_AUTO, contract_pb2.AGENT_MODE_AUTO),
+        (contract_pb2.AGENT_MODE_PLAN, contract_pb2.AGENT_MODE_PLAN),
+    ],
+)
+async def test_execute_workflow_sets_agent_mode_from_the_start_request(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_workflow_client_event,
+    mock_context,
+    servicer,
+    sent,
+    expected,
+):
+    if sent is not None:
+        start_workflow_client_event.startRequest.agent_mode = sent
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+
+    async def request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield start_workflow_client_event
+
+    result = servicer.ExecuteWorkflow(
+        request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    assert agent_mode.get() == expected
 
 
 @pytest.mark.asyncio

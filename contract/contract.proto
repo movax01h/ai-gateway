@@ -45,6 +45,19 @@ message ClientEvent {
     }
 }
 
+// AgentMode is the agent mode the client asserts for a turn, not a statement of what it can
+// execute. An unknown value (e.g. from a newer client) is treated as AGENT_MODE_UNSPECIFIED.
+enum AgentMode {
+    // AGENT_MODE_UNSPECIFIED means no mode was asserted, e.g. by a client older than this field.
+    AGENT_MODE_UNSPECIFIED = 0;
+    // AGENT_MODE_BUILD is the client's default mode. The service never promotes tools in this mode.
+    AGENT_MODE_BUILD = 1;
+    // AGENT_MODE_PLAN is the read-only mode. The service never promotes tools in this mode.
+    AGENT_MODE_PLAN = 2;
+    // AGENT_MODE_AUTO lets the service skip the prompt for tools GitLab marks as promotable.
+    AGENT_MODE_AUTO = 3;
+}
+
 // StartWorkflowRequest carries the parameters needed to start a new workflow execution.
 message StartWorkflowRequest {
     // clientVersion identifies the version of the client initiating the workflow.
@@ -94,6 +107,10 @@ message StartWorkflowRequest {
     // GitLab and ignore flowConfig. Use it for a saved AI Catalog flow. It cannot be combined with
     // flowConfigId.
     optional bool fetch_flow_config = 19 [json_name = "fetch_flow_config"];
+    // agent_mode is the client's asserted mode for this turn. It does not gate what auto mode
+    // may skip (the signed tool access policy does). When unspecified, the service falls back
+    // to the "auto_mode" entry in clientCapabilities.
+    optional AgentMode agent_mode = 20 [json_name = "agent_mode"];
 }
 
 // CatalogItems is a versioned envelope for the catalog items carried by one workflow run.

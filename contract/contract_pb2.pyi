@@ -8,6 +8,17 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class AgentMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    AGENT_MODE_UNSPECIFIED: _ClassVar[AgentMode]
+    AGENT_MODE_BUILD: _ClassVar[AgentMode]
+    AGENT_MODE_PLAN: _ClassVar[AgentMode]
+    AGENT_MODE_AUTO: _ClassVar[AgentMode]
+AGENT_MODE_UNSPECIFIED: AgentMode
+AGENT_MODE_BUILD: AgentMode
+AGENT_MODE_PLAN: AgentMode
+AGENT_MODE_AUTO: AgentMode
+
 class ClientEvent(_message.Message):
     __slots__ = ("startRequest", "actionResponse", "heartbeat", "stopWorkflow")
     STARTREQUEST_FIELD_NUMBER: _ClassVar[int]
@@ -21,7 +32,7 @@ class ClientEvent(_message.Message):
     def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ..., heartbeat: _Optional[_Union[HeartbeatRequest, _Mapping]] = ..., stopWorkflow: _Optional[_Union[StopWorkflowRequest, _Mapping]] = ...) -> None: ...
 
 class StartWorkflowRequest(_message.Message):
-    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools", "flowConfigId", "flowVersion", "streaming", "resume_checkpoint_ts", "catalog_items", "fetch_flow_config")
+    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools", "flowConfigId", "flowVersion", "streaming", "resume_checkpoint_ts", "catalog_items", "fetch_flow_config", "agent_mode")
     CLIENTVERSION_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
@@ -40,6 +51,7 @@ class StartWorkflowRequest(_message.Message):
     RESUME_CHECKPOINT_TS_FIELD_NUMBER: _ClassVar[int]
     CATALOG_ITEMS_FIELD_NUMBER: _ClassVar[int]
     FETCH_FLOW_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    AGENT_MODE_FIELD_NUMBER: _ClassVar[int]
     clientVersion: str
     workflowID: str
     workflowDefinition: str
@@ -58,7 +70,8 @@ class StartWorkflowRequest(_message.Message):
     resume_checkpoint_ts: str
     catalog_items: CatalogItems
     fetch_flow_config: bool
-    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ..., streaming: bool = ..., resume_checkpoint_ts: _Optional[str] = ..., catalog_items: _Optional[_Union[CatalogItems, _Mapping]] = ..., fetch_flow_config: bool = ...) -> None: ...
+    agent_mode: AgentMode
+    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ..., streaming: bool = ..., resume_checkpoint_ts: _Optional[str] = ..., catalog_items: _Optional[_Union[CatalogItems, _Mapping]] = ..., fetch_flow_config: bool = ..., agent_mode: _Optional[_Union[AgentMode, str]] = ...) -> None: ...
 
 class CatalogItems(_message.Message):
     __slots__ = ("catalog_items_v1",)
