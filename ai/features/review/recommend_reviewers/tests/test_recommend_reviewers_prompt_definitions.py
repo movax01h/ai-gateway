@@ -231,3 +231,206 @@ def test_compact_user_template_says_when_there_is_nothing_to_suggest(
     assert "empty suggestions list" in rendered
     assert "Candidates" not in rendered
     assert "Approval rules that need reviewers" not in rendered
+
+
+def _render_user_template(version: str, reviewer_data: dict) -> str:
+    return jinja_env.get_template(
+        f"recommend_reviewers_assign/user/{version}.jinja"
+    ).render(reviewer_data=reviewer_data, merge_request_iid=7, project_id=13)
+
+
+def _reviewer_data(
+    current_reviewer_ids: list[int], approval_rules: list[dict] | None = None
+) -> dict:
+    return {
+        "current_reviewers": [
+            {"id": user_id, "username": f"user{user_id}"}
+            for user_id in current_reviewer_ids
+        ],
+        "approval_rules": _DEFAULT_RULES if approval_rules is None else approval_rules,
+    }
+
+
+@pytest.mark.parametrize(
+    ("current_reviewer_ids", "approval_rules"),
+    [
+        ([], None),
+        ([4], None),
+        ([1, 4], None),
+        ([], [_rule(10, 1, [2, 3]), _rule(30, 1, [3])]),
+        ([1], [_rule(30, 2, [1]), _rule(20, 1, [4])]),
+        ([], []),
+    ],
+)
+def test_user_template_3_0_0_dev_renders_like_2_1_0_without_the_new_fields(
+    current_reviewer_ids: list[int], approval_rules: list[dict] | None
+) -> None:
+    """Rails sends the new fields and signals behind flags, so without them nothing changes."""
+    reviewer_data = _reviewer_data(current_reviewer_ids, approval_rules)
+
+    assert _render_user_template("3.0.0-dev", reviewer_data) == _render_user_template(
+        "2.1.0", reviewer_data
+    )
+
+
+def _with(approver_id: int, **fields) -> dict:
+    return {**_APPROVERS[approver_id], **fields}
+
+
+def test_user_template_3_0_0_dev_lists_cost_sorted_by_cost() -> None:
+    """A candidate with fewer pending reviews can cost more, so candidates are listed by cost when Rails sends it."""
+    rule = {
+        **_rule(10, 1, []),
+        "eligible_approvers": [_with(2, cost=10.0), _with(4, cost=6.0)],
+    }
+
+    rendered = _render_user_template("3.0.0-dev", _reviewer_data([], [rule]))
+
+    assert (
+        "Candidates (id|pending_reviews|cost|local_time|last_activity_on|status):\n"
+        "4|1|6.0|12:00|2026-01-01|\n"
+        "2|0|10.0|12:00|2026-01-01|\n"
+    ) in rendered
+
+
+def test_user_template_3_0_0_dev_sorts_by_pending_reviews_when_some_candidates_have_no_cost() -> (
+    None
+):
+    """Sorting by a cost that some candidates lack would fail the render, so they are listed by workload."""
+    rule = {
+        **_rule(10, 1, []),
+        "eligible_approvers": [_with(2, cost=10.0), _APPROVERS[4], _with(1, cost=4.0)],
+    }
+
+    rendered = _render_user_template("3.0.0-dev", _reviewer_data([], [rule]))
+
+    assert (
+        "Candidates (id|pending_reviews|cost|local_time|last_activity_on|status):\n"
+        "2|0|10.0|12:00|2026-01-01|\n"
+        "4|1||12:00|2026-01-01|\n"
+        "1|2|4.0|12:00|2026-01-01|\n"
+    ) in rendered
+
+
+_SIGNALS = [
+    {
+        "name": "path_history",
+        "description": "Merged MRs on the changed files.\nHigher is more.",
+    },
+    {"name": "recent_reviews", "description": "Review requests in the last 7 days."},
+]
+
+
+def test_user_template_3_0_0_dev_lists_declared_signals_in_declared_order() -> None:
+    """Rails declares signals once and sends values per candidate, so a new signal needs no gateway change."""
+    rule = {
+        **_rule(10, 1, []),
+        "eligible_approvers": [
+            _with(
+                2, signals={"recent_reviews": 12, "path_history": 4, "undeclared": 9}
+            ),
+            _with(4, signals={"recent_reviews": 0}),
+            _APPROVERS[11],
+        ],
+    }
+
+    rendered = _render_user_template(
+        "3.0.0-dev", {**_reviewer_data([], [rule]), "signals": _SIGNALS}
+    )
+
+    assert (
+        "Signals (name: what it measures):\n"
+        "- path_history: Merged MRs on the changed files. Higher is more.\n"
+        "- recent_reviews: Review requests in the last 7 days.\n"
+        "\n"
+        "Candidates (id|pending_reviews|path_history|recent_reviews|local_time|last_activity_on|status):\n"
+        "2|0|4|12|12:00|2026-01-01|\n"
+        "4|1||0|12:00|2026-01-01|\n"
+        "11|3|||12:00|2026-01-01|\n"
+    ) in rendered
+    assert "undeclared" not in rendered
+
+
+def test_user_template_3_0_0_dev_renders_signal_values_safely() -> None:
+    """Booleans read like can_merge, and a value cannot add a column or a line."""
+    signals = [{"name": "flag"}, {"name": "note|x"}, {"name": "empty"}]
+    rule = {
+        **_rule(10, 1, []),
+        "eligible_approvers": [
+            _with(2, signals={"flag": True, "note|x": "a|b\nc", "empty": None}),
+            _with(4, signals={"flag": False}),
+        ],
+    }
+
+    rendered = _render_user_template(
+        "3.0.0-dev", {**_reviewer_data([], [rule]), "signals": signals}
+    )
+
+    assert "Candidates (id|pending_reviews|flag|note/x|empty|local_time|" in rendered
+    assert "- note/x: \n" in rendered
+    assert "\n2|0|yes|a/b c||12:00|" in rendered
+    assert "\n4|1|no|||12:00|" in rendered
+
+
+def test_user_template_3_0_0_dev_lists_no_signals_when_nothing_needs_reviewers() -> (
+    None
+):
+    rendered = _render_user_template(
+        "3.0.0-dev", {**_reviewer_data([], []), "signals": _SIGNALS}
+    )
+
+    assert "empty suggestions list" in rendered
+    assert "Signals" not in rendered
+
+
+def test_user_template_3_0_0_dev_lists_can_merge() -> None:
+    """can_merge is yes, no, or empty when Rails did not check the candidate."""
+    rule = {
+        **_rule(10, 1, []),
+        "eligible_approvers": [
+            _with(2, can_merge=True),
+            _with(4, can_merge=False),
+            _approver(5, pending_reviews=2),
+        ],
+    }
+
+    rendered = _render_user_template("3.0.0-dev", _reviewer_data([], [rule]))
+
+    assert (
+        "Candidates (id|pending_reviews|can_merge|local_time|last_activity_on|status):\n"
+    ) in rendered
+    assert "\n2|0|yes|12:00|" in rendered
+    assert "\n4|1|no|12:00|" in rendered
+    assert "\n5|2||12:00|" in rendered
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected_line"),
+    [
+        (
+            {"merger_required": True},
+            "A reviewer who can merge is required: neither the author nor a current reviewer can merge",
+        ),
+        ({"suggested_set": [4, 2]}, "Suggested set (ids): 4,2"),
+    ],
+)
+def test_user_template_3_0_0_dev_adds_the_merger_and_suggested_set_lines(
+    extra: dict, expected_line: str
+) -> None:
+    rendered = _render_user_template("3.0.0-dev", {**_reviewer_data([]), **extra})
+
+    assert expected_line in rendered
+    assert rendered.index("Approval rules that need reviewers") < rendered.index(
+        expected_line
+    )
+
+
+@pytest.mark.parametrize(
+    "extra", [{"merger_required": False}, {"suggested_set": []}, {"signals": []}]
+)
+def test_user_template_3_0_0_dev_skips_lines_for_empty_values(extra: dict) -> None:
+    reviewer_data = {**_reviewer_data([]), **extra}
+
+    assert _render_user_template("3.0.0-dev", reviewer_data) == _render_user_template(
+        "2.1.0", _reviewer_data([])
+    )
