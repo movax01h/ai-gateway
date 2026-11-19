@@ -171,9 +171,6 @@ ai_gateway/prompts/definitions/create_repository_branch/base
 ai_gateway/prompts/definitions/create_repository_branch/gpt
 ai_gateway/prompts/definitions/create_repository_branch/system
 ai_gateway/prompts/definitions/create_repository_branch/user
-ai_gateway/prompts/definitions/feature_discovery_search/base
-ai_gateway/prompts/definitions/feature_discovery_search/system
-ai_gateway/prompts/definitions/feature_discovery_search/user
 ai_gateway/prompts/definitions/fix_pipeline_add_comment/base
 ai_gateway/prompts/definitions/fix_pipeline_add_comment/system
 ai_gateway/prompts/definitions/fix_pipeline_add_comment/user

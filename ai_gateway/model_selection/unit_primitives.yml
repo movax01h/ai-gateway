@@ -501,13 +501,6 @@ configurable_unit_primitives:
       - identifier: "text_embedding_005_vertex"
     selectable_models:
       - "text_embedding_005_vertex"
-  - feature_setting: "feature_discovery_search"
-    unit_primitives:
-      - "feature_discovery_search"
-    default_models:
-      - identifier: "gemini_3_7_flash_vertex"
-    selectable_models:
-      - "gemini_3_7_flash_vertex"
   - feature_setting: "recommend_reviewers_post"
     unit_primitives:
       - "duo_agent_platform"

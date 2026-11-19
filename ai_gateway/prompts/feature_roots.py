@@ -49,6 +49,8 @@ RETIRED_INCLUDE_NAMES: frozenset[str] = frozenset(
     {
         "common/project_activity_fetch_issues/1.0.0.jinja",
         "common/project_activity_fetch_merge_requests/1.0.0.jinja",
+        "feature_discovery_search/system/1.0.0.jinja",
+        "feature_discovery_search/user/1.0.0.jinja",
         "list_available_tools/system/1.0.0.jinja",
         "list_available_tools/user/1.0.0.jinja",
         "project_activity_create_summary_issue/system/1.0.0.jinja",

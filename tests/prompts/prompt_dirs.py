@@ -43,7 +43,6 @@ FEATURE_SETTINGS_THAT_RAILS_SENDS = {
     "classify_code_review_mention_intent": "duo_agent_platform",
     "generate_session_title": "duo_agent_platform",
     "summarize_duo_workflow": "duo_agent_platform",
-    "feature_discovery_search": "feature_discovery_search",
     "generate_commit_message": "generate_commit_message",
     "glab_ask_git_command": "glab_ask_git_command",
     "resolve_vulnerability": "resolve_vulnerability",
