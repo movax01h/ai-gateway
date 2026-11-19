@@ -228,6 +228,11 @@ class ListVulnerabilities(DuoBaseTool):
 
             all_vulnerabilities.extend(vulnerabilities)
 
+            # Redaction is per project, so an empty page means either no access or no
+            # more rows; `hasNextPage` still counts redacted rows, so don't follow it.
+            if not vulnerabilities:
+                break
+
             page_info = vulnerabilities_data.get("pageInfo", {})
             if not fetch_all_pages or not page_info.get("hasNextPage"):
                 break
@@ -295,7 +300,17 @@ class ListVulnerabilities(DuoBaseTool):
             )
             return
 
-        if not isinstance(response, GitLabHttpResponse) or response.status_code != 403:
+        if not isinstance(response, GitLabHttpResponse):
+            return
+
+        if response.status_code != 403:
+            # Fail open, but keep exhausted-retry 5xx and 401 responses visible.
+            if not 200 <= response.status_code < 300:
+                log.warning(
+                    "Vulnerability report access check returned unexpected status",
+                    tool=self.name,
+                    status_code=response.status_code,
+                )
             return
 
         # The REST 403 is the same whether the tier lacks the security dashboard or the
@@ -316,14 +331,17 @@ class ListVulnerabilities(DuoBaseTool):
             "Vulnerability report access denied",
             tool=self.name,
             project_full_path=project_full_path,
-            reason="insufficient_permissions",
+            reason="report_access_denied",
         )
 
         raise ToolException(
             f"Vulnerability report access denied: {project_full_path}. "
-            "The project is readable but its security dashboard is not, so no "
-            "vulnerabilities could be listed. This empty result is caused by missing "
-            "access and must not be reported as the project having no vulnerabilities."
+            "The project is readable but its vulnerability report is not, so no "
+            "vulnerabilities could be listed. Either these credentials (the user or "
+            "the GitLab Duo service account) lack permission to read the report, or "
+            "Security and compliance is turned off for the project. This empty result "
+            "is caused by missing access and must not be reported as the project "
+            "having no vulnerabilities."
         )
 
     def format_display_message(
