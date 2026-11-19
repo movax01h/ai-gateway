@@ -4,11 +4,14 @@
 import json
 
 import duo_workflow_service.tools.bl_write_sast_report as bl
-from tests.duo_workflow_service.tools.test_bl_write_sast_report import _audit, _writer
+from tests.duo_workflow_service.tools.test_bl_write_sast_report import (
+    _audit,
+    _build_report,
+)
 
 
 def test_no_anchor_state_reaches_the_report():
-    report = _writer()._build_report(
+    report = _build_report(
         [
             {
                 "file": "a.go",
@@ -25,7 +28,7 @@ def test_no_anchor_state_reaches_the_report():
 
 
 def test_an_unverified_line_is_stated_in_that_findings_description():
-    report = _writer()._build_report(
+    report = _build_report(
         [
             {
                 "file": "a.go",
@@ -64,7 +67,7 @@ def test_an_unverified_line_is_stated_in_that_findings_description():
 
 
 def test_a_finding_the_check_never_saw_also_carries_the_note():
-    report = _writer()._build_report([{"file": "a.go", "new_line": 3, "body": "x"}])
+    report = _build_report([{"file": "a.go", "new_line": 3, "body": "x"}])
 
     assert report["vulnerabilities"][0]["description"].endswith(bl.UNVERIFIED_LINE_NOTE)
 

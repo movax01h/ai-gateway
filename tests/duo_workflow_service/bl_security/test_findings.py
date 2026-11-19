@@ -220,3 +220,31 @@ class TestFinding:
         raw["tier"] = 2
         assert f.to_dict() == self.MODEL_DICT
         assert hash(f) == hash(Finding.from_dict(self.MODEL_DICT))
+
+    def test_with_changes_writes_only_the_given_keys_into_raw_and_fields(self):
+        f = Finding.from_dict({"file": "a.py", "new_line": 1, "tier": 1})
+        g = f.with_changes(
+            file="b.py", new_line=7, anchor_status="corrected", anchor_claimed_line=1
+        )
+
+        assert (g.file, g.line, g.anchor_status, g.anchor_claimed_line) == (
+            "b.py",
+            7,
+            "corrected",
+            "1",
+        )
+        assert g.to_dict() == {
+            "file": "b.py",
+            "new_line": 7,
+            "tier": 1,
+            "anchor_status": "corrected",
+            "anchor_claimed_line": 1,
+        }
+        assert (g.claimed_file, g.anchor_reason) == ("", "")
+
+    def test_with_changes_leaves_the_original_untouched(self):
+        f = Finding.from_dict({"file": "a.py"})
+        f.with_changes(file="b.py", claimed_file="a.py", anchor_reason="r")
+
+        assert f.to_dict() == {"file": "a.py"}
+        assert (f.file, f.claimed_file, f.anchor_reason) == ("a.py", "", "")
