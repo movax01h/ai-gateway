@@ -1,5 +1,6 @@
 """Test suite for SupervisorAgentComponentV2."""
 
+from itertools import pairwise
 from typing import Optional
 from unittest.mock import Mock, patch
 
@@ -1163,3 +1164,79 @@ class TestDispatchedRunsClaimFromTheParentsInbox:
                 TaskId("a-later-task"), Claimant(recipient=another_run)
             )
         ] == ["for-another-run"]
+
+
+class _SizedSubagent:
+    """Subagent stub that compiles to a chain of ``nodes`` real nodes and has a cycle budget of ``cycles``."""
+
+    def __init__(self, name: str, nodes: int, cycles: int):
+        self.name = name
+        self.description = "A test subagent."
+        self._nodes = nodes
+        self._cycles = cycles
+
+    def max_iterations(self) -> int:
+        return self._cycles
+
+    def compile_as_subagent(self, address):
+        names = [f"{self.name}_n{i}" for i in range(self._nodes)]
+        graph = StateGraph(FlowState)
+        for name in names:
+            graph.add_node(name, lambda _state: {})
+        for current, following in pairwise(names):
+            graph.add_edge(current, following)
+        graph.set_entry_point(names[0])
+        graph.set_finish_point(names[-1])
+        return graph.compile()
+
+
+class TestSupervisorGraphSteps:
+    """A subagent has its own step count, so the limit covers the supervisor's loop or the slowest subagent."""
+
+    @staticmethod
+    def _steps(supervisor):
+        graph = StateGraph(FlowState)
+        supervisor.attach(graph, Mock())
+        return supervisor.graph_steps(len(graph.nodes)), len(graph.nodes)
+
+    def _subagents(self, developer_name, tester_name, cycles):
+        return {
+            developer_name: _SizedSubagent(developer_name, nodes=4, cycles=cycles),
+            tester_name: _SizedSubagent(tester_name, nodes=3, cycles=1),
+        }
+
+    def test_a_small_subagent_leaves_the_supervisors_own_loop(
+        self, make_supervisor, developer_name, tester_name
+    ):
+        supervisor = make_supervisor(
+            subagent_components=self._subagents(developer_name, tester_name, 1)
+        )
+        steps, added = self._steps(supervisor)
+
+        assert steps == added * supervisor.max_iterations()
+
+    def test_a_slow_subagent_sets_the_limit(
+        self, make_supervisor, developer_name, tester_name
+    ):
+        supervisor = make_supervisor(
+            subagent_components=self._subagents(developer_name, tester_name, 1000)
+        )
+        steps, _ = self._steps(supervisor)
+
+        assert steps == 4 * 1000
+
+    @pytest.mark.parametrize("max_delegations", [3, None])
+    def test_max_delegations_does_not_change_the_count(
+        self, make_supervisor, developer_name, tester_name, max_delegations
+    ):
+        subagents = self._subagents(developer_name, tester_name, 1000)
+        baseline, _ = self._steps(
+            make_supervisor(subagent_components=subagents, max_delegations=1)
+        )
+        steps, _ = self._steps(
+            make_supervisor(
+                subagent_components=subagents, max_delegations=max_delegations
+            )
+        )
+
+        assert steps == baseline

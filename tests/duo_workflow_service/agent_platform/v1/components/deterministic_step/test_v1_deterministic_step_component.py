@@ -216,6 +216,11 @@ def toolset_with_no_args_tool_fixture():
     return toolset
 
 
+class TestDeterministicStepComponentMaxIterations:
+    def test_max_iterations_is_one(self, deterministic_component):
+        assert deterministic_component.max_iterations() == 1
+
+
 class TestDeterministicStepComponentInitialization:
     """Test suite for DeterministicStepComponent initialization."""
 

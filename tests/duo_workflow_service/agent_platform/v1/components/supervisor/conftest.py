@@ -636,6 +636,7 @@ def mock_router_fixture():
 def mock_state_graph_fixture():
     """Fixture for mock StateGraph."""
     mock_graph = Mock()
+    mock_graph.nodes = {}
     mock_graph.add_node = Mock()
     mock_graph.add_edge = Mock()
     mock_graph.add_conditional_edges = Mock()

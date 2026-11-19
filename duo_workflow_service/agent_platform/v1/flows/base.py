@@ -188,6 +188,8 @@ class Flow(AbstractWorkflow):
     # Set by _resolve_stop_recovery during stop-recovery; read by get_graph_input.
     # Absent on non-stop-recovery paths (get_graph_input uses getattr with default []).
     _discarded_ui_chat_log: list[UiChatLog]
+    # Set by `_compile`: the graph is only known then, so the limit is too.
+    _graph_recursion_limit: int | None = None
 
     # pylint: disable=dangerous-default-value
     @inject
@@ -768,9 +770,19 @@ class Flow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
         checkpointer: BaseCheckpointSaver,
     ) -> Any:
-        graph = self._graph_builder(tools_registry).build(self._config)
+        builder = self._graph_builder(tools_registry)
+        graph = builder.build(self._config)
+        self._graph_recursion_limit = builder.derived_recursion_limit()
+        self.log.info(
+            "Flow recursion limit derived", recursion_limit=self._graph_recursion_limit
+        )
 
         return graph.compile(checkpointer=checkpointer)
+
+    @override
+    def _recursion_limit(self) -> int:
+        """Return the limit derived from the compiled graph, or the flat limit before the first compile."""
+        return self._graph_recursion_limit or super()._recursion_limit()
 
     def _graph_builder(self, tools_registry: ToolsRegistry) -> FlowGraphBuilder:
         """Build the graph builder carrying this run's dependencies.

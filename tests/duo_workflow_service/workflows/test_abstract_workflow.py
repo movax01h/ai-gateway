@@ -2889,12 +2889,15 @@ async def test_handle_graph_recursion_limit_logs_error_on_graph_recursion_error(
     )
     error = GraphRecursionError("Recursion limit reached")
 
-    with patch.object(workflow, "log") as mock_log:
+    with (
+        patch.object(workflow, "log") as mock_log,
+        patch.object(workflow, "_recursion_limit", return_value=1234),
+    ):
         await workflow._handle_graph_recursion_limit(error)
 
     mock_log.error.assert_called_once_with(
-        "Workflow hit hard recursion limit (RECURSION_LIMIT); session terminated",
-        recursion_limit=RECURSION_LIMIT,
+        "Workflow hit hard recursion limit; session terminated",
+        recursion_limit=1234,
     )
 
 
@@ -3096,6 +3099,37 @@ async def test_compile_and_run_graph_checkpoint_durability(
     await workflow._compile_and_run_graph("goal")
 
     assert graph.captured_durability == expected_durability
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.get_event",
+    new_callable=AsyncMock,
+    return_value=None,
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_refreshes_the_recursion_limit_after_compile(
+    mock_tools_registry, mock_gitlab_workflow, _mock_get_event, user
+):
+    """A flow derives its limit from the compiled graph, so the graph runs with the limit read after compile."""
+    mock_tools_registry.return_value = MagicMock()
+    _stop_recovery_checkpointer(mock_gitlab_workflow)
+    workflow = StopRecoveryMockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    graph = ConfigCapturingGraph()
+    workflow._compile = MagicMock(return_value=graph)
+    # The first read builds the initial config, before the graph exists. The second runs after compile.
+    workflow._recursion_limit = MagicMock(side_effect=[600, 1234])
+
+    await workflow._compile_and_run_graph("goal")
+
+    assert graph.captured_config["recursion_limit"] == 1234
 
 
 @pytest.mark.asyncio

@@ -1212,7 +1212,11 @@ class AbstractWorkflow(ABC):
                 )
                 invocation = await self._resolve_graph_invocation(
                     compiled_graph=compiled_graph,
-                    graph_config=graph_config,
+                    # A flow derives its limit from the graph, so it is known only after compile.
+                    graph_config={
+                        **graph_config,
+                        "recursion_limit": self._recursion_limit(),
+                    },
                     goal=goal,
                     status_event=status_event,
                     checkpoint_tuple=checkpoint_tuple,
@@ -1262,10 +1266,10 @@ class AbstractWorkflow(ABC):
                 await audit_collector.close()
 
     async def _handle_graph_recursion_limit(self, e: GraphRecursionError) -> None:
-        """Log and tag the hard `RECURSION_LIMIT` being hit."""
+        """Log and tag the hard recursion limit being hit."""
         self.log.error(
-            "Workflow hit hard recursion limit (RECURSION_LIMIT); session terminated",
-            recursion_limit=RECURSION_LIMIT,
+            "Workflow hit hard recursion limit; session terminated",
+            recursion_limit=self._recursion_limit(),
         )
         await self._tag_langsmith_hard_limit()
 

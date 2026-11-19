@@ -168,6 +168,14 @@ class OneOffComponent(PromptReference, BaseComponent):
         )
 
     @override
+    def max_iterations(self) -> int:
+        """A failed tool call loops back to the agent node, up to ``max_correction_attempts`` times.
+
+        The first pass always runs, so the bound is at least 1.
+        """
+        return max(self.max_correction_attempts, 1)
+
+    @override
     def __entry_hook__(self) -> str:
         return f"{self.name}{NODE_ROLE_SEPARATOR}llm"
 

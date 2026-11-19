@@ -229,6 +229,9 @@ class SupervisorAgentComponentV2(AgentComponentBase):
     # Pydantic's field schema while allowing normal instance assignment.
     _delegate_task_cls: type = PrivateAttr()
 
+    # Nodes in each compiled subagent graph, read by ``graph_steps``.
+    _subagent_nodes: dict[str, int] = PrivateAttr(default_factory=dict)
+
     @field_validator("max_delegations")
     @classmethod
     def validate_max_delegations(cls, v: Optional[int]) -> Optional[int]:
@@ -452,6 +455,23 @@ class SupervisorAgentComponentV2(AgentComponentBase):
             web_search=web_search,
         )
 
+    @override
+    def graph_steps(self, added_nodes: int) -> int:
+        """Return the larger of the supervisor's own loop and the slowest subagent run.
+
+        A subagent runs as its own subgraph with its own step count, but the flow's limit applies to each run. So
+        the limit covers the supervisor's steps and, separately, the slowest subagent. ``max_delegations`` changes
+        neither number.
+        """
+        slowest = max(
+            (
+                self._subagent_nodes.get(name, 0) * subagent.max_iterations()
+                for name, subagent in self.subagent_components.items()
+            ),
+            default=0,
+        )
+        return max(added_nodes * self.max_iterations(), slowest)
+
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         """Attach the supervisor to the graph, wiring subagents as native dispatch targets.
 
@@ -572,6 +592,12 @@ class SupervisorAgentComponentV2(AgentComponentBase):
                 address=self._address_of_run(agent_name)
             )
             for agent_name, subagent in self.subagent_components.items()
+        }
+        self._subagent_nodes = {
+            agent_name: len(
+                [name for name in graph_.nodes if not name.startswith("__")]
+            )
+            for agent_name, graph_ in subagent_graphs.items()
         }
         dispatch_nodes = {
             agent_name: SubagentDispatchNode(
