@@ -1,5 +1,6 @@
 # pylint: disable=too-many-lines
 import json
+import logging
 import sys
 from typing import ClassVar, Optional, Type
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,6 +27,7 @@ from duo_workflow_service.components.tools_registry import (
     _READ_ONLY_GITLAB_TOOLS,
     NO_OP_TOOLS,
     Promotion,
+    ToolSelector,
     Toolset,
     ToolsRegistry,
     _effective_privileges,
@@ -4261,3 +4263,252 @@ def test_promotable_drops_client_injected_tools(
     )
 
     assert registry.toolset(["gitlab_create_issue"]).promotable == expected
+
+
+def _selection_registry(tool_metadata, *tools):
+    return ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=_mcp_configs(*tools),
+    )
+
+
+def _mcp(name, trusted=True, client_injected=False):
+    return contract_pb2.McpTool(
+        name=name,
+        description="MCP tool",
+        inputSchema="{}",
+        trusted=trusted,
+        client_injected=client_injected,
+    )
+
+
+def _gitlab(*names):
+    return [ToolSelector("gitlab", list(names))]
+
+
+@pytest.mark.asyncio
+async def test_select_tools_matches_trusted_mcp_tools_by_server_prefix(tool_metadata):
+    registry = _selection_registry(
+        tool_metadata,
+        _mcp("gitlab_get_merge_request"),
+        _mcp("gitlab_get_issue"),
+        _mcp("orbit_list_commands"),
+        _mcp("orbit_invoke_command"),
+    )
+
+    with patch.object(tools_registry, "strips_client_mcp_trust", return_value=True):
+        assert registry.select_tools(_gitlab("get_merge_request")) == [
+            "gitlab_get_merge_request"
+        ]
+        assert registry.select_tools(
+            [ToolSelector("orbit", ["list_commands", "invoke_command"])]
+        ) == ["orbit_list_commands", "orbit_invoke_command"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool",
+    [
+        # Untrusted: a client can name a tool whatever it likes.
+        _mcp("gitlab_get_merge_request", trusted=False),
+        # Rails never sets trusted on a client tool, and DWS clears it again behind client_injected.
+        _mcp("gitlab_get_merge_request", client_injected=True),
+    ],
+)
+async def test_select_tools_ignores_an_mcp_tool_that_is_not_trusted(
+    tool_metadata, tool
+):
+    registry = _selection_registry(tool_metadata, tool)
+
+    with patch.object(tools_registry, "strips_client_mcp_trust", return_value=True):
+        assert registry.select_tools(_gitlab("get_merge_request")) == []
+
+
+@pytest.mark.asyncio
+async def test_select_tools_selects_no_mcp_tool_when_gitlab_keeps_client_trust(
+    tool_metadata,
+):
+    registry = _selection_registry(tool_metadata, _mcp("gitlab_get_merge_request"))
+
+    with (
+        patch.object(tools_registry, "strips_client_mcp_trust", return_value=False),
+        capture_logs() as logs,
+    ):
+        assert registry.select_tools(_gitlab("get_merge_request")) == []
+
+    assert [log["log_level"] for log in logs] == ["warning"]
+    assert logs[0]["server"] == "gitlab"
+
+
+@pytest.mark.asyncio
+async def test_select_tools_logs_a_name_that_matches_nothing(tool_metadata):
+    registry = _selection_registry(tool_metadata, _mcp("gitlab_get_issue"))
+
+    with (
+        patch.object(tools_registry, "strips_client_mcp_trust", return_value=True),
+        capture_logs() as logs,
+    ):
+        selected = registry.select_tools(_gitlab("get_issue", "gone", "create_commit"))
+
+    assert selected == ["gitlab_get_issue"]
+    # `create_commit` is a native tool that the flow has no privilege for, `gone` is a typo.
+    assert [(log["server"], log["tool_name"], log["reason"]) for log in logs] == [
+        ("gitlab", "gone", "unknown"),
+        ("gitlab", "create_commit", "missing_privilege"),
+    ]
+    # Info, like toolset(): a flow that lists a tool its environment drops is expected.
+    assert {log["log_level"] for log in logs} == {"info"}
+    # A key that LogRecord reserves, such as `name`, fails the log call under stdlib logging.
+    reserved = set(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
+    assert not reserved & logs[0].keys()
+
+
+@pytest.mark.asyncio
+async def test_select_tools_selects_no_mcp_tool_when_workhorse_did_not_handle_the_request(
+    tool_metadata,
+):
+    """A token that DWS issued, such as a CI job's, forces every tool to client_injected, so none is trusted."""
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=convert_mcp_tools_to_configs(
+            [_mcp("gitlab_get_merge_request")], force_client_injected=True
+        ),
+    )
+
+    with patch.object(tools_registry, "strips_client_mcp_trust", return_value=True):
+        assert registry.select_tools(_gitlab("get_merge_request")) == []
+
+
+def _native_registry(tool_metadata, *tools):
+    """A registry whose flow has the privilege for the native `get_merge_request` tool."""
+    return ToolsRegistry(
+        enabled_tools=["read_only_gitlab", "run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=_mcp_configs(*tools),
+    )
+
+
+@pytest.mark.asyncio
+async def test_select_tools_selects_a_native_tool_under_gitlab_on_any_gitlab_version(
+    tool_metadata,
+):
+    registry = _native_registry(tool_metadata)
+
+    with (
+        patch.object(tools_registry, "strips_client_mcp_trust", return_value=False),
+        capture_logs() as logs,
+    ):
+        assert registry.select_tools(_gitlab("get_merge_request")) == [
+            "get_merge_request"
+        ]
+
+    assert not logs
+
+
+@pytest.mark.asyncio
+async def test_select_tools_prefers_a_native_tool_over_an_mcp_tool_of_the_same_name(
+    tool_metadata,
+):
+    registry = _native_registry(tool_metadata, _mcp("gitlab_get_merge_request"))
+
+    with patch.object(tools_registry, "strips_client_mcp_trust", return_value=True):
+        assert registry.select_tools(_gitlab("get_merge_request")) == [
+            "get_merge_request"
+        ]
+
+
+@pytest.mark.asyncio
+async def test_select_tools_falls_back_to_the_mcp_tool_when_the_native_tool_is_not_enabled(
+    tool_metadata,
+):
+    """`run_mcp_tools` alone grants no native `get_merge_request`, so the name finds the MCP tool."""
+    registry = _selection_registry(tool_metadata, _mcp("gitlab_get_merge_request"))
+
+    with patch.object(tools_registry, "strips_client_mcp_trust", return_value=True):
+        assert registry.select_tools(_gitlab("get_merge_request")) == [
+            "gitlab_get_merge_request"
+        ]
+
+
+@pytest.mark.asyncio
+async def test_select_tools_does_not_take_a_client_tool_for_a_native_tool(
+    tool_metadata,
+):
+    """A client tool named like a gitlab tool sits in the registry under its bare name, but is not native."""
+    registry = _selection_registry(
+        tool_metadata, _mcp("get_pipeline", trusted=False, client_injected=True)
+    )
+    assert registry.get("get_pipeline") is not None
+
+    with patch.object(tools_registry, "strips_client_mcp_trust", return_value=True):
+        assert registry.select_tools(_gitlab("get_pipeline")) == []
+
+
+@pytest.mark.asyncio
+async def test_select_tools_never_selects_a_native_tool_under_another_server(
+    tool_metadata,
+):
+    registry = _native_registry(tool_metadata)
+
+    with (
+        patch.object(tools_registry, "strips_client_mcp_trust", return_value=True),
+        capture_logs() as logs,
+    ):
+        assert (
+            registry.select_tools([ToolSelector("orbit", ["get_merge_request"])]) == []
+        )
+
+    # Only gitlab names cover native tools, so a native reason such as unsupported_client would mislead here.
+    assert [(log["server"], log["reason"]) for log in logs] == [("orbit", "unknown")]
+
+
+@pytest.mark.asyncio
+async def test_select_tools_keeps_a_native_tool_when_gitlab_keeps_client_trust(
+    tool_metadata,
+):
+    """The version gate only closes the MCP lookup, so a native name in the same selector still resolves."""
+    registry = _native_registry(tool_metadata, _mcp("gitlab_get_pipeline"))
+
+    with (
+        patch.object(tools_registry, "strips_client_mcp_trust", return_value=False),
+        capture_logs(),
+    ):
+        assert registry.select_tools(_gitlab("get_merge_request", "get_pipeline")) == [
+            "get_merge_request"
+        ]
+
+
+@pytest.mark.asyncio
+async def test_select_tools_returns_the_registered_name_of_an_mcp_tool(tool_metadata):
+    """A selector matches the wire name of an MCP tool, and the registry names the tool by its sanitised llm_name."""
+    registry = _selection_registry(tool_metadata, _mcp("gitlab_get.issue"))
+
+    with patch.object(tools_registry, "strips_client_mcp_trust", return_value=True):
+        assert registry.select_tools(_gitlab("get.issue")) == ["gitlab_get_issue"]
+
+
+@pytest.mark.asyncio
+async def test_select_tools_never_selects_delegate_task(tool_metadata):
+    """A supervisor builds `delegate_task` itself, so the registry has no such tool for a selector to find."""
+    registry = _native_registry(tool_metadata)
+
+    with patch.object(tools_registry, "strips_client_mcp_trust", return_value=True):
+        assert registry.select_tools(_gitlab("delegate_task")) == []
+
+
+@pytest.mark.asyncio
+async def test_select_tools_returns_each_tool_once(tool_metadata):
+    registry = _native_registry(tool_metadata, _mcp("gitlab_get_pipeline"))
+
+    with patch.object(tools_registry, "strips_client_mcp_trust", return_value=True):
+        assert registry.select_tools(
+            [
+                ToolSelector("gitlab", ["get_merge_request", "get_pipeline"]),
+                ToolSelector("gitlab", ["get_pipeline", "get_merge_request"]),
+            ]
+        ) == ["get_merge_request", "gitlab_get_pipeline"]
