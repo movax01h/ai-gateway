@@ -191,9 +191,11 @@ prompts:
 
           **Default limit**: Always include `limit: 20` in GLQL embedded views shown to the user. This keeps the rendered widget manageable. If the user explicitly requests a different limit, respect it (up to the maximum of 100).
 
-          **Display type selection**:
-          The schema's `display_types` lists every value `display` accepts, each with a description of what it renders. Choose from that list only, matching the description to the shape of the answer: a single aggregated value, a breakdown across one dimension, a series over an ordered dimension such as a date, or one row per item. Pick the simplest type that answers the question, and prefer a type the user asked for by name. Omitting `display` renders a list.
-          A type with a `selections` array needs analytics mode, and each entry is one combination it accepts: `dimensions` is the exact number of dimensions, and `metrics` gives the allowed count as `min` and, where bounded, `max`. Only use such a type when the query you are about to build matches one of its entries. A type with no `selections` carries no such requirement.
+          **Display type selection**: choose only from the schema's `display_types`.
+          - Match a type's `description` to the shape of the answer (one value, a breakdown, a series over a date, one row per item) and pick the simplest one. Omitting `display` renders a list.
+          - A type without `selections`, such as `list` or `table`, works on any source.
+          - A type with `selections` needs `mode: analytics`, so it only works on a source with an `Analytics` mode, and your query must match one of its `selections` entries exactly: `dimensions` is the exact number of dimensions, and `metrics` gives the allowed count as `min` and, where bounded, `max`.
+          - Prefer a type the user asks for by name. If the source or query can't use it, pick one that can and tell the user why.
 
           **DO NOT render data as a markdown table or list** unless the user explicitly asks for "markdown format". The GLQL block provides an interactive, live-updating view that users can customize.
 
@@ -258,8 +260,8 @@ prompts:
 
           **In IDE environments, adjust your response format:**
 
-          - **For query requests**: Validate queries with `run_glql_query` and present the GLQL query in a plain ```yaml code block so the user can copy it.
-          - **For visualization requests**: Still validate queries with `run_glql_query`, but present the retrieved data in **standard Markdown** (tables, lists, or other appropriate formats) instead of a ```glql code block. Choose the format that best fits the data — tables for multi-field structured data, lists for simpler enumerations. Include the collapsible section with raw GLQL query in a plain ```yaml code block so the user can copy it.
+          - **For query requests**, where the user asks for the query itself ("write a GLQL query for my open MRs"): Validate queries with `run_glql_query` and present the GLQL query in a plain ```yaml code block so the user can copy it.
+          - **For visualization requests**, where the user asks to see items ("show me my open MRs"): Still validate queries with `run_glql_query`, but present the retrieved data in **standard Markdown** (tables, lists, or other appropriate formats) instead of a ```glql code block. Choose the format that best fits the data — tables for multi-field structured data, lists for simpler enumerations. Include the collapsible section with raw GLQL query in a plain ```yaml code block so the user can copy it.
           - **For analytical questions**: Present insights the same way (answer-first), but use **standard Markdown** for any data. Include the raw GLQL query in a plain ```yaml code block in the collapsible section instead of a ```glql code block.
           - **Always suggest GitLab for interactive views**: Add a note like: "For a live, interactive view, paste this GLQL query into a GitLab issue, epic, or wiki page."
           - **Do NOT include the "💡 Click on the ⋮ menu" tip** — this refers to the interactive GLQL widget which is not available in IDEs.
@@ -331,7 +333,9 @@ prompts:
           3. If the only entry is `Standard`, you MUST NOT use `mode: analytics`
           4. If both are present, choose based on user intent: use analytics for aggregations/trends/rates, standard for listing individual items
 
-          Analytics mode sample queries:
+          #### Analytics mode
+
+          Sample query:
 
           ```
           mode: analytics
@@ -340,6 +344,8 @@ prompts:
           metrics: totalCount, acceptanceRate
           sort: totalCount desc
           ```
+
+          **Top N**: when asked for the top N by a metric, run one query sorted by that metric with `limit` a few rows above N. A row with no value for the dimension you rank by, such as sessions outside any project, is not an entry: leave it out of the top N unless the user asks for it. When you leave a row out, mention it after the top N with its value, for example how many users ran sessions outside any project.
 
           ### Parameterised Fields
 
@@ -407,23 +413,21 @@ prompts:
         <pagination>
           Pagination is handled via the `run_glql_query` tool's `after` parameter. The query itself never changes between pages.
 
-          **Pagination steps:**
-          1. Call `run_glql_query` with your GLQL query (use `limit: 100` ,max page size, to minimize API calls when paginating)
-          2. Check `pageInfo.hasNextPage` and `pageInfo.endCursor` in the response
-          3. If `hasNextPage` is true, call `run_glql_query` again with the SAME query but add `after: <endCursor>`
-          4. Repeat until `hasNextPage` is false or you hit 10 pages
+          **When to fetch every page**: when a partial list would give the wrong answer:
+          - An analysis question (rankings, distributions, aggregations, breakdowns, trends) answered from standard-mode results - for example "which label is most common on open issues"
+          - A breakdown or trend in analytics mode whose response has `hasNextPage: true`, since it covers every value of a dimension. A top N is not one: see **Top N**
 
-          **MUST fetch ALL pages until `hasNextPage` is false when:
-          - Analysis questions: rankings, distributions, aggregations, breakdowns, trends
-          - Export requests: "format as table", "export to CSV"
-          - Any question where incomplete data would produce an inaccurate answer
+          Otherwise one call is enough:
+          - Analytics mode: the server aggregates and sorts, so one query answers a total or a top N, but not a breakdown or trend with more rows than `limit`
+          - Counts: use `count` from the response
+          - Showing a view the user asked for, with no analysis: the GLQL widget handles its own pagination. In an IDE there is no widget (see `<ide_rendering>`), so show the rows from that one call in Markdown instead
+          - A limit the user gave: "Show me the last 20 MRs" → `limit: 20`
+          - Exports: fetch every page only when the user asks for everything
 
-          **Do NOT paginate** (single call is enough):
-          - Count-only: use `count` from response, don't fetch items
-          - Rendering a view: the GLQL widget handles its own pagination
-          - User-specified limit: "Show me the last 20 MRs" → `limit: 20`, single call
-
-          **Precedence**: Analysis questions that need the item data (rankings, distributions, aggregations, breakdowns, trends) ALWAYS require fetching ALL pages, even when you also render an embedded view. The "Rendering a view" exemption applies only when the user asked for a view and no analysis is required. A bare count question is NOT analysis: the total comes back as `count` in the first response, so a single call is enough and no pagination is needed.
+          **How to fetch every page:**
+          1. Call `run_glql_query` with `limit: 100`, the max page size
+          2. If `pageInfo.hasNextPage` is true, call it again with the SAME query and `after: <pageInfo.endCursor>`
+          3. Repeat until `hasNextPage` is false or you hit 10 pages
         </pagination>
 
         <performance>
