@@ -1,6 +1,6 @@
-"""Guards for the shipped deep_code_review flow config.
+"""Guards for the shipped standard_code_review flow config.
 
-These tests assert on the content of ``deep_code_review/1.0.0.yml`` (the
+These tests assert on the content of ``standard_code_review/1.0.0.yml`` (the
 seven-step pipeline, the router that skips the discussion fetch on a first
 review and the router that aborts when the review is not published, the
 reviewer's schema id, toolset and ``max_cycles``, the fetch step's pinned
@@ -29,8 +29,8 @@ def discover_flow_configs_fixture():
         yield
 
 
-class TestDeepCodeReviewConfig:
-    FLOW = "deep_code_review"
+class TestStandardCodeReviewConfig:
+    FLOW = "standard_code_review"
     INVESTIGATION_TOOLSET = [
         "grep",
         "read_file",
@@ -327,13 +327,8 @@ class TestDeepCodeReviewConfig:
         assert schema.model_fields["checks"].is_required() is True
 
 
-class TestStandardCodeReviewConfig(TestDeepCodeReviewConfig):
-    FLOW = "standard_code_review"
-
-
-@pytest.mark.parametrize("flow", ["deep_code_review", "standard_code_review"])
-def test_1_0_0_reads_the_merge_request_from_the_resource_context(flow):
-    config = FlowConfig.from_yaml_config(flow, "1.0.0")
+def test_1_0_0_reads_the_merge_request_from_the_resource_context():
+    config = FlowConfig.from_yaml_config("standard_code_review", "1.0.0")
     sources = {
         i["from"]
         for c in config.components

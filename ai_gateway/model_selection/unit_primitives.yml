@@ -557,13 +557,6 @@ configurable_unit_primitives:
       - "gpt_5_2"
       - "gpt_5_3_codex"
 
-  - feature_setting: "review_merge_request_dap_deep"
-    unit_primitives: []
-    default_models:
-      - identifier: "claude_sonnet_5_5_vertex"
-    selectable_models:
-      - "claude_sonnet_5_5_vertex"
-
   - feature_setting: "review_merge_request_dap_standard"
     unit_primitives: []
     default_models:
@@ -677,14 +670,12 @@ flows:
   code_review: [review_merge_request_dap]
   convert_to_gitlab_ci: [duo_agent_platform]
   convert_to_gl_ci: [duo_agent_platform]
-  # The old name of standard_code_review. Workflows that started under it can resume with the new feature.
-  deep_code_review: [review_merge_request_dap_deep, review_merge_request_dap_standard]
   developer: [duo_developer, duo_agent_platform_agentic_chat, duo_agent_platform]
   duo_permissions_assistant: [duo_agent_platform_agentic_chat]
   duo_planner: [duo_agent_platform_agentic_chat]
   fix_pipeline: [duo_agent_platform]
   flow_creator: [duo_agent_platform_agentic_chat]
-  gitlab_duo_mention_assistant: [review_merge_request_dap, review_merge_request_dap_standard, review_merge_request_dap_deep]
+  gitlab_duo_mention_assistant: [review_merge_request_dap, review_merge_request_dap_standard]
   issue_to_merge_request: [duo_agent_platform]
   onboarding_guide: [duo_agent_platform_agentic_chat]
   orbit_agent: [duo_agent_platform_agentic_chat]
