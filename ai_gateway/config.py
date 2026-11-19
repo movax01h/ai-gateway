@@ -544,6 +544,19 @@ class ConfigModelSelection(BaseModel):
             'Example: \'{"duo_chat": ["claude_sonnet_4_5_20250929_vertex"]}\''
         ),
     )
+    models_for_tags: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description=(
+            "JSON object mapping feature_setting names (or '*' for all features) to a "
+            "tag -> model identifier map. Replaces models_for_tags from "
+            "unit_primitives.yml for matching keys; an empty map clears a "
+            "feature's tag routing so every tag falls back to default_models. The "
+            "wildcard '*' applies to all features unless a feature-specific "
+            "key is also present. "
+            "Examples: '{\"duo_developer\": {}}' clears duo_developer, "
+            "'{\"*\": {}}' clears all tag routing."
+        ),
+    )
     model_params: dict[str, dict] = Field(
         default_factory=dict,
         description=(

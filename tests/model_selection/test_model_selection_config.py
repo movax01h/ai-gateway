@@ -282,11 +282,97 @@ def test_default_models_override_empty_dict_is_noop():
 
 
 @pytest.mark.usefixtures("mock_fs")
+@pytest.mark.parametrize(
+    ("models_for_tags_override", "expected_tags"),
+    [
+        pytest.param(
+            None,
+            {"test_config": {}, "multiple_defaults": {}},
+            id="omitted_leaves_yaml_tags",
+        ),
+        pytest.param(
+            {"test_config": {"small": "gitlab-model-2"}},
+            {
+                "test_config": {"small": ModelTagEntry(models=["gitlab-model-2"])},
+                "multiple_defaults": {},
+            },
+            id="feature_key_replaces_yaml_tags",
+        ),
+        pytest.param(
+            {"*": {"small": "gitlab-model-1"}},
+            {
+                "test_config": {"small": ModelTagEntry(models=["gitlab-model-1"])},
+                "multiple_defaults": {
+                    "small": ModelTagEntry(models=["gitlab-model-1"])
+                },
+            },
+            id="wildcard_applies_to_all_features",
+        ),
+        pytest.param(
+            {"*": {"small": "gitlab-model-1"}, "test_config": {}},
+            {
+                "test_config": {},
+                "multiple_defaults": {
+                    "small": ModelTagEntry(models=["gitlab-model-1"])
+                },
+            },
+            id="feature_key_wins_over_wildcard",
+        ),
+        pytest.param(
+            {"nonexistent": {"small": "gitlab-model-1"}},
+            {"test_config": {}, "multiple_defaults": {}},
+            id="unknown_feature_setting_is_ignored",
+        ),
+    ],
+)
+def test_models_for_tags_override(models_for_tags_override, expected_tags):
+    """Test how models_for_tags_override is applied on top of the YAML tags."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        models_for_tags_override=models_for_tags_override,
+    )
+
+    unit_primitive_map = config.get_unit_primitive_config_map()
+
+    for feature_setting, tags in expected_tags.items():
+        assert unit_primitive_map[feature_setting].models_for_tags == tags
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_wildcard_override_gives_each_feature_its_own_entry():
+    """A wildcard reaches every feature, so the entries have to be distinct objects.
+
+    Sharing one would let a later mutation of a tag on one feature surface on all of them.
+    """
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        models_for_tags_override={"*": {"small": "gitlab-model-1"}},
+    )
+
+    unit_primitive_map = config.get_unit_primitive_config_map()
+
+    first = unit_primitive_map["test_config"].models_for_tags["small"]
+    second = unit_primitive_map["multiple_defaults"].models_for_tags["small"]
+
+    assert first == second
+    assert first is not second
+
+    first.models.append("gitlab-model-2")
+
+    assert second.models == ["gitlab-model-1"]
+
+
+@pytest.mark.usefixtures("mock_fs")
 def test_instance_uses_get_config_for_overrides():
     """Test that ModelSelectionConfig.instance() reads overrides from get_config()."""
     ModelSelectionConfig._instance = None
     mock_config = MagicMock()
     mock_config.model_selection.default_models = {"test_config": ["gitlab-model-2"]}
+    mock_config.model_selection.models_for_tags = {
+        "test_config": {"small": "gitlab-model-1"}
+    }
     mock_config.model_selection.model_params = {}
     mock_config.model_selection.prompt_params = {}
 
@@ -301,6 +387,9 @@ def test_instance_uses_get_config_for_overrides():
     assert unit_primitive_map["test_config"].default_model_identifiers == [
         "gitlab-model-2"
     ]
+    assert unit_primitive_map["test_config"].models_for_tags == {
+        "small": ModelTagEntry(models=["gitlab-model-1"])
+    }
 
 
 @pytest.mark.usefixtures("mock_fs")
@@ -452,6 +541,7 @@ def test_instance_uses_get_config_for_prompt_params():
     ModelSelectionConfig._instance = None
     mock_config = MagicMock()
     mock_config.model_selection.default_models = {}
+    mock_config.model_selection.models_for_tags = {}
     mock_config.model_selection.model_params = {}
     mock_config.model_selection.prompt_params = {
         "gitlab-model-1": {"vertex_location": "us-east5"}
@@ -476,6 +566,7 @@ def test_instance_uses_get_config_for_model_params():
     ModelSelectionConfig._instance = None
     mock_config = MagicMock()
     mock_config.model_selection.default_models = {}
+    mock_config.model_selection.models_for_tags = {}
     mock_config.model_selection.prompt_params = {}
     mock_config.model_selection.model_params = {
         "gitlab-model-1": {
@@ -1268,6 +1359,21 @@ def test_validate_with_invalid_tags_field(selection_config, fs: FakeFilesystem):
     assert "non-existent-small" in str(excinfo.value)
 
 
+@pytest.mark.usefixtures("mock_fs")
+def test_validate_rejects_unknown_model_id_from_models_for_tags_override():
+    """Validate() should report model IDs introduced by the override that don't exist."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        models_for_tags_override={"test_config": {"small": "non-existent-override"}},
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        config.validate()
+
+    assert "non-existent-override" in str(excinfo.value)
+
+
 @pytest.fixture(name="size_preference_model_dir")
 def size_preference_model_dir_fixture(fs: FakeFilesystem):
     """Shared fixture for tag-based model routing validation tests.
@@ -1894,6 +2000,7 @@ class TestEnvModelReleases:
         payload_str = _env_model_payload()
         mock_cfg = MagicMock()
         mock_cfg.model_selection.default_models = {}
+        mock_cfg.model_selection.models_for_tags = {}
         mock_cfg.model_selection.model_params = {}
         mock_cfg.model_selection.prompt_params = {}
         mock_cfg.model_selection.model_releases = SecretStr(payload_str)
