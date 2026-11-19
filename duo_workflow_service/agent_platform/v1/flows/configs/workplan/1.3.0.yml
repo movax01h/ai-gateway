@@ -756,6 +756,11 @@ prompts:
           edits a shared file after the parallel tracks depends on them.
         - Every track names its files.
         - Every `depends_on` key names another track, with no cycle.
+        - When track B depends only on track A, and no other track depends
+          on A, put both in one track. The split adds a merge request and a
+          review, and no track starts sooner. A dependency that another
+          dependency already implies does not count: when C depends on A and
+          B, and B depends on A, C depends only on B.
         - At most 10 tracks.
 
         Each track, merged after the tracks it depends on and with no other
