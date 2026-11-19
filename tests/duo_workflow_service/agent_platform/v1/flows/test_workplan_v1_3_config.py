@@ -166,6 +166,15 @@ class TestWorkplanV130PublishTracks:
         assert "Two tracks that change the same file are one track" in section
         assert "Every track names its files." in section
         assert "At most 10 tracks." in section
+        flat = " ".join(section.split())
+        assert (
+            "When track B depends only on track A, and no other track depends on A, "
+            "put both in one track." in flat
+        )
+        assert (
+            "A dependency that another dependency already implies does not count"
+            in flat
+        )
         assert "word for word" in section
         # The planner returns no tracks for any other type: the tool skips
         # that type, and its note would contradict the announcement.

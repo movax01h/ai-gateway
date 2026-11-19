@@ -152,6 +152,72 @@ def _topological_order(keys: List[str], deps: Dict[str, List[str]]) -> List[str]
     return order
 
 
+def _chain_problems(
+    keys: List[str], deps: Dict[str, List[str]], ancestors: Dict[str, set[str]]
+) -> List[str]:
+    """One problem for each pair of tracks that one track can replace.
+
+    The check reads the direct dependencies that no other dependency implies. So a track that also names the blocker of
+    its blocker still makes a chain with its blocker.
+    """
+    direct = {
+        key: [
+            dep
+            for dep in deps[key]
+            if not any(dep in ancestors[other] for other in deps[key] if other != dep)
+        ]
+        for key in keys
+    }
+    dependents: Dict[str, List[str]] = {key: [] for key in keys}
+    for key in keys:
+        for dep in direct[key]:
+            dependents[dep].append(key)
+
+    problems: List[str] = []
+    for key in keys:
+        if len(direct[key]) != 1 or dependents[direct[key][0]] != [key]:
+            continue
+        blocker_key = direct[key][0]
+        blocker = _key(blocker_key)
+        sentences = [
+            f"Track '{_key(key)}' depends only on track '{blocker}', and no other track "
+            f"depends on '{blocker}'."
+        ]
+        # The note shows the plan's own `depends_on`, so explain each listed
+        # dependency that the check did not count.
+        implied = [f"'{_key(dep)}'" for dep in deps[key] if dep != blocker_key]
+        if len(implied) == 1:
+            sentences.append(
+                f"Its dependency on {implied[0]} comes through '{blocker}'."
+            )
+        elif implied:
+            sentences.append(
+                f"Its dependencies on {_listed(implied)} come through '{blocker}'."
+            )
+        for other in keys:
+            if other != key and blocker_key in deps[other]:
+                # The blocker is not a direct dependency of `other`, so another
+                # dependency of `other` comes after the blocker.
+                via = next(dep for dep in deps[other] if blocker_key in ancestors[dep])
+                sentences.append(
+                    f"The dependency of '{_key(other)}' on '{blocker}' comes through "
+                    f"'{_key(via)}'."
+                )
+        sentences.append(
+            "So the two tracks can be one track: the split adds a merge request and a "
+            "review, and no track starts sooner."
+        )
+        problems.append(" ".join(sentences))
+    return problems
+
+
+def _listed(items: List[str]) -> str:
+    """Items as an English list: 'a' and 'b', or 'a', 'b', and 'c'."""
+    if len(items) < 3:
+        return " and ".join(items)
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
+
+
 def plan_tracks(tracks: List[WorkplanTrack]) -> TrackPlan:
     """Check that the tracks can be published, and find the creation order.
 
@@ -162,6 +228,10 @@ def plan_tracks(tracks: List[WorkplanTrack]) -> TrackPlan:
     - Every track names the files it changes.
     - Two tracks that change the same file are ordered: one of them depends on the other, directly or not. Two agents
         that edit one file at the same time make merge requests that conflict.
+    - No two tracks are a chain: track B depends only on track A, and no other track depends on A. One track can do
+        the work of both. A track that can run at the same time as A can also run at the same time as B, and the
+        reverse. So the split adds a merge request and a review, and no track starts sooner. A dependency that another
+        dependency already implies does not count.
 
     Returns:
         A TrackPlan. ``concurrent`` maps each key to the keys of the tracks
@@ -240,6 +310,8 @@ def plan_tracks(tracks: List[WorkplanTrack]) -> TrackPlan:
                     f"Tracks '{_key(first)}' and '{_key(second)}' both change {', '.join(shared)}, "
                     "and neither depends on the other."
                 )
+
+    problems.extend(_chain_problems(keys, deps, ancestors))
 
     if problems:
         return TrackPlan(order=[], concurrent={}, problems=problems)
@@ -356,11 +428,12 @@ def _status(entries: List[Dict[str, Any]], links_read: bool) -> str:
 
 
 def _outcome_note(result: Dict[str, Any]) -> str:
-    """The note that tells the author what to check in the child work items."""
-    if result["status"] == "skipped":
+    """The note that tells the author the outcome of the split."""
+    if result["status"] in ("skipped", "refused"):
+        # Neither result creates a child item in this run.
         lines = [
             "Generate Workplan did not split the plan into child work items. "
-            "The result is `skipped`."
+            f"The result is `{result['status']}`."
         ]
     else:
         lines = [
@@ -487,7 +560,7 @@ class WorkplanPublishTracks(WorkItemBaseTool):
                 parent_url,
                 {
                     "status": "refused",
-                    "reason": "The split failed a check, so no child work item was created.",
+                    "reason": "The split has these problems:",
                     "problems": plan.problems,
                 },
             )

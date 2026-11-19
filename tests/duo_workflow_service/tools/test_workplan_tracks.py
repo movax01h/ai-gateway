@@ -40,6 +40,45 @@ SERVERS = [
     _track("readme", ["README.md"], ["go", "rust"]),
 ]
 
+# The tracks that GW 1.3.0 planned on 2026-11-19 for
+# https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/work_items/3643.
+# The e2e track depends only on the diff track, and nothing else depends on
+# the diff track, so the two make a chain.
+TABS = [
+    _track("expand-tabs-helper", ["packages/cli/model/src/expand_tabs.ts"]),
+    _track(
+        "diff-width-aware-wrap",
+        ["packages/cli/tui/src/lib/components/diff/wrap_text.ts"],
+        ["expand-tabs-helper"],
+    ),
+    _track(
+        "diff-tabs-e2e",
+        ["packages/cli/app/test/e2e/scenarios/diff_tabs.scenario.ts"],
+        ["diff-width-aware-wrap"],
+    ),
+    _track(
+        "expand-tabs-shared-text",
+        ["packages/cli/tui/src/lib/components/Text.tsx"],
+        ["expand-tabs-helper"],
+    ),
+]
+
+
+def _chain(key, blocker, *notes):
+    """The problem for a chain, as test_refuses_the_chain_of_the_gitlab_lsp_plan pins it.
+
+    Each note is one sentence that the problem puts between its first and last sentence.
+    """
+    return " ".join(
+        [
+            f"Track '{key}' depends only on track '{blocker}', and no other track "
+            f"depends on '{blocker}'.",
+            *notes,
+            "So the two tracks can be one track: the split adds a merge request and a "
+            "review, and no track starts sooner.",
+        ]
+    )
+
 
 def _child(gid, iid, title, marker=None, state="OPEN"):
     description = f"<!-- workplan-track: {marker} -->" if marker else "Made by hand."
@@ -67,10 +106,17 @@ class TestPlanTracks:
         assert concurrent["ci"] == ["guards", "readme"]
         assert "go" not in concurrent["ci"]
 
-    def test_tail_comes_after_a_blocker_listed_later(self):
-        plan = plan_tracks([_track("tail", ["a"], ["head"]), _track("head", ["b"])])
+    def test_tail_comes_after_blockers_listed_later(self):
+        plan = plan_tracks(
+            [
+                _track("tail", ["a"], ["head", "side"]),
+                _track("head", ["b"]),
+                _track("side", ["c"]),
+            ]
+        )
 
-        assert plan.order == ["head", "tail"]
+        assert not plan.problems
+        assert plan.order == ["head", "side", "tail"]
 
     def test_refuses_two_unordered_tracks_on_one_file(self):
         plan = plan_tracks([_track("a", ["README.md"]), _track("b", ["./README.md"])])
@@ -122,12 +168,210 @@ class TestPlanTracks:
         assert plan.concurrent["d"] == []
 
     def test_allows_one_file_in_tracks_ordered_through_another(self):
+        # c depends on a only through b and z.
         plan = plan_tracks(
-            [_track("a", ["x"]), _track("b", ["y"], ["a"]), _track("c", ["x"], ["b"])]
+            [
+                _track("a", ["x"]),
+                _track("b", ["y"], ["a"]),
+                _track("z", ["z"], ["a"]),
+                _track("c", ["x"], ["b", "z"]),
+            ]
         )
 
         assert not plan.problems
-        assert plan.order == ["a", "b", "c"]
+        assert plan.order == ["a", "b", "z", "c"]
+
+    def test_refuses_the_chain_of_the_gitlab_lsp_plan(self):
+        plan = plan_tracks(TABS)
+
+        assert plan.order == []
+        assert plan.problems == [
+            "Track 'diff-tabs-e2e' depends only on track 'diff-width-aware-wrap', and no "
+            "other track depends on 'diff-width-aware-wrap'. So the two tracks can be "
+            "one track: the split adds a merge request and a review, and no track "
+            "starts sooner."
+        ]
+
+    @pytest.mark.parametrize(
+        "tracks,chains",
+        [
+            pytest.param(
+                [_track("a", ["x"]), _track("b", ["y"], ["a"])],
+                [("b", "a")],
+                id="two-tracks",
+            ),
+            pytest.param(
+                [
+                    _track("a", ["x"]),
+                    _track("b", ["y"], ["a"]),
+                    _track("c", ["z"], ["b"]),
+                ],
+                [("b", "a"), ("c", "b")],
+                id="three-tracks",
+            ),
+            pytest.param(
+                [
+                    _track("go", ["go/"]),
+                    _track("rust", ["rust/"]),
+                    _track("ci", ["c"], ["go", "rust"]),
+                    _track("deploy", ["d"], ["ci"]),
+                ],
+                [("deploy", "ci")],
+                id="a-tail-of-a-tail",
+            ),
+            # The whole split is refused, so b does not run at the same time
+            # as the others either.
+            pytest.param(
+                [_track("a", ["x"]), _track("b", ["y"]), _track("c", ["z"], ["a"])],
+                [("c", "a")],
+                id="a-chain-beside-a-track",
+            ),
+        ],
+    )
+    def test_refuses_two_tracks_in_a_row(self, tracks, chains):
+        plan = plan_tracks(tracks)
+
+        assert plan.order == []
+        assert plan.problems == [_chain(key, blocker) for key, blocker in chains]
+
+    @pytest.mark.parametrize(
+        "tracks,problems",
+        [
+            # c also names a, which b already implies.
+            pytest.param(
+                [
+                    _track("a", ["x"]),
+                    _track("b", ["y"], ["a"]),
+                    _track("c", ["z"], ["a", "b"]),
+                ],
+                [
+                    _chain("b", "a", "The dependency of 'c' on 'a' comes through 'b'."),
+                    _chain("c", "b", "Its dependency on 'a' comes through 'b'."),
+                ],
+                id="one-implied-dependency",
+            ),
+            # d also names a and b, which c already implies.
+            pytest.param(
+                [
+                    _track("a", ["x"]),
+                    _track("b", ["y"], ["a"]),
+                    _track("c", ["z"], ["b"]),
+                    _track("d", ["w"], ["a", "b", "c"]),
+                ],
+                [
+                    _chain("b", "a", "The dependency of 'd' on 'a' comes through 'b'."),
+                    _chain("c", "b", "The dependency of 'd' on 'b' comes through 'c'."),
+                    _chain(
+                        "d", "c", "Its dependencies on 'a' and 'b' come through 'c'."
+                    ),
+                ],
+                id="two-implied-dependencies",
+            ),
+            # e names every earlier track: one problem lists three, and several
+            # problems name e.
+            pytest.param(
+                [
+                    _track("a", ["v"]),
+                    _track("b", ["w"], ["a"]),
+                    _track("c", ["x"], ["b"]),
+                    _track("d", ["y"], ["a", "b", "c"]),
+                    _track("e", ["z"], ["a", "b", "c", "d"]),
+                ],
+                [
+                    _chain(
+                        "b",
+                        "a",
+                        "The dependency of 'd' on 'a' comes through 'b'.",
+                        "The dependency of 'e' on 'a' comes through 'b'.",
+                    ),
+                    _chain(
+                        "c",
+                        "b",
+                        "The dependency of 'd' on 'b' comes through 'c'.",
+                        "The dependency of 'e' on 'b' comes through 'c'.",
+                    ),
+                    _chain(
+                        "d",
+                        "c",
+                        "Its dependencies on 'a' and 'b' come through 'c'.",
+                        "The dependency of 'e' on 'c' comes through 'd'.",
+                    ),
+                    _chain(
+                        "e",
+                        "d",
+                        "Its dependencies on 'a', 'b', and 'c' come through 'd'.",
+                    ),
+                ],
+                id="three-implied-dependencies",
+            ),
+            # A serial tail d also names b, which c already implies. d depends
+            # on c and x, so d and c are not a chain, but the note must still
+            # explain why d does not count as a track that depends on b.
+            pytest.param(
+                [
+                    _track("a", ["v"]),
+                    _track("b", ["w"], ["a"]),
+                    _track("c", ["x"], ["b"]),
+                    _track("x", ["y"]),
+                    _track("d", ["z"], ["b", "c", "x"]),
+                ],
+                [
+                    _chain("b", "a"),
+                    _chain("c", "b", "The dependency of 'd' on 'b' comes through 'c'."),
+                ],
+                id="a-tail-that-names-the-blocker",
+            ),
+        ],
+    )
+    def test_names_the_dependencies_that_a_chain_does_not_count(self, tracks, problems):
+        assert plan_tracks(tracks).problems == problems
+
+    def test_a_chain_comes_with_the_other_problems(self):
+        # One refusal names every problem, so one planner run can fix them all.
+        plan = plan_tracks(
+            [_track("a", ["x"]), _track("b", ["x"]), _track("c", ["z"], ["a"])]
+        )
+
+        assert plan.problems == [
+            "Tracks 'a' and 'b' both change x, and neither depends on the other.",
+            _chain("c", "a"),
+        ]
+
+    @pytest.mark.parametrize(
+        "tracks",
+        [
+            pytest.param(SERVERS, id="tails-after-a-join"),
+            pytest.param(
+                [
+                    _track("a", ["x"]),
+                    _track("b", ["y"], ["a"]),
+                    _track("c", ["z"], ["a"]),
+                ],
+                id="two-tracks-after-one",
+            ),
+            pytest.param(
+                [
+                    _track("a", ["x"]),
+                    _track("b", ["y"], ["a"]),
+                    _track("c", ["z"], ["a"]),
+                    _track("d", ["w"], ["b", "c"]),
+                ],
+                id="diamond",
+            ),
+            # d also names a, which b and c already imply.
+            pytest.param(
+                [
+                    _track("a", ["x"]),
+                    _track("b", ["y"], ["a"]),
+                    _track("c", ["z"], ["a"]),
+                    _track("d", ["w"], ["a", "b", "c"]),
+                ],
+                id="diamond-with-an-implied-dependency",
+            ),
+        ],
+    )
+    def test_allows_tracks_that_run_at_the_same_time(self, tracks):
+        assert not plan_tracks(tracks).problems
 
     def test_refuses_a_cycle(self):
         plan = plan_tracks([_track("a", ["x"], ["b"]), _track("b", ["y"], ["a"])])
@@ -482,10 +726,19 @@ class TestPublish:
         )
 
     @pytest.mark.asyncio
-    async def test_refused_tracks_create_nothing_and_tell_the_author(self):
+    @pytest.mark.parametrize(
+        "tracks,problem",
+        [
+            ([_track("a", ["x"]), _track("b", ["x"])], "both change x"),
+            (TABS, "'diff-tabs-e2e' depends only on track 'diff-width-aware-wrap'"),
+        ],
+    )
+    async def test_refused_tracks_create_nothing_and_tell_the_author(
+        self, tracks, problem
+    ):
         fake = FakeGitLab()
 
-        result = await _run(fake, [_track("a", ["x"]), _track("b", ["x"])])
+        result = await _run(fake, tracks)
 
         assert result["status"] == "refused"
         assert result["problems"]
@@ -494,8 +747,14 @@ class TestPublish:
         assert fake.notes[0]["noteableId"] == PARENT_ID
         # The flow's note policy: visible to everyone, as a resolvable thread.
         assert fake.notes[0]["internal"] is False
-        assert "with this result: `refused`" in fake.notes[0]["body"]
-        assert "both change x" in fake.notes[0]["body"]
+        body = fake.notes[0]["body"]
+        assert body.startswith(
+            "Generate Workplan did not split the plan into child work items. "
+            "The result is `refused`."
+        )
+        # No child item exists, so the note does not ask the author to check one.
+        assert "Check the child work items" not in body
+        assert problem in body
 
     @pytest.mark.asyncio
     async def test_skips_a_parent_that_is_not_an_issue_with_a_note(self):
