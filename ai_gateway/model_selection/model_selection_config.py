@@ -406,6 +406,7 @@ class ModelSelectionConfig:
         model_params_override: dict[str, dict] | None = None,
         prompt_params_override: dict[str, dict] | None = None,
         model_releases: Optional[str] = None,
+        models_for_tags_override: dict[str, dict[str, str]] | None = None,
     ) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
         self._unit_primitives_file: Optional[dict[str, Any]] = None
@@ -413,6 +414,9 @@ class ModelSelectionConfig:
         self._flow_features: Optional[dict[str, tuple[str, ...]]] = None
         self._model_restrictions: Optional[list[ModelRestriction]] = None
         self._default_models_override: dict[str, list[str]] = default_models_override
+        self._models_for_tags_override: dict[str, dict[str, str]] = (
+            models_for_tags_override or {}
+        )
         self._model_params_override: dict[str, dict] = model_params_override or {}
         self._prompt_params_override: dict[str, dict] = prompt_params_override or {}
         self._env_llm_definitions: dict[str, LLMDefinition] = {}
@@ -439,6 +443,7 @@ class ModelSelectionConfig:
                 model_releases=(
                     model_releases.get_secret_value() if model_releases else None
                 ),
+                models_for_tags_override=cfg.model_selection.models_for_tags,
             )
         return cls._instance
 
@@ -540,7 +545,26 @@ class ModelSelectionConfig:
                         DefaultModelEntry(identifier=m) for m in models
                     ]
 
+            wildcard_tags = self._models_for_tags_override.get("*")
+            if wildcard_tags is not None:
+                for config in self._unit_primitive_configs.values():
+                    config.models_for_tags = self._build_tag_entries(wildcard_tags)
+
+            for feature_setting, tags in self._models_for_tags_override.items():
+                if feature_setting in self._unit_primitive_configs:
+                    self._unit_primitive_configs[
+                        feature_setting
+                    ].models_for_tags = self._build_tag_entries(tags)
+
         return self._unit_primitive_configs
+
+    @staticmethod
+    def _build_tag_entries(tags: dict[str, str]) -> dict[str, ModelTagEntry]:
+        """Build a fresh entry per tag, so no two features share a mutable map.
+
+        The override names one model per tag, so any goal keywords the YAML declared for that tag do not survive it.
+        """
+        return {tag: ModelTagEntry(models=[model]) for tag, model in tags.items()}
 
     def get_flow_features(self) -> dict[str, tuple[str, ...]]:
         """Return the features of each flow that this gateway ships, from the ``flows`` map of ``unit_primitives.yml``.

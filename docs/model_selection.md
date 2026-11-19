@@ -526,6 +526,33 @@ Routing runs only when a workflow starts, so each workflow emits at most one rou
 Each operation's `model_id` is the provider-reported model name, not a `gitlab_identifier`, so map `gitlab_identifier` to its `params.model` in `models.yml` before comparing them.
 Billing also covers resumed runs, which aren't routed again and can be served by a different model than the routing event names.
 
+### Overriding tags with an environment variable
+
+`AIGW_MODEL_SELECTION__MODELS_FOR_TAGS` replaces `models_for_tags` at runtime, without editing
+`unit_primitives.yml`. It takes a JSON object mapping a `feature_setting` to a tag-to-model map,
+and works the same way as `AIGW_MODEL_SELECTION__DEFAULT_MODELS`:
+
+```shell
+# Route every tag for one feature to a single model
+AIGW_MODEL_SELECTION__MODELS_FOR_TAGS='{"duo_developer": {"small": "gpt_5_3_codex", "large": "gpt_5_3_codex"}}'
+
+# Clear one feature's tag routing, so every tag falls back to default_models
+AIGW_MODEL_SELECTION__MODELS_FOR_TAGS='{"duo_developer": {}}'
+
+# Clear tag routing for every feature
+AIGW_MODEL_SELECTION__MODELS_FOR_TAGS='{"*": {}}'
+```
+
+Use `*` as the `feature_setting` to apply one map to every feature. A feature-specific key takes
+precedence over the wildcard, so `'{"*": {}, "duo_chat": {"small": "..."}}'` clears every
+feature except `duo_chat`. Unknown feature settings are ignored.
+
+The override names one model per tag, so any `keywords` the YAML declared for that tag do not
+survive it: goal routing falls back to `default_models` for an overridden feature.
+
+This is intended for evaluation and local testing, where results must attribute cleanly to one
+model. It is an environment-level override, not a per-request one.
+
 ### How tag resolution works
 
 The `ModelMetadataByTag` class wraps one or more `ModelMetadata` instances and exposes a `get(model_tags)` method that resolves the right model for the requested tags.
