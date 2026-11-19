@@ -2,10 +2,11 @@
 import asyncio
 import base64
 import json
+import operator
 import zlib
 from asyncio import CancelledError
 from copy import deepcopy
-from typing import Any, Optional, Sequence, TypedDict
+from typing import Annotated, Any, Optional, Sequence, TypedDict
 from unittest.mock import ANY, AsyncMock, Mock, call, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -21,6 +22,8 @@ from langgraph.checkpoint.base import (
 )
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, Send, interrupt
 from structlog.testing import capture_logs
 
 from duo_workflow_service.audit_events.event_types import SessionEndedEvent
@@ -32,6 +35,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     _dict_of_list_delta,
     _FlushPoint,
     _get_orbit_tool_calls,
+    _latest_interrupts,
     _serialize_all_channels_full,
     _serialize_channel_blobs,
 )
@@ -88,6 +92,13 @@ from lib.context.tool_loop import (
 )
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
+from tests.duo_workflow_service.checkpointer.in_memory_rails import (
+    GraphQLTipRails,
+    InMemoryRails,
+    SaverFactory,
+    gitlab_savers,
+    memory_savers,
+)
 
 
 class CustomRunnableConfig(TypedDict):
@@ -8258,3 +8269,319 @@ async def test_latest_checkpoint_status_ignores_nested_lineages(gitlab_workflow)
 
     # Falls through to the API rather than answering from the nested entry.
     mock_fetch.assert_awaited_once_with()
+
+
+class TestLatestInterrupts:
+    """GitLab only adds writes, so the stored rows are read as LangGraph keeps them."""
+
+    @pytest.mark.parametrize(
+        ("stored", "kept"),
+        [
+            (
+                [
+                    (1, "a", "__interrupt__", ("q1",)),
+                    (2, "b", "__interrupt__", ("q2",)),
+                ],
+                [("a", "__interrupt__", ("q1",)), ("b", "__interrupt__", ("q2",))],
+            ),
+            (
+                [
+                    (1, "a", "__interrupt__", ("q1",)),
+                    (3, "a", "__interrupt__", ("q2",)),
+                ],
+                [("a", "__interrupt__", ("q2",))],
+            ),
+            (
+                [
+                    (3, "a", "__interrupt__", ("q2",)),
+                    (1, "a", "__interrupt__", ("q1",)),
+                ],
+                [("a", "__interrupt__", ("q2",))],
+            ),
+            (
+                [
+                    (1, "a", "__interrupt__", ("q1",)),
+                    (2, "b", "__interrupt__", ("q2",)),
+                    (3, "b", "__interrupt__", ()),
+                ],
+                [("a", "__interrupt__", ("q1",))],
+            ),
+            (
+                [
+                    (1, "a", "__interrupt__", ("q1",)),
+                    (2, "a", "__interrupt__", ()),
+                    (3, "a", "__interrupt__", ("q2",)),
+                ],
+                [("a", "__interrupt__", ("q2",))],
+            ),
+            (
+                [
+                    (1, "a", "__interrupt__", ("q1",)),
+                    (2, "a", "__resume__", ["one"]),
+                    (3, "a", "__interrupt__", ("q2",)),
+                    (4, "a", "__resume__", ["one", "two"]),
+                ],
+                [
+                    ("a", "__resume__", ["one"]),
+                    ("a", "__interrupt__", ("q2",)),
+                    ("a", "__resume__", ["one", "two"]),
+                ],
+            ),
+            (
+                [
+                    (0, "a", "__interrupt__", ("q1",)),
+                    (0, "a", "__interrupt__", ("q2",)),
+                ],
+                [("a", "__interrupt__", ("q1",)), ("a", "__interrupt__", ("q2",))],
+            ),
+            ([], []),
+        ],
+        ids=[
+            "one interrupt for each task",
+            "a task that paused again keeps its latest interrupt",
+            "whatever order the rows come back in",
+            "a task that finished after it paused has none",
+            "a task that pauses after it was stored as finished waits again",
+            "writes on other channels stay as they are",
+            "rows without an ID are all kept",
+            "no rows",
+        ],
+    )
+    def test_each_task_keeps_its_latest_interrupt_until_it_finishes(self, stored, kept):
+        assert _latest_interrupts(stored) == kept
+
+
+class _PausedStepState(TypedDict, total=False):
+    call: str
+    asked: int
+    trail: Annotated[list[str], operator.add]
+
+
+class _RequestsOnOneGraph:
+    """One graph, compiled on a fresh saver for each request, as each request to DWS is."""
+
+    _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1"}}
+
+    def __init__(self, graph: StateGraph, savers: SaverFactory) -> None:
+        self._graph = graph
+        self._savers = savers
+
+    async def request(self, graph_input: Any) -> dict[str, Any]:
+        compiled = self._graph.compile(checkpointer=self._savers())
+        return await compiled.ainvoke(graph_input, self._CONFIG)
+
+    async def waiting(self) -> dict[str, str]:
+        """The ID of each interrupt that still waits, by the question it asks."""
+        compiled = self._graph.compile(checkpointer=self._savers())
+        snapshot = await compiled.aget_state(self._CONFIG)
+        return {pending.value: pending.id for pending in snapshot.interrupts}
+
+
+def _subagents_that_ask(
+    savers: SaverFactory,
+    calls: Sequence[str] = ("call-a", "call-b"),
+    asks_last: Optional[str] = None,
+) -> _RequestsOnOneGraph:
+    """Prepare -> one dispatch per call, in one step -> collect.
+
+    Each dispatch runs a subgraph that asks once. The call named in `asks_last` asks after the others had time to
+    run.
+    """
+
+    async def gate(state: _PausedStepState) -> _PausedStepState:
+        if state["call"] == asks_last:
+            await asyncio.sleep(0.05)
+        answer = interrupt(f"question of {state['call']}")
+        if answer == "fail":
+            raise RuntimeError("The subagent failed")
+        return {"trail": [f"{state['call']}: {answer}"]}
+
+    async def tools(state: _PausedStepState) -> _PausedStepState:
+        return {"trail": [f"{state['call']}: tool ran"]}
+
+    subgraph = StateGraph(_PausedStepState)
+    subgraph.add_node("gate", gate)
+    subgraph.add_node("tools", tools)
+    subgraph.add_edge(START, "gate")
+    subgraph.add_edge("gate", "tools")
+    subgraph.add_edge("tools", END)
+    subagent = subgraph.compile()
+
+    async def prepare(state: _PausedStepState) -> Command:
+        return Command(goto=[Send("reviewer", {"call": call}) for call in calls])
+
+    async def dispatch(
+        state: _PausedStepState, config: RunnableConfig
+    ) -> _PausedStepState:
+        result = await subagent.ainvoke(state, config=config)
+        return {"trail": result["trail"]}
+
+    async def collect(state: _PausedStepState) -> _PausedStepState:
+        return {"trail": ["collected"]}
+
+    graph = StateGraph(_PausedStepState)
+    graph.add_node("prepare", prepare, destinations=("reviewer",))
+    graph.add_node("reviewer", dispatch)
+    graph.add_node("collect", collect)
+    graph.add_edge(START, "prepare")
+    graph.add_edge("reviewer", "collect")
+    graph.add_edge("collect", END)
+    return _RequestsOnOneGraph(graph, savers)
+
+
+def _one_subagent_that_asks_twice(savers: SaverFactory) -> _RequestsOnOneGraph:
+    """One dispatch whose subagent asks, and asks again, so its task pauses twice in one step."""
+
+    async def gate(state: _PausedStepState) -> _PausedStepState:
+        asked = state.get("asked", 0) + 1
+        answer = interrupt(f"question {asked}")
+        return {"asked": asked, "trail": [f"question {asked}: {answer}"]}
+
+    subgraph = StateGraph(_PausedStepState)
+    subgraph.add_node("gate", gate)
+    subgraph.add_edge(START, "gate")
+    subgraph.add_conditional_edges(
+        "gate", lambda state: "gate" if state["asked"] < 2 else END
+    )
+    subagent = subgraph.compile()
+
+    async def dispatch(
+        state: _PausedStepState, config: RunnableConfig
+    ) -> _PausedStepState:
+        result = await subagent.ainvoke({}, config=config)
+        return {"trail": result["trail"]}
+
+    graph = StateGraph(_PausedStepState)
+    graph.add_node("reviewer", dispatch)
+    graph.add_edge(START, "reviewer")
+    graph.add_edge("reviewer", END)
+    return _RequestsOnOneGraph(graph, savers)
+
+
+class TestAPausedStepOverSeveralRequests:
+    """A step that pauses keeps its interrupts in GitLab until every task of it finished."""
+
+    @pytest.fixture(
+        params=[memory_savers, gitlab_savers], ids=["InMemorySaver", "GitLabWorkflow"]
+    )
+    def savers(self, request: pytest.FixtureRequest) -> SaverFactory:
+        return request.param()
+
+    @pytest.mark.asyncio
+    async def test_a_task_that_was_answered_is_no_longer_listed(
+        self, savers: SaverFactory
+    ):
+        flow = _subagents_that_ask(savers)
+        await flow.request({})
+        asked = await flow.waiting()
+
+        await flow.request(Command(resume={asked["question of call-b"]: "approve"}))
+
+        assert await flow.waiting() == {
+            "question of call-a": asked["question of call-a"]
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_task_that_failed_after_its_answer_is_still_listed(
+        self, savers: SaverFactory
+    ):
+        flow = _subagents_that_ask(savers)
+        await flow.request({})
+        asked = await flow.waiting()
+
+        with pytest.raises(RuntimeError, match="The subagent failed"):
+            await flow.request(Command(resume={asked["question of call-b"]: "fail"}))
+
+        # A retry asks again, so the question it failed on still waits.
+        assert await flow.waiting() == asked
+
+    @pytest.mark.asyncio
+    async def test_a_task_that_paused_again_is_listed_once(self, savers: SaverFactory):
+        flow = _subagents_that_ask(savers)
+        await flow.request({})
+        asked = await flow.waiting()
+
+        await flow.request(None)
+        await flow.request(None)
+
+        assert await flow.waiting() == asked
+
+    @pytest.mark.asyncio
+    async def test_tasks_answered_one_request_at_a_time_each_run_once(
+        self, savers: SaverFactory
+    ):
+        flow = _subagents_that_ask(savers)
+        await flow.request({})
+        asked = await flow.waiting()
+
+        await flow.request(Command(resume={asked["question of call-b"]: "approve"}))
+        result = await flow.request(
+            Command(resume={asked["question of call-a"]: "reject"})
+        )
+
+        assert result["trail"] == [
+            "call-a: reject",
+            "call-a: tool ran",
+            "call-b: approve",
+            "call-b: tool ran",
+            "collected",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_more_tasks_answered_in_one_request_than_gitlab_takes_in_one_batch(
+        self, savers: SaverFactory
+    ):
+        calls = [
+            f"call-{number}" for number in range(InMemoryRails.MAX_WRITES_PER_BATCH + 2)
+        ]
+        flow = _subagents_that_ask(savers, calls, asks_last=calls[-1])
+        await flow.request({})
+        asked = await flow.waiting()
+        answered = {asked[f"question of {call}"]: "approve" for call in calls[:-1]}
+
+        await flow.request(Command(resume=answered))
+
+        assert set(await flow.waiting()) == {f"question of {calls[-1]}"}
+
+    @pytest.mark.asyncio
+    async def test_a_task_that_finished_is_stored_as_an_interrupt_with_nothing_in_it(
+        self,
+    ):
+        rails = InMemoryRails()
+        flow = _subagents_that_ask(gitlab_savers(rails))
+        await flow.request({})
+        asked = await flow.waiting()
+
+        await flow.request(Command(resume={asked["question of call-b"]: "approve"}))
+
+        # The channel and the shape are ones every gateway reads, so one from before this reads the row as no change.
+        has_an_interrupt = [has_one for _task, has_one in rails.stored_interrupts()]
+        assert has_an_interrupt.count(False) == 1
+        assert has_an_interrupt[-1] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("rails_class", [InMemoryRails, GraphQLTipRails])
+    async def test_a_task_that_pauses_twice_in_one_step_resumes(
+        self, rails_class: type[InMemoryRails]
+    ):
+        flow = _one_subagent_that_asks_twice(gitlab_savers(rails_class()))
+        await flow.request({})
+        await flow.request(Command(resume="approve"))
+
+        result = await flow.request(Command(resume="approve"))
+
+        assert result["trail"] == ["question 1: approve", "question 2: approve"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("rails_class", [InMemoryRails, GraphQLTipRails])
+    async def test_a_step_that_finishes_stores_no_row_for_its_finished_task(
+        self, rails_class: type[InMemoryRails]
+    ):
+        rails = rails_class()
+        flow = _one_subagent_that_asks_twice(gitlab_savers(rails))
+        await flow.request({})
+        await flow.request(Command(resume="approve"))
+        await flow.request(Command(resume="approve"))
+
+        # A row for each pause, at the nested run and at its dispatch, and none for a task that finished.
+        assert [has_one for _task, has_one in rails.stored_interrupts()] == [True] * 4
