@@ -1,7 +1,8 @@
 # ADR-005: MCP tools reach a `tools:` component only through explicit selectors
 
-- Status: proposed
-- Date: 2026-10-19
+- Status: accepted
+- Date: 2026-11-13
+- Deciders: `bjune`, `terrichu`, `mikolaj_wawrzyniak`
 
 ## Context
 
@@ -180,8 +181,8 @@ contract change in DWS, Workhorse, and the clients.
 server that Rails configured, which includes `gitlab`, `orbit`, `slack` and the catalog servers. `client` is a tool
 the client supplies. `origin` says who configured the server, not who owns it. Workhorse sets `origin` on each tool.
 On a tool the client supplies it sets `client`, whatever the client sent, as it already clears the `trusted` flag
-there (Rails sets `trusted` on `gitlab` and `orbit` tools, see [phase A](#phase-a-explicit-selectors)). So a client
-can't choose its origin. Code that holds a DWS token, such as a CI job, could connect to DWS directly and send
+there (Rails sets `trusted` on `gitlab`, `orbit` and `slack`, see [phase A](#phase-a-explicit-selectors)). So a
+client can't choose its origin. Code that holds a DWS token, such as a CI job, could connect to DWS directly and send
 `origin` itself. DWS can tell such a request apart, because it issued that token. That's why DWS reads `origin` only
 on a request that Workhorse handled. On any other request every tool counts as `client`, and DWS drops them all. On a
 GitLab version that sends `origin`, a tool message without `origin` counts as `client`. On an older version, DWS uses
@@ -227,18 +228,20 @@ and removes nothing.
 
 ### Phase A: explicit selectors
 
-Phase A ships to the `experimental` version of the flow registry only. Later phases build on it.
+Phase A ships to the `experimental` version of the flow registry only, so it covers foundational flows that have an
+`experimental` config. Foundational flows on `v1` get `tools:` in phase B, part 1. Custom flows always run as `v1` and
+get it in phase B, part 2.
 
 - Introduce the `tools:` key in the `experimental` version of the flow registry. A selector only accepts `origin: instance`.
-- `server` is `gitlab` or `orbit`, and `name` lists exact tool names. Any other `server`, or `origin: client`, is a
-  config error.
+- `server` is `gitlab`, `orbit` or `slack`, and `name` lists exact tool names. Any other `server`, or `origin: client`,
+  is a config error.
 - `server: gitlab` also selects native tools by exact name, so a `tools:` component can still declare them. DWS has no
   pair data yet (Phase C), so it looks for a native tool first and then for an MCP tool.
 - Workhorse doesn't send a server name yet. So DWS selects a tool when the tool is `trusted` and its name is
-  `<server>_<name>` (the phase A rule). Rails sets `trusted` only on `gitlab` and `orbit`. DWS does this only on a
-  GitLab version that clears `trusted` on client tools (19.3.6, 19.4.3, and 19.5.0 or later). On any other version a
-  selector selects nothing, and DWS logs it (whether that fails the flow is an open question). DWS also counts no tool
-  as `trusted` on a request that Workhorse didn't handle.
+  `<server>_<name>` (the phase A rule). Rails sets `trusted` only on `gitlab`, `orbit` and, from 19.6, `slack`. DWS does
+  this only on a GitLab version that clears `trusted` on client tools (19.3.6, 19.4.3, and 19.5.0 or later). On any
+  other version a selector selects nothing, and so does a `slack` selector before 19.6. DWS logs it (whether that fails
+  the flow is an open question). DWS also counts no tool as `trusted` on a request that Workhorse didn't handle.
 - If two MCP tools from the instance, or two client tools, arrive with the same name, DWS drops every tool with that
   name and logs it ([!7721](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/7721)).
   Workhorse routes a call by name alone, so DWS can't send a call to one of the tools. A client tool that shares a name
@@ -255,8 +258,8 @@ Phase A ships to the `experimental` version of the flow registry only. Later pha
 
 Phase B ships in two parts. Part 1 needs no Workhorse change. Part 2 needs the Workhorse contract change.
 
-Part 1, no Workhorse change. The selectors use the phase A rule, so `server` is `gitlab` or `orbit` and `name` lists
-exact tool names:
+Part 1, no Workhorse change. The selectors use the phase A rule, so `server` is `gitlab`, `orbit` or `slack` and `name`
+lists exact tool names:
 
 - The `v1` parser reads `tools:`. It rejects a flow that mixes `toolset:` and `tools:` components. It counts an
   `AgentComponent` with neither key as a `toolset:` component and ignores a `tool_name:` step. The check covers the
@@ -272,11 +275,10 @@ Part 2, needs the contract change and Rails side change:
 
 - DWS reads `server`, `origin`, and drops the phase A rule, on a GitLab version that sends them.
 - On a GitLab version that doesn't send them, DWS keeps the phase A rule, with the same version check and the same
-  `trusted` condition. Only `server: gitlab` and `server: orbit` select tools there. Any other selector for an MCP tool
-  selects nothing, and DWS logs it. An instance that hasn't upgraded GitLab keeps its GitLab MCP tools when DWS ships
-  this part.
-- Any server name works. `origin: client` selects local servers, and `origin: instance` covers catalog servers and
-  `slack`.
+  `trusted` condition. Only `server: gitlab`, `server: orbit` and `server: slack` select tools there. Any other selector
+  for an MCP tool selects nothing, and DWS logs it. An instance that hasn't upgraded GitLab keeps its GitLab MCP tools
+  when DWS ships this part.
+- Any server name works. `origin: client` selects local servers, and `origin: instance` also covers catalog servers.
 - DWS drops client tools on a request that Workhorse didn't handle.
 - If `RunMCPTool` carries the server, DWS routes a call by server and name, and the drop rule for MCP tools that share a
   name ends. If it doesn't, the rule stays.
@@ -332,9 +334,9 @@ Part 2, needs the contract change and Rails side change:
   there a native tool and its MCP copy both stay until pairs ship (phase C).
 - The contract change (phase B, part 2) goes in this order: the proto in ai-assist, a new `gopb` version, the bump in
   the GitLab repository (Workhorse), then DWS reads the new fields. A GitLab version without the change sends none of
-  them, so DWS keeps the phase A rule for `gitlab` and `orbit` there. Workhorse only forwards client tools, so the
-  clients (`gitlab-lsp` and the CLI) must also send the name of a local server. A selector for a local server, such as
-  `jira`, selects nothing for users on a client release that doesn't send it.
+  them, so DWS keeps the phase A rule for `gitlab`, `orbit` and `slack` there. Workhorse only forwards client tools, so
+  the clients (`gitlab-lsp` and the CLI) must also send the name of a local server. A selector for a local server, such
+  as `jira`, selects nothing for users on a client release that doesn't send it.
 - A GitLab version that doesn't send `origin` can't select local MCP servers. DWS ships a new major version of each
   shipped `chat` or `chat-partial` config that relies on automatic MCP tools. The new version uses `tools:` and names
   each tool once. DWS resolves each name through the pair, so a session without the GitLab MCP server keeps the native
@@ -360,7 +362,7 @@ Part 2, needs the contract change and Rails side change:
 | Automatic MCP tools per environment                                          | `tools: []` would behave differently in each environment.                                                                                                                                                    |
 | A `deny` entry in the config                                                 | A ban that must hold whatever a config says is an admin rule (see [Decisions](#decisions)).                                                                                                                                |
 | `server: client` for all local servers                                       | A flow couldn't select one local server and not another.                                                                                                                                                     |
-| Derive `server` or `origin` in DWS from `trusted` and the `<server>_` prefix | Not as the end state: a server name can contain `_`, so the prefix is ambiguous. Phase A uses it for `gitlab` and `orbit` only, where Rails sets `trusted`. Phase B keeps it only for older GitLab versions. |
+| Derive `server` or `origin` in DWS from `trusted` and the `<server>_` prefix | Not as the end state: a server name can contain `_`, so the prefix is ambiguous. Phase A uses it for `gitlab`, `orbit` and `slack` only, where Rails sets `trusted`. Phase B keeps it only for older GitLab versions. |
 | Exact names only for `gitlab` and `orbit` until a lock exists                | The syntax would differ by server, which confuses authors. An author who needs a tight tool set lists exact names.                                                                                           |
 | Allow, ask or deny levels for client tools                                   | Admin rules accept only tool names that GitLab knows, so they can't name a client tool. One toggle blocks every client tool.                                                                                 |
 | Reuse `client_injected` instead of adding `origin`                           | DWS reads a missing `client_injected` as `false`, which means from the instance. A missing `origin` counts as `client`.                                                                                      |
