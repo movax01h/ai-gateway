@@ -3,6 +3,7 @@ import importlib.util
 import json
 import keyword
 from collections import Counter
+from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 from typing import (
@@ -53,6 +54,7 @@ from duo_workflow_service.tools.mr_review import SubmitMrReview
 from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_fields import UpdateFormFields
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
+from duo_workflow_service.tools.version_compatibility import strips_client_mcp_trust
 from duo_workflow_service.tools.web_search import web_search_boto_session
 from lib.feature_roots import default_features_dir
 from lib.language_server import LanguageServerVersion
@@ -632,6 +634,14 @@ query($workflowId: AiDuoWorkflowsWorkflowID!, $toolName: String!, $toolCallArgs:
 """
 
 
+@dataclass
+class ToolSelector:
+    """The tools to select from one server, by exact name without the server prefix."""
+
+    server: str
+    names: list[str]
+
+
 class ToolsRegistry:
     _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
     _preapproved_tool_names: set[str]
@@ -776,6 +786,7 @@ class ToolsRegistry:
         self._preapproved_tool_names = set(baseline_preapproved)
         self._denied_tools: set[str] = denied_tool_names
         self._ask_tool_names: set[str] = set(ask_tools or [])
+        self._registered_mcp_tools = registered_mcp_tools
         self._mcp_tool_names = [tool["llm_name"] for tool in registered_mcp_tools]
 
         self._gl_http_client = gl_http_client
@@ -1118,6 +1129,70 @@ class ToolsRegistry:
             are connected to the session).
         """
         return list(self._mcp_tool_names)
+
+    def select_tools(self, selectors: list[ToolSelector]) -> list[str]:
+        """Return the registered name of each tool that the selectors name, without repeats.
+
+        Under ``server: gitlab`` a name picks an enabled native tool first, then an MCP tool. There is no pair data
+        yet, so a native tool wins when both exist. A native tool that is not enabled for the flow, whatever the
+        reason, counts as no match, so the name falls through to the MCP lookup. A name that matches no tool is logged
+        and skipped.
+
+        The MCP lookup takes a trusted tool whose wire name is ``<server>_<name>``. Workhorse sends no server name, so
+        the prefix stands in for it. That holds only where Workhorse clears ``trusted`` on client tools, so on any
+        other GitLab version the MCP lookup selects nothing. The native lookup needs no version check.
+        """
+        selected: list[str] = []
+        for selector in selectors:
+            mcp_names = []
+            for name in selector.names:
+                if (
+                    selector.server == "gitlab"
+                    and name in self._enabled_tools
+                    and name not in self._mcp_tool_names
+                ):
+                    selected.append(name)
+                else:
+                    mcp_names.append(name)
+            selected += self._select_mcp_tools(selector.server, mcp_names)
+        return list(dict.fromkeys(selected))
+
+    def _select_mcp_tools(self, server: str, names: list[str]) -> list[str]:
+        if not names:
+            return []
+
+        if not strips_client_mcp_trust():
+            log.warning(
+                "MCP lookup of a tool selector selects nothing: GitLab does not clear trust on client MCP tools",
+                server=server,
+                names=names,
+            )
+            return []
+
+        trusted = {
+            tool["original_name"]: tool["llm_name"]
+            for tool in self._registered_mcp_tools
+            if tool["trusted"]
+        }
+        selected: list[str] = []
+        for name in names:
+            llm_name = trusted.get(f"{server}_{name}")
+            if llm_name is None:
+                # Info, like toolset(): a native tool that a flow lists but its environment drops is expected.
+                log.info(
+                    "Tool selector name matches no enabled tool",
+                    server=server,
+                    tool_name=name,
+                    # Only gitlab names also cover native tools, so any other server has no native reason to report.
+                    reason=(
+                        self._unavailable_reason(name)
+                        if server == "gitlab"
+                        else "unknown"
+                    ),
+                )
+            else:
+                selected.append(llm_name)
+        return selected
 
     def toolset(
         self,
