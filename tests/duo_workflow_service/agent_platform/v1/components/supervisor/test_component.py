@@ -4,16 +4,17 @@ from unittest.mock import Mock
 
 import pytest
 from langchain_core.messages import AIMessage
-from langgraph.graph import END
+from langgraph.graph import END, StateGraph
 from pydantic import ValidationError
 
+from duo_workflow_service.agent_platform.constants import DEFAULT_ASSUMED_DELEGATIONS
 from duo_workflow_service.agent_platform.core.inbox import Address, Claimant
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponentBase,
     MaxCyclesConfig,
     RoutingError,
 )
-from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
+from duo_workflow_service.agent_platform.v1.state import FlowState, FlowStateKeys
 from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
 from duo_workflow_service.tracking.subagent_delegation import (
     DelegationRejectionReason,
@@ -969,3 +970,90 @@ class TestSupervisorIdenticalToolCallLimit:
 
         call_kwargs = mock_tool_node_cls.call_args[1]
         assert call_kwargs["identical_call_max_wrap_up_retries"] == expected
+
+
+class _SizedSubagent:
+    """Subagent stub whose ``attach`` adds ``nodes`` real nodes and whose cycle budget is ``cycles``."""
+
+    def __init__(self, name: str, nodes: int, cycles: int):
+        self.name = name
+        self.description = "A test subagent."
+        self._nodes = nodes
+        self._cycles = cycles
+
+    def bind_to_supervisor(self, **_kwargs):
+        """No-op: the stub needs no key factories."""
+
+    def max_iterations(self) -> int:
+        return self._cycles
+
+    def attach(self, graph: StateGraph, router) -> None:
+        for i in range(self._nodes):
+            graph.add_node(f"{self.name}_n{i}", lambda _state: {})
+
+
+class TestSupervisorGraphSteps:
+    """The step count adds ``max_delegations`` runs of the slowest subagent to the supervisor's own loop."""
+
+    SLOWEST_PASS = (
+        4 * 5
+    )  # developer: 4 nodes x 5 cycles. The tester passes in 3 x 2 = 6.
+
+    @pytest.fixture(name="subagents")
+    def subagents_fixture(self, developer_name, tester_name):
+        return {
+            developer_name: _SizedSubagent(developer_name, nodes=4, cycles=5),
+            tester_name: _SizedSubagent(tester_name, nodes=3, cycles=2),
+        }
+
+    @staticmethod
+    def _attach(supervisor):
+        graph = StateGraph(FlowState)
+        supervisor.attach(graph, Mock())
+        return len(graph.nodes)
+
+    def _steps(self, make_supervisor, subagents, max_delegations):
+        supervisor = make_supervisor(
+            subagent_components=subagents, max_delegations=max_delegations
+        )
+        return supervisor.graph_steps(self._attach(supervisor))
+
+    def test_each_delegation_adds_the_slowest_subagent_pass(
+        self, make_supervisor, subagents
+    ):
+        one = self._steps(make_supervisor, subagents, 1)
+        three = self._steps(make_supervisor, subagents, 3)
+
+        assert three - one == 2 * self.SLOWEST_PASS
+
+    def test_without_max_delegations_it_assumes_the_default(
+        self, make_supervisor, subagents
+    ):
+        one = self._steps(make_supervisor, subagents, 1)
+        unset = self._steps(make_supervisor, subagents, None)
+
+        assert unset - one == (DEFAULT_ASSUMED_DELEGATIONS - 1) * self.SLOWEST_PASS
+
+    @pytest.mark.parametrize("max_delegations", [5, None])
+    def test_the_supervisors_own_cycles_cap_the_delegations(
+        self, make_supervisor, subagents, max_delegations
+    ):
+        supervisor = make_supervisor(
+            subagent_components=subagents, max_delegations=max_delegations, max_cycles=2
+        )
+        added = self._attach(supervisor)
+        own_nodes = added - (4 + 3)
+
+        assert supervisor.graph_steps(added) == own_nodes * 2 + 2 * self.SLOWEST_PASS
+
+    def test_the_own_loop_counts_every_node_except_the_subagents(
+        self, make_supervisor, subagents
+    ):
+        supervisor = make_supervisor(subagent_components=subagents, max_delegations=1)
+        added = self._attach(supervisor)
+        own_nodes = added - (4 + 3)
+
+        assert (
+            supervisor.graph_steps(added)
+            == own_nodes * supervisor.max_iterations() + self.SLOWEST_PASS
+        )

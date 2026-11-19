@@ -102,6 +102,27 @@ class BaseComponent(BaseModel, ABC):
         return self
 
     @abstractmethod
+    def max_iterations(self) -> int:
+        """Return the most times one pass through this component runs its attached nodes.
+
+        ``1`` for a straight-line topology. A component whose ``attach`` adds a loop returns the bound on that loop,
+        for example the cycle budget of an agent.
+
+        This is a loop bound, not a node count. ``FlowGraphBuilder`` counts the nodes that ``attach`` adds to the
+        graph and multiplies by this value. A node added to ``attach`` counts without a change here. The method is
+        abstract because a default of ``1`` would hide a loop and the flow would hit LangGraph's step limit early.
+        """
+
+    def graph_steps(self, added_nodes: int) -> int:
+        """Return the most graph steps one pass through this component runs.
+
+        ``added_nodes`` is the number of nodes that ``attach`` added to the graph. The default multiplies it by
+        ``max_iterations()``. A component that nests other components, such as a supervisor, overrides this to
+        count the nested ones with their own bounds.
+        """
+        return added_nodes * self.max_iterations()
+
+    @abstractmethod
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         pass
 
@@ -119,6 +140,14 @@ class EndComponent(BaseComponent):
     # The status the terminal writes. ``COMPLETED`` ends the session; an
     # environment that ends only the turn seeds ``IDLE`` instead.
     status: WorkflowStatusEnum = WorkflowStatusEnum.COMPLETED
+
+    @override
+    def max_iterations(self) -> int:
+        """Run once.
+
+        The builder counts the terminals as ``END_NODE_STEPS``.
+        """
+        return 1
 
     @override
     def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
@@ -139,6 +168,14 @@ class EndComponent(BaseComponent):
 
 
 class AbortComponent(BaseComponent):
+    @override
+    def max_iterations(self) -> int:
+        """Run once.
+
+        The builder counts the terminals as ``END_NODE_STEPS``.
+        """
+        return 1
+
     def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
         return "abort_flow"
 

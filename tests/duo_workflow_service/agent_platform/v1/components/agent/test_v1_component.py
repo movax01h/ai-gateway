@@ -3129,6 +3129,20 @@ class TestAgentComponentMaxCycles:
         assert "cycle_count" in subkeys
 
 
+class TestAgentComponentMaxIterations:
+    """The agent loop bound that the flow's recursion limit is derived from."""
+
+    @pytest.mark.parametrize(
+        "max_cycles,expected",
+        [(7, 7), (MaxCyclesConfig(threshold=9), 9)],
+        ids=["plain_int", "nested_form"],
+    )
+    def test_max_iterations_is_the_cycle_budget(
+        self, make_agent_component, max_cycles, expected
+    ):
+        assert make_agent_component(max_cycles=max_cycles).max_iterations() == expected
+
+
 class TestAgentComponentMaxCyclesWarningOffset:
     """Test suite for the `iteration_warning_offset` sub-field of `max_cycles` (nested MaxCyclesConfig form)."""
 

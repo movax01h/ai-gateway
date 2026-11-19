@@ -170,6 +170,18 @@ class TestOneOffComponentInitialization:
         ]
 
 
+class TestOneOffComponentMaxIterations:
+    def test_max_iterations_is_max_correction_attempts(
+        self, one_off_component, max_correction_attempts
+    ):
+        assert one_off_component.max_iterations() == max_correction_attempts
+
+    def test_max_iterations_is_at_least_one(self, one_off_component):
+        one_off_component.max_correction_attempts = 0
+
+        assert one_off_component.max_iterations() == 1
+
+
 class TestOneOffComponentEntryHook:
     """Test suite for OneOffComponent entry hook."""
 

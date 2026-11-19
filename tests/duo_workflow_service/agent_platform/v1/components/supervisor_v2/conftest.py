@@ -358,7 +358,9 @@ class MockSubagentComponent:
     def __init__(self, name: str, description: str = "A test subagent."):
         self.name = name
         self.description = description
-        self.compile_as_subagent = Mock(return_value=Mock(name=f"{name}_compiled"))
+        self.compile_as_subagent = Mock(
+            return_value=Mock(name=f"{name}_compiled", nodes={})
+        )
 
 
 class RoutingMockSubagentComponent:

@@ -9,6 +9,8 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.agent_platform.v1.flows.graph_builder import (
     FlowGraph,
     FlowGraphBuilder,
+    declared_edges,
+    reachable,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 
@@ -63,10 +65,10 @@ class ChatGraphBuilder(FlowGraphBuilder):
                 "Can not build flow graph: entry_point is not defined in the flow config."
             )
 
-        edges = _declared_edges(flow_config.routers)
-        can_end = _reachable("end", _reversed(edges))
+        edges = declared_edges(flow_config.routers)
+        can_end = reachable("end", _reversed(edges))
         stranded = sorted(
-            _reachable(entry_point, edges) - can_end - _TERMINAL_COMPONENT_NAMES
+            reachable(entry_point, edges) - can_end - _TERMINAL_COMPONENT_NAMES
         )
         if stranded:
             raise ValueError(
@@ -79,32 +81,9 @@ class ChatGraphBuilder(FlowGraphBuilder):
         super()._build_routers(flow_config, components, graph)
 
 
-def _declared_edges(routers: list[dict]) -> dict[str, set[str]]:
-    edges: dict[str, set[str]] = {}
-    for router in routers:
-        if "condition" in router:
-            targets = set(router["condition"]["routes"].values())
-        else:
-            targets = {router["to"]}
-        edges.setdefault(router["from"], set()).update(targets)
-    return edges
-
-
 def _reversed(edges: dict[str, set[str]]) -> dict[str, set[str]]:
     reversed_edges: dict[str, set[str]] = {}
     for source, targets in edges.items():
         for target in targets:
             reversed_edges.setdefault(target, set()).add(source)
     return reversed_edges
-
-
-def _reachable(start: str, edges: dict[str, set[str]]) -> set[str]:
-    seen: set[str] = set()
-    frontier = [start]
-    while frontier:
-        name = frontier.pop()
-        if name in seen:
-            continue
-        seen.add(name)
-        frontier.extend(edges.get(name, ()))
-    return seen

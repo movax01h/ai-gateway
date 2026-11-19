@@ -151,6 +151,14 @@ class HumanInputComponent(BaseComponent):
         return self
 
     @override
+    def max_iterations(self) -> int:
+        """Run the request and fetch nodes once.
+
+        A resumed run starts with a new step count.
+        """
+        return 1
+
+    @override
     def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
         return f"{self.name}{NODE_ROLE_SEPARATOR}request"
 

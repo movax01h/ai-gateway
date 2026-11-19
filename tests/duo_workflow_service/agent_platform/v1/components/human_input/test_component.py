@@ -69,6 +69,9 @@ class TestHumanInputComponent:
         assert cancelled_turn_output.target == "context"
         assert cancelled_turn_output.subkeys == ["inputs", "cancelled_turn"]
 
+    def test_max_iterations_is_one(self, human_input_component):
+        assert human_input_component.max_iterations() == 1
+
     def test_entry_hook_returns_correct_node_name(self, human_input_component):
         """Test that __entry_hook__ returns the component's request node name."""
         assert human_input_component.__entry_hook__() == "test_human_input#request"

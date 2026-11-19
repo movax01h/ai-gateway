@@ -7,6 +7,7 @@ from langgraph.graph import StateGraph
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from duo_workflow_service.agent_platform.constants import (
+    DEFAULT_ASSUMED_DELEGATIONS,
     INTERACTIVE_ENVIRONMENTS,
     NODE_ROLE_SEPARATOR,
 )
@@ -263,6 +264,9 @@ class SupervisorAgentComponent(AgentComponentBase):
     # therefore owns a distinct DelegateTask subclass.  PrivateAttr keeps it out of
     # Pydantic's field schema while allowing normal instance assignment.
     _delegate_task_cls: type = PrivateAttr()
+
+    # Nodes that each subagent added to the graph in ``attach``, read by ``graph_steps``.
+    _subagent_nodes: dict[str, int] = PrivateAttr(default_factory=dict)
 
     @field_validator("max_delegations")
     @classmethod
@@ -639,6 +643,25 @@ class SupervisorAgentComponent(AgentComponentBase):
             web_search=web_search,
         )
 
+    @override
+    def graph_steps(self, added_nodes: int) -> int:
+        """Count the supervisor's own loop, plus one run of the slowest subagent for each delegation.
+
+        The subagent nodes join this graph, so their steps share the flow's step count. Each delegation starts the
+        subagent with a fresh ``max_cycles`` budget. Without ``max_delegations`` the count assumes
+        ``DEFAULT_ASSUMED_DELEGATIONS``. The supervisor delegates at most once per cycle, so its own ``max_cycles``
+        also caps the count.
+        """
+        passes = [
+            self._subagent_nodes.get(name, 0) * subagent.max_iterations()
+            for name, subagent in self.subagent_components.items()
+        ]
+        own_nodes = added_nodes - sum(self._subagent_nodes.values())
+        delegations = min(
+            self.max_delegations or DEFAULT_ASSUMED_DELEGATIONS, self.max_iterations()
+        )
+        return own_nodes * self.max_iterations() + delegations * max(passes, default=0)
+
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         """Attach the supervisor and all subagent subgraphs to the graph.
 
@@ -834,4 +857,6 @@ class SupervisorAgentComponent(AgentComponentBase):
                 ),
                 cycle_count_key=self._subagent_cycle_count_key_for(agent_name),
             )
+            nodes_before = len(graph.nodes)
             subagent.attach(graph, subagent_router)
+            self._subagent_nodes[agent_name] = len(graph.nodes) - nodes_before

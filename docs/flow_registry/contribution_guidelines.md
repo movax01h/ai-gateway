@@ -242,6 +242,17 @@ Every component must implement the following methods:
    - Property that returns the name of the LangGraph node serving as the entry point
    - Used by the framework to connect components in the flow
 
+1. **`max_iterations(self) -> int`**
+   - Returns the most times one pass through the component runs its attached nodes
+   - Return `1` when `attach` adds a straight line of nodes. Return the loop bound when `attach` adds a loop, for
+     example the `max_cycles` of an agent
+   - `FlowGraphBuilder` multiplies the nodes that `attach` adds by this value, and sums the result over all components
+     to derive the LangGraph step limit of the flow
+   - Do not return a node count. A node that you add to `attach` counts without a change here
+   - A component that runs other components, such as a supervisor, can override `graph_steps(self, added_nodes: int)`
+     to count them with their own bounds. The default is `added_nodes * max_iterations()`
+   - This method exists in Flow Registry v1 only. Experimental components do not implement it
+
 #### Required Attributes
 
 Components must override these class attributes:
@@ -426,6 +437,9 @@ class MyComponentNode:
         return state
 
 class MyComponent(BaseComponent):
+    def max_iterations(self) -> int:
+        return 1
+
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         node = MyComponentNode(self.name, self.config)
         graph.add_node(f"{self.name}#main", node.execute)

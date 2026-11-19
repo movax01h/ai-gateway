@@ -94,6 +94,8 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     def mock_component(self, name: str):
         mock_component = MagicMock(spec=BaseComponent)
         mock_component.__entry_hook__.return_value = f"{name}_entry_node"
+        mock_component.max_iterations.return_value = 1
+        mock_component.graph_steps.side_effect = lambda added_nodes: added_nodes
         return mock_component
 
     @contextmanager
@@ -119,6 +121,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     ):
         # Create mock StateGraph and compiled graph
         mock_state_graph = Mock(spec=StateGraph)
+        mock_state_graph.nodes = {}
         mock_compiled_graph = Mock()
 
         # Mock the compiled graph's astream method
@@ -1815,6 +1818,19 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         state = graph.aupdate_state.call_args[0][1]
         assert state["ui_chat_log"].value[0]["content"] == "Safe message only"
 
+    def test_recursion_limit_comes_from_the_graph_the_builder_built(
+        self, flow_instance
+    ):
+        """The limit is the flat constant until compile, then the one the builder derives from the graph."""
+        builder = MagicMock()
+        builder.derived_recursion_limit.return_value = 1234
+        assert flow_instance._recursion_limit() == RECURSION_LIMIT
+
+        with patch.object(flow_instance, "_graph_builder", return_value=builder):
+            flow_instance._compile("goal", MagicMock(), MagicMock())
+
+        assert flow_instance._recursion_limit() == 1234
+
     @pytest.mark.asyncio
     async def test_handle_compile_and_run_exception_converts_graph_recursion_error(
         self, flow_instance
@@ -1840,7 +1856,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         wrapped = exc_info.value.original_exception
         assert isinstance(wrapped, NotifiableAgentException)
-        assert str(RECURSION_LIMIT) in wrapped.internal_detail
+        assert str(flow_instance._recursion_limit()) in wrapped.internal_detail
         assert (
             wrapped.ui_message
             == "The workflow reached its maximum step limit and could not complete. "

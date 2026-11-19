@@ -31,6 +31,10 @@ class ConcreteComponent(BaseComponent):
     )
     supported_environments = ("platform", "local")
 
+    def max_iterations(self) -> int:
+        """Mock implementation of abstract method."""
+        return 1
+
     def attach(self, graph: StateGraph, router: RouterProtocol):
         """Mock implementation of abstract method."""
 
@@ -45,6 +49,10 @@ class ComponentWithoutOutputs(BaseComponent):
     _allowed_input_targets = ("context",)
     _outputs = ()
     supported_environments = ("platform",)
+
+    def max_iterations(self) -> int:
+        """Mock implementation of abstract method."""
+        return 1
 
     def attach(self, graph: StateGraph, router: RouterProtocol):
         """Mock implementation of abstract method."""
@@ -310,6 +318,9 @@ class TestEndComponent:
         """Test that __entry_hook__ returns 'terminate_flow'."""
         assert end_component.__entry_hook__() == "terminate_flow"
 
+    def test_max_iterations_is_one(self, end_component):
+        assert end_component.max_iterations() == 1
+
     def test_attach_adds_node_and_edge(self, end_component):
         """Test that attach method adds node and edge to graph."""
         mock_graph = Mock(spec=StateGraph)
@@ -407,6 +418,9 @@ class TestAbortComponent:
     def test_entry_hook_returns_abort_flow(self, abort_component):
         """Test that __entry_hook__ returns 'abort_flow'."""
         assert abort_component.__entry_hook__() == "abort_flow"
+
+    def test_max_iterations_is_one(self, abort_component):
+        assert abort_component.max_iterations() == 1
 
     def test_attach_adds_node_and_edge(self, abort_component):
         """Test that attach method adds node and edge to graph."""

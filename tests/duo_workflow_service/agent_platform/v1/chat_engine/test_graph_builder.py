@@ -8,6 +8,9 @@ from langgraph.graph import StateGraph
 
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
+from duo_workflow_service.agent_platform.constants import (
+    END_NODE_STEPS,
+)
 from duo_workflow_service.agent_platform.v1.catalog import CatalogItems
 from duo_workflow_service.agent_platform.v1.chat_engine.graph_builder import (
     ChatGraphBuilder,
@@ -33,6 +36,10 @@ _PARENT_MODULE = "duo_workflow_service.agent_platform.v1.flows.graph_builder"
 
 class _NodeComponent(BaseComponent):
     """One real node per component; the router owns the edge out of it."""
+
+    @override
+    def max_iterations(self) -> int:
+        return 1
 
     @override
     def __entry_hook__(self) -> str:
@@ -281,6 +288,9 @@ async def test_a_completed_chat_partial_config_builds_and_ends_its_turn(builder)
 
     with _node_components():
         graph = builder.build(authored.to_config())
+
+    # The chat builder overrides `_build_routers`, so check that it still counts the nodes.
+    assert builder.derived_recursion_limit() == 1 + END_NODE_STEPS
 
     result = await graph.compile().ainvoke(
         FlowState(

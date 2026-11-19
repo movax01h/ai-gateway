@@ -112,6 +112,10 @@ class DeterministicStepComponent(BaseComponent):
         return data
 
     @override
+    def max_iterations(self) -> int:
+        return 1
+
+    @override
     def __entry_hook__(self) -> str:
         return f"{self.name}{NODE_ROLE_SEPARATOR}deterministic_step"
 

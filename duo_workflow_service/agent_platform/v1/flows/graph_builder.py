@@ -7,6 +7,10 @@ from langgraph.graph import StateGraph
 
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
+from duo_workflow_service.agent_platform.constants import (
+    END_NODE_STEPS,
+    RECURSION_LIMIT,
+)
 from duo_workflow_service.agent_platform.core.inbox import RunInbox
 from duo_workflow_service.agent_platform.utils.flow import (
     filter_pre_approvals_by_policy,
@@ -19,6 +23,9 @@ from duo_workflow_service.agent_platform.v1.components.base import (
     AbortComponent,
     BaseComponent,
     EndComponent,
+)
+from duo_workflow_service.agent_platform.v1.components.human_input import (
+    HumanInputComponent,
 )
 from duo_workflow_service.agent_platform.v1.components.supervisor.component import (
     extract_subagent_names,
@@ -34,7 +41,7 @@ from duo_workflow_service.tools import Toolset
 from lib.events import GLReportingEventContext
 from lib.internal_events.client import InternalEventsClient
 
-__all__ = ["FlowGraph", "FlowGraphBuilder"]
+__all__ = ["FlowGraph", "FlowGraphBuilder", "declared_edges", "reachable"]
 
 
 # The graph a flow compiles to. Its runtime context is the run's inbox (see `build`), but a component's `attach` takes
@@ -87,6 +94,9 @@ class FlowGraphBuilder:
         # Per-run, like the tools registry: the items belong to the request, not the
         # config. `Flow.__init__` normalizes a request without items to `CatalogItems()`.
         self._catalog_items = catalog_items
+        # Set by `build`, read by `derived_recursion_limit`.
+        self._graph_steps = 0
+        self._loops_without_human_input = False
 
     def build(self, flow_config: FlowConfig) -> FlowGraph:
         """Build the graph for ``flow_config``, entry point set, ready to compile."""
@@ -97,13 +107,34 @@ class FlowGraphBuilder:
 
         # The run's inbox arrives as runtime context, which a node reads to claim the messages it receives.
         graph = StateGraph(FlowState, context_schema=RunInbox)
+        self._graph_steps = 0
         components = self._build_components(flow_config, graph)
         self._build_routers(flow_config, components, graph)
+        self._loops_without_human_input = _has_loop_without_human_input(
+            flow_config.routers, components
+        )
 
         entry_component = components[flow_config.flow.entry_point]
         graph.set_entry_point(entry_component.__entry_hook__())
 
         return graph
+
+    def derived_recursion_limit(self) -> int:
+        """Return the LangGraph step limit for the graph this builder last built.
+
+        The sum, over every attached component, of its ``graph_steps()`` for the nodes it added, plus
+        ``END_NODE_STEPS``. There is no ceiling: the limit follows the budgets that the flow declares. It reads the
+        real components, so a node added to a component's ``attach`` counts without a change here. Call it after
+        ``build``.
+
+        It counts one pass through each component. A loop through a ``HumanInputComponent`` fits, because the run
+        pauses there and a resumed run starts with a new step count. A router loop without one can run any number of
+        times, so nothing bounds it. A flow with such a loop keeps at least ``RECURSION_LIMIT``.
+        """
+        derived = END_NODE_STEPS + self._graph_steps
+        if self._loops_without_human_input:
+            return max(RECURSION_LIMIT, derived)
+        return derived
 
     def _build_components(
         self, flow_config: FlowConfig, graph: FlowGraph
@@ -299,7 +330,12 @@ class FlowGraphBuilder:
                 to_comp = components[router_config["to"]]
                 router = Router(from_component=from_comp, to_component=to_comp)
 
+            # `Router.attach` calls `from_comp.attach(graph, router)`, so the node delta
+            # is exactly what that component added.
+            nodes_before = len(graph.nodes)
             router.attach(graph)
+            added_nodes = len(graph.nodes) - nodes_before
+            self._graph_steps += from_comp.graph_steps(added_nodes)
 
     def _parse_toolset(self, toolset_config: list, flow_config: FlowConfig) -> Toolset:
         """Parse toolset configuration and extract tool options.
@@ -361,3 +397,52 @@ class FlowGraphBuilder:
         abort_component.attach(graph)
 
         return {"end": end_component, "abort": abort_component}
+
+
+def declared_edges(routers: list[dict]) -> dict[str, set[str]]:
+    """Return the edges that ``routers`` declare, as a map from source component name to target component names."""
+    edges: dict[str, set[str]] = {}
+    for router in routers:
+        if "condition" in router:
+            targets = set(router["condition"]["routes"].values())
+        else:
+            targets = {router["to"]}
+        edges.setdefault(router["from"], set()).update(targets)
+    return edges
+
+
+def reachable(start: str, edges: dict[str, set[str]]) -> set[str]:
+    """Return the component names that ``start`` reaches through ``edges``, ``start`` included.
+
+    The loop check needs ``start`` in the result, because a router from a component to itself is a loop.
+    """
+    seen: set[str] = set()
+    frontier = [start]
+    while frontier:
+        name = frontier.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        frontier.extend(edges.get(name, ()))
+    return seen
+
+
+def _has_loop_without_human_input(
+    routers: list[dict], components: dict[str, BaseComponent]
+) -> bool:
+    """Return True when the routers form a loop that passes through no ``HumanInputComponent``."""
+    pauses = {
+        name
+        for name, component in components.items()
+        if isinstance(component, HumanInputComponent)
+    }
+    edges = {
+        source: targets - pauses
+        for source, targets in declared_edges(routers).items()
+        if source not in pauses
+    }
+    return any(
+        source in reachable(target, edges)
+        for source, targets in edges.items()
+        for target in targets
+    )

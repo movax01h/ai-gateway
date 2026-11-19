@@ -11,15 +11,23 @@ from typing import Any, Callable, Optional, override
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
+from duo_workflow_service.agent_platform.constants import (
+    END_NODE_STEPS,
+    RECURSION_LIMIT,
+)
 from duo_workflow_service.agent_platform.core.inbox import RunInbox
 from duo_workflow_service.agent_platform.v1.catalog import CatalogItems
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
     RouterProtocol,
+)
+from duo_workflow_service.agent_platform.v1.components.human_input import (
+    HumanInputComponent,
 )
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.agent_platform.v1.flows.graph_builder import FlowGraphBuilder
@@ -51,6 +59,8 @@ class _ComponentClassStub:
 def _component_stub(name: str) -> MagicMock:
     component = MagicMock(spec=BaseComponent)
     component.__entry_hook__.return_value = f"{name}_entry_node"
+    component.max_iterations.return_value = 1
+    component.graph_steps.side_effect = lambda added_nodes: added_nodes
     return component
 
 
@@ -60,6 +70,10 @@ class _NodeComponent(BaseComponent):
     Mirrors what every shipped component does in ``attach``: add its node, then let
     the router own the conditional edge out of it.
     """
+
+    @override
+    def max_iterations(self) -> int:
+        return 1
 
     @override
     def __entry_hook__(self) -> str:
@@ -72,6 +86,25 @@ class _NodeComponent(BaseComponent):
         graph.add_node(self.__entry_hook__(), lambda _state: {})
         if router is not None:
             graph.add_conditional_edges(self.__entry_hook__(), router.route)
+
+
+class _LoopComponent(_NodeComponent):
+    """Two real nodes that one pass runs up to three times, like an agent's ``agent`` and ``tools``."""
+
+    @override
+    def max_iterations(self) -> int:
+        return 3
+
+    @override
+    def attach(
+        self, graph: StateGraph, router: Optional[RouterProtocol] = None
+    ) -> None:
+        tools = f"{self.name}_tools"
+        graph.add_node(self.__entry_hook__(), lambda _state: {})
+        graph.add_node(tools, lambda _state: {})
+        graph.add_edge(self.__entry_hook__(), tools)
+        if router is not None:
+            graph.add_conditional_edges(tools, router.route)
 
 
 def _config(**overrides: Any) -> FlowConfig:
@@ -152,6 +185,7 @@ class TestFlowGraphBuilder:
     @pytest.fixture(name="mock_graph")
     def mock_graph_fixture(self, mock_state_graph_class) -> Mock:
         graph = Mock(spec=StateGraph)
+        graph.nodes = {}
         mock_state_graph_class.return_value = graph
         return graph
 
@@ -876,3 +910,153 @@ class TestFlowGraphBuilder:
             "agent_entry_node",
             "reviewer_entry_node",
         ]
+
+    def test_derived_recursion_limit_sums_components_and_does_not_carry_over(
+        self, builder
+    ):
+        config = _config(
+            components=[
+                {"name": "agent", "type": "LoopComponent"},
+                {"name": "step", "type": "NodeComponent"},
+            ],
+            routers=[{"from": "agent", "to": "step"}, {"from": "step", "to": "end"}],
+        )
+
+        with _component_classes(
+            {"LoopComponent": _LoopComponent, "NodeComponent": _NodeComponent}
+        ):
+            builder.build(config)
+            builder.build(config)
+
+        assert builder.derived_recursion_limit() == 2 * 3 + 1 + END_NODE_STEPS
+
+    def test_derived_recursion_limit_uses_the_components_graph_steps(self, builder):
+        """A component that nests others counts them in its own ``graph_steps``."""
+        with (
+            _component_classes({"NodeComponent": _NodeComponent}),
+            patch.object(_NodeComponent, "graph_steps", return_value=1234),
+        ):
+            builder.build(
+                _config(components=[{"name": "agent", "type": "NodeComponent"}])
+            )
+
+        assert builder.derived_recursion_limit() == 1234 + END_NODE_STEPS
+
+    @pytest.mark.asyncio
+    async def test_derived_limit_is_exactly_enough_for_a_straight_flow(self, builder):
+        """The limit lets a flow run its last node, and one step less does not.
+
+        LangGraph raises when a run needs as many steps as the limit, which is why the
+        derived limit carries ``END_NODE_STEPS``.
+        """
+        config = _config(
+            components=[
+                {"name": "a", "type": "NodeComponent"},
+                {"name": "b", "type": "NodeComponent"},
+                {"name": "c", "type": "NodeComponent"},
+            ],
+            flow={"entry_point": "a"},
+            routers=[
+                {"from": "a", "to": "b"},
+                {"from": "b", "to": "c"},
+                {"from": "c", "to": "end"},
+            ],
+        )
+        with _component_classes({"NodeComponent": _NodeComponent}):
+            graph = builder.build(config).compile()
+        limit = builder.derived_recursion_limit()
+
+        await graph.ainvoke({}, {"recursion_limit": limit})
+        with pytest.raises(GraphRecursionError):
+            await graph.ainvoke({}, {"recursion_limit": limit - 1})
+
+    @pytest.mark.parametrize(
+        "routers",
+        [
+            [
+                {
+                    "from": "a",
+                    "condition": {
+                        "input": "context:a.execution_result",
+                        "routes": {"success": "b", "default_route": "a"},
+                    },
+                },
+                {"from": "b", "to": "end"},
+            ],
+            [
+                {"from": "a", "to": "b"},
+                {
+                    "from": "b",
+                    "condition": {
+                        "input": "context:b.execution_result",
+                        "routes": {"success": "end", "default_route": "a"},
+                    },
+                },
+            ],
+        ],
+        ids=["retry_loop", "loop_over_two_components"],
+    )
+    def test_a_loop_without_human_input_keeps_the_flat_limit(self, builder, routers):
+        """Nothing bounds how often such a loop runs, so the derived limit cannot cover it."""
+        with _component_classes({"NodeComponent": _NodeComponent}):
+            builder.build(
+                _config(
+                    components=[
+                        {"name": "a", "type": "NodeComponent"},
+                        {"name": "b", "type": "NodeComponent"},
+                    ],
+                    flow={"entry_point": "a"},
+                    routers=routers,
+                )
+            )
+
+        assert builder.derived_recursion_limit() == RECURSION_LIMIT
+
+    def test_a_loop_above_the_flat_limit_keeps_the_derived_limit(self, builder):
+        with (
+            _component_classes({"NodeComponent": _NodeComponent}),
+            patch.object(_NodeComponent, "graph_steps", return_value=1234),
+        ):
+            builder.build(
+                _config(
+                    components=[{"name": "agent", "type": "NodeComponent"}],
+                    routers=[{"from": "agent", "to": "agent"}],
+                )
+            )
+
+        assert builder.derived_recursion_limit() == 1234 + END_NODE_STEPS
+
+    def test_a_loop_through_human_input_keeps_the_derived_limit(self, builder):
+        """The run pauses at human input, and a resumed run starts with a new step count."""
+        human = MagicMock(spec=HumanInputComponent)
+        human.__entry_hook__.return_value = "human_entry_node"
+        human.graph_steps.side_effect = lambda added_nodes: added_nodes
+        human.inputs = []  # The conditional router revalidates its targets.
+
+        with _component_classes(
+            {
+                "NodeComponent": _NodeComponent,
+                "HumanInputComponent": _ComponentClassStub(human),
+            }
+        ):
+            builder.build(
+                _config(
+                    components=[
+                        {"name": "agent", "type": "NodeComponent"},
+                        {"name": "human", "type": "HumanInputComponent"},
+                    ],
+                    routers=[
+                        {"from": "agent", "to": "human"},
+                        {
+                            "from": "human",
+                            "condition": {
+                                "input": "context:human.status",
+                                "routes": {"done": "end", "default_route": "agent"},
+                            },
+                        },
+                    ],
+                )
+            )
+
+        # The stub attaches no nodes, so only `agent` counts.
+        assert builder.derived_recursion_limit() == 1 + END_NODE_STEPS
