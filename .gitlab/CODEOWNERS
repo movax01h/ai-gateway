@@ -38,6 +38,10 @@
 /ai/features/utilities/generate_commit_message @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
 /ai/features/utilities/generate_description @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
 
+# Model configuration check prompt (self-hosted connection test) is co-owned by AI Model Services
+/ai_gateway/prompts/definitions/model_configuration/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/custom-models
+/ai/features/model_configuration/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/custom-models
+
 # Workflow session prompts under ai/features/workflow/ are co-owned by Agent Observability (see work item 90)
 /ai/features/workflow/generate_session_title/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
 /ai/features/workflow/summarize_duo_workflow/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
@@ -134,6 +138,10 @@
 # Legacy non-agentic Duo features
 /ai/features/utilities/generate_commit_message @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
 /ai/features/utilities/generate_description @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
+
+# Model configuration check prompt (self-hosted connection test)
+/ai_gateway/prompts/definitions/model_configuration/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/custom-models
+/ai/features/model_configuration/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/custom-models
 
 # Workflow session prompts under ai/features/workflow/
 /ai/features/workflow/generate_session_title/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
