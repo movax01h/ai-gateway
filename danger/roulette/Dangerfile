@@ -10,8 +10,8 @@ MARKDOWN
 
 CATEGORY_TABLE = <<MARKDOWN
 
-| Category | Reviewer | Maintainer |
-| -------- | -------- | ---------- |
+| Category | Maintainer |
+| -------- | ---------- |
 MARKDOWN
 
 POST_TABLE_MESSAGE = <<MARKDOWN
@@ -31,12 +31,7 @@ MARKDOWN
 
 NO_SUGGESTIONS = <<MARKDOWN
 
-There are no reviewer and maintainer suggestions for the changes in this MR.
-MARKDOWN
-
-TABLE_HEADER = <<~MARKDOWN
-  | Reviewer | Maintainer |
-  | -------- | ---------- |
+There are no maintainer suggestions for the changes in this MR.
 MARKDOWN
 
 UNKNOWN_FILES_MESSAGE = <<MARKDOWN
@@ -139,11 +134,11 @@ def note_for_spin_role(spin, role, category)
   note || (template % { role: role })
 end
 
+# Categories with an optional maintainer, such as analytics instrumentation, need a reviewer instead.
 def markdown_row_for_spin(category, spin)
-  maintainer_note = note_for_spin_role(spin, :maintainer, category)
-  reviewer_note = note_for_spin_role(spin, :reviewer, category)
+  role = spin.optional_role == :maintainer ? :reviewer : :maintainer
 
-  "| #{CATEGORY_LABELS[category]} | #{reviewer_note} | #{maintainer_note} |"
+  "| #{CATEGORY_LABELS[category]} | #{note_for_spin_role(spin, role, category)} |"
 end
 
 # A stale prefix does not empty a row, it quietly narrows it to the untagged
@@ -177,7 +172,8 @@ if changes.any?
     warn_on_stale_team_tag(category) if TEAM_TAG_PREFIXES.key?(category)
   end
 
-  random_roulette_spins = roulette.spin(nil, categories)
+  # Trainee maintainers review first and then assign a maintainer to merge.
+  random_roulette_spins = roulette.spin(nil, categories, maintainer_pool: :maintainers_and_traintainers)
   rows = random_roulette_spins.map do |spin|
     markdown_row_for_spin(spin.category, spin)
   end

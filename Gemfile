@@ -1,6 +1,6 @@
 source 'https://rubygems.org'
 
-gem 'gitlab-dangerfiles', '~> 4.10.0'
+gem 'gitlab-dangerfiles', '~> 4.16.0'
 # The danger-review CI component resolves gems fresh each run (no committed
 # Gemfile.lock). git 6.0.0 removed Git::Base and the Git::Log Enumerable
 # interface, which danger 9.6.1 still relies on, crashing the job with
