@@ -2216,6 +2216,10 @@ WORKFLOW_BINDING_ABORT = (
     grpc.StatusCode.PERMISSION_DENIED,
     "Workflow token is not authorized for the requested workflow",
 )
+UNBOUND_WORKFLOW_TOKEN_ABORT = (
+    grpc.StatusCode.PERMISSION_DENIED,
+    "Workflow token is not bound to a workflow",
+)
 
 
 async def _execute_workflow_with_id(servicer, mock_context, workflow_id):
@@ -2402,21 +2406,49 @@ async def test_execute_workflow_allows_matching_workflow_token(
 @pytest.mark.parametrize("claims_extra", [{"binds_workflow": True}])
 @patch("duo_workflow_service.server.log")
 @patch("duo_workflow_service.server.resolve_flow")
-async def test_execute_workflow_logs_unbound_token_from_a_binding_instance(
+async def test_execute_workflow_rejects_unbound_token_from_a_binding_instance(
     mock_resolve_flow,
     mock_log,
     mock_context,
     servicer,
 ):
-    await _execute_workflow_with_id(servicer, mock_context, "9" * 100)
+    await _execute_workflow_with_id(servicer, mock_context, "42")
 
-    assert not _binding_guard_aborted(mock_context)
+    assert mock_context.abort.await_args_list == []
     mock_resolve_flow.assert_called_once()
-    assert _recorded_token_rejection(mock_resolve_flow) is None
-    mock_log.info.assert_any_call(
+    rejection = _recorded_token_rejection(mock_resolve_flow)
+    assert type(rejection) is WorkflowTokenRejectedError
+    assert rejection.details == UNBOUND_WORKFLOW_TOKEN_ABORT[1]
+    assert rejection.drop_reason == "token_rejected"
+    mock_log.warning.assert_any_call(
         "Workflow token without a workflow binding",
         token_issuer=ANY,
-        requested_workflow_id="9" * 64,
+        requested_workflow_id="42",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [{"binds_workflow": True}])
+@pytest.mark.parametrize("workflow_id", ["9" * 100, "#42", "abc"])
+@patch("duo_workflow_service.server.log")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_aborts_unbound_token_for_an_id_it_cannot_drop(
+    mock_resolve_flow,
+    mock_log,
+    mock_context,
+    servicer,
+    workflow_id,
+):
+    await _execute_workflow_with_id(servicer, mock_context, workflow_id)
+
+    assert UNBOUND_WORKFLOW_TOKEN_ABORT in [
+        c.args for c in mock_context.abort.await_args_list
+    ]
+    mock_resolve_flow.assert_not_called()
+    mock_log.warning.assert_any_call(
+        "Workflow token without a workflow binding",
+        token_issuer=ANY,
+        requested_workflow_id=workflow_id[:64],
     )
 
 
@@ -2432,7 +2464,7 @@ async def test_execute_workflow_logs_unbound_token_from_a_binding_instance(
 )
 @patch("duo_workflow_service.server.log")
 @patch("duo_workflow_service.server.resolve_flow")
-async def test_execute_workflow_does_not_log_unbound_token_otherwise(
+async def test_execute_workflow_leaves_other_tokens_alone(
     mock_resolve_flow,
     mock_log,
     mock_context,
@@ -2440,9 +2472,10 @@ async def test_execute_workflow_does_not_log_unbound_token_otherwise(
 ):
     await _execute_workflow_with_id(servicer, mock_context, "42")
 
-    assert not _binding_guard_aborted(mock_context)
+    assert mock_context.abort.await_args_list == []
     mock_resolve_flow.assert_called_once()
-    logged = [call.args[0] for call in mock_log.info.call_args_list if call.args]
+    assert _recorded_token_rejection(mock_resolve_flow) is None
+    logged = [call.args[0] for call in mock_log.warning.call_args_list if call.args]
     assert "Workflow token without a workflow binding" not in logged
 
 
@@ -2468,7 +2501,9 @@ async def test_execute_workflow_with_empty_id_never_reaches_the_binding_guard(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("user_is_debug", [True])
-@pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
+@pytest.mark.parametrize(
+    "claims_extra", [{"workflow_id": "42"}, {"binds_workflow": True}]
+)
 @patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_exempts_debug_user_from_workflow_binding(
     mock_resolve_flow,
