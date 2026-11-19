@@ -787,6 +787,14 @@ class TestListVulnerabilities:
         assert result["vulnerabilities"] == []
         assert result["summary"]["total"] == 0
 
+    @pytest.mark.parametrize(
+        "aget_mock",
+        [
+            AsyncMock(side_effect=Exception("Network error")),
+            AsyncMock(return_value={"unexpected": "dict"}),
+        ],
+        ids=["raises", "non_http_response"],
+    )
     @patch(
         "duo_workflow_service.tools.security.supports_project_vulnerabilities_rest_scope",
         return_value=True,
@@ -794,15 +802,16 @@ class TestListVulnerabilities:
     async def test_empty_results_when_report_access_check_fails(
         self,
         _mock_supports_scope,
+        aget_mock,
         gitlab_client_mock,
         metadata,
         empty_vulnerabilities_response,
     ):
-        """Test a failing access check leaves the empty result untouched."""
+        """Test a failing or unexpected access check leaves the empty result untouched."""
         gitlab_client_mock.apost = AsyncMock(
             return_value=empty_vulnerabilities_response
         )
-        gitlab_client_mock.aget = AsyncMock(side_effect=Exception("Network error"))
+        gitlab_client_mock.aget = aget_mock
 
         tool = ListVulnerabilities(metadata=metadata)
         response = await tool.arun({"project_full_path": "namespace/project"})
