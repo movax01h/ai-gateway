@@ -59,11 +59,12 @@ variables render the same in either.
   that message, in order. Anthropic, for one, takes system content only at the top, and this keeps it there.
 - **`message`** is one template string that renders one user message per claim, so it fits right after history and
   never leaves an assistant message for the next call to continue.
-- **A tail before every call.** A component in a flow that opts in calls the model only after rendering at least one
-  tail, so the prefix is never the last thing sent.
+- **Never the prefix alone.** The run that starts a version which opts in delivers the session's first message, and
+  refuses to start without one, so the component's first call follows a rendered tail. Every later call follows a
+  tool result or a new tail, because the agent loop calls the model again only after one of them.
 
 Neither block holds an assistant turn, so there's no few-shot exchange or prefill. The schema enforces the first two
-rules, and the component enforces the third.
+rules, and the run enforces the third.
 
 ### 3. The format is declared, never inferred
 
@@ -163,8 +164,12 @@ branch on format:
   translates an old-format prompt.
 - A version is all new format or all old. One that mixes them refuses to build.
 - An old-format version keeps today's delivery path for its whole life. Old-format chat-partial configs keep running
-  on the legacy Agentic Chat engine, as unlisted ones do today, and a chat-partial version listed for the engine that
-  uses the old format refuses to build. So the inbox never handles an old-format prompt.
+  on the legacy Agentic Chat engine, as they do today. So the inbox never handles an old-format prompt.
+- **The format is what routes a chat-partial version to the chat engine**, and there is no second list of versions
+  to keep in step with it. Legacy `chat.Workflow` reads `prompt_template` only and has nowhere to put what
+  `message` renders, so the declared format already says which engine can run a version. Shipping a config that
+  declares `template` is a code change and a deploy, exactly as adding a version to a table was. GitLab decides which
+  sessions get that version, through per-session version resolution behind a feature flag.
 - A new-format prompt with no `message` gets the platform default, `{{ inbound_messages.text }}`, followed by the
   attachments, as one user message. The cancelled-turn block is added by §6.
 - The default isn't legacy chat's `user` partial. A flow that needs legacy parity, such as the engine-owned chat
@@ -216,10 +221,24 @@ version declares one format. It runs in CI for every flow and prompt in this rep
 `ValidateFlowConfig`, which the AI Catalog uses to validate customer flows, so customer flows join the rolling
 migration too. Components refuse at build time as a backstop.
 
-The rollout is staged. For customer 0, the new format is limited to chat-partial: the validator rejects `template` in
-other environments, in CI and behind `ValidateFlowConfig`. Customer flows can't use it until two things change: the
-engine builds only versions listed in this repository (`ENGINE_OWNED_CONFIG_VERSIONS`), and `ValidateFlowConfig` skips
-the chat-partial dry run. Other environments follow once the first release is verified in production.
+The rollout is staged, and all three limits are conditions in one place, `opts_into_chat_engine`, so the runtime
+and the validator can't disagree:
+
+- **Chat-partial only.** A version that declares `template` anywhere else refuses to build, in the runtime and
+  behind `ValidateFlowConfig`. The chat engine is what puts a turn's message in the run's inbox, and no other
+  engine delivers one yet.
+- **Flows that ship in this repository only.** A config carries a registry identity only when the registry loader
+  read it from this repository, and a flow authored in the AI Catalog never does, so it is refused when it is
+  saved. Lifting this one is deleting the condition, once customer flows have docs, validation and Rails support
+  for building `template` prompts for custom agents.
+- **Prompts declared inline only.** A prompt referenced by `prompt_id` and `prompt_version` is loaded after this check
+  runs, so its format can't be read here, and the prompt registry refuses a prompt file that declares `template`.
+  Lifting this one means resolving referenced prompts in the check, which `agentic_chat` needs for its `chat/agent`
+  prompt.
+
+`ValidateFlowConfig` still skips the component dry run for chat-partial flows, so a chat-partial version's prompt
+variables are only checked when a session builds the flow. Running the dry run for versions that opt in, so CI
+catches a broken prompt, is a follow-up that `developer/4.0.0` waits on.
 
 Classifying old-format layouts lives here, as a migration aid, not in the runtime.
 

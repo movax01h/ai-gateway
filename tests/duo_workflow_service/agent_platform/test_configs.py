@@ -35,6 +35,7 @@ from duo_workflow_service.agent_platform.v1.flows.validation import (
     _make_validation_tools_registry,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.workflows.registry import get_flow_classes
 from lib.feature_roots import default_features_dir
 from lib.internal_events.client import InternalEventsClient
 
@@ -492,13 +493,21 @@ class TestValidateFlowConfigs:
 
     @staticmethod
     def _test_flow_config(config_path: Path):
-        yaml_content = config_path.read_text()
         registry = _make_local_prompt_registry()
         validator = FlowValidator(prompt_registry=registry)
 
         error = None
         try:
-            validator.validate(yaml_content)
+            # Loaded the way the registry loads it, so validation sees the identity a registry file carries at
+            # runtime. A config written outside this repository has none, and is validated from text instead.
+            flow_id, version = _config_id(config_path).split("/")
+            data = yaml.safe_load(config_path.read_text())
+            # The class the registry picks for this schema and environment: a chat-partial config may omit `flow`
+            # and `routers`, which only its partial class allows.
+            config_cls, _ = get_flow_classes(data["version"], data.get("environment"))
+            validator.validate_config(
+                config_cls.from_registry_file(config_path, flow_id, version)
+            )
         except (
             MissingInputVariablesError,
             ExtraInputVariablesError,

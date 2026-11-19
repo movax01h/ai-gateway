@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, ClassVar, Optional, Self, Union, override
+from typing import Any, ClassVar, Self, Union, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import HumanMessage
@@ -35,6 +35,9 @@ from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
     UILogEventsOneOff,
     one_off_ui_log_writer_class,
 )
+from duo_workflow_service.agent_platform.v1.components.prompt_reference import (
+    PromptReference,
+)
 from duo_workflow_service.agent_platform.v1.components.registry import (
     register_component,
 )
@@ -64,7 +67,7 @@ from lib.internal_events import InternalEventsClient
 
 
 @register_component(decorators=[inject])
-class OneOffComponent(BaseComponent):
+class OneOffComponent(PromptReference, BaseComponent):
     _tool_calls_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="context",
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "tool_calls"],
@@ -94,8 +97,6 @@ class OneOffComponent(BaseComponent):
         _execution_result_key,
     )
 
-    prompt_id: str
-    prompt_version: Optional[str] = None
     toolset: Toolset
     compaction: Union[CompactionConfig, bool] = True
     max_correction_attempts: int = 3

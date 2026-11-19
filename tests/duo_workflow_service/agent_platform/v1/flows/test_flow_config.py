@@ -309,6 +309,11 @@ class TestFlowConfig:
 
         assert "Error parsing YAML file" in str(exc_info.value)
 
+    def test_a_registry_file_that_disappeared_names_the_flow(self, tmp_path):
+        # A file deleted between version resolution and loading.
+        with pytest.raises(FileNotFoundError, match="my_flow/1.0.0 file not found"):
+            FlowConfig.from_registry_file(tmp_path / "1.0.0.yml", "my_flow", "1.0.0")
+
     @pytest.mark.parametrize(
         "malicious_path",
         [

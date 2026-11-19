@@ -23,6 +23,7 @@ __all__ = [
     "PromptConfig",
     "PromptProviderParams",
     "TemplateDeclaration",
+    "is_legacy_prompt",
 ]
 
 
@@ -126,6 +127,21 @@ class TemplateDeclaration(BaseModel):
             )
 
         return prompt_format.roles
+
+
+def is_legacy_prompt(prompt: TemplateDeclaration) -> bool:
+    """Whether a prompt is written in the old `prompt_template` roles, as opposed to the `template` format.
+
+    The one place that says which of the two a prompt is, so a caller that has to tell them apart doesn't branch
+    on which key the prompt was written under.
+
+    Args:
+        prompt: Any prompt config, whether the registry's or a flow's inline one.
+
+    Returns:
+        True for the old format, False for `template`.
+    """
+    return isinstance(prompt.prompt_format, LegacyTemplate)
 
 
 class PromptConfig(TemplateDeclaration):

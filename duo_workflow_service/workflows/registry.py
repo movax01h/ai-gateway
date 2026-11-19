@@ -38,11 +38,17 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
 )
 from duo_workflow_service.agent_platform.v1 import list_configs as v1_list_configs
 from duo_workflow_service.agent_platform.v1.chat_engine import ChatFlow
+from duo_workflow_service.agent_platform.v1.components.prompt_reference import (
+    prompt_reference_of,
+)
 from duo_workflow_service.agent_platform.v1.flows import FetchedFlow
 from duo_workflow_service.agent_platform.v1.flows import Flow as V1Flow
 from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
 from duo_workflow_service.agent_platform.v1.flows import (
     PartialFlowConfig as V1PartialFlowConfig,
+)
+from duo_workflow_service.agent_platform.v1.flows.prompt_format import (
+    opts_into_chat_engine,
 )
 from duo_workflow_service.flow_request import (
     FetchedFlowRequest,
@@ -83,13 +89,6 @@ _WORKFLOWS_LOOKUP = {
     f"{Path(inspect.getfile(workflow_cls)).relative_to(current_directory).parent.with_suffix('')}": workflow_cls
     for workflow_cls in _WORKFLOWS
 }
-
-# Engine-owned config versions. A chat-partial config listed here builds
-# ``ChatFlow``; every other chat-partial version builds legacy ``chat.Workflow``.
-# Keyed by the config id and the concrete version a request resolved to, never
-# by the constraint the client sent. An owner moves a flow to the engine by
-# shipping a new config version and listing it.
-ENGINE_OWNED_CONFIG_VERSIONS: frozenset[tuple[str, str]] = frozenset()
 
 FlowFactory: TypeAlias = Callable[..., AbstractWorkflow]
 
@@ -343,37 +342,6 @@ def _validate_flow_config_prompts(
                     ) from e
 
 
-def _refuse_template_prompts(
-    config: Union[
-        ExperimentalFlowConfig,
-        ExperimentalPartialFlowConfig,
-        V1FlowConfig,
-        V1PartialFlowConfig,
-    ],
-) -> None:
-    """Reject a config whose prompts declare `template`, while nothing renders it.
-
-    The format is accepted by the config schema and by the AI Catalog's validation from this change on, but no
-    runtime reads it yet: a flow built from such a prompt would run with no system prompt and no user message, and
-    say nothing about it. Refusing here turns that into an error the author sees. The MR that teaches the chat
-    engine to render the format replaces this with the route to it.
-
-    Raises:
-        ValueError: When any prompt in the config declares `template`.
-    """
-    try:
-        prompts = list(getattr(config, "prompts", None) or [])
-    except TypeError:  # A Mock in a test isn't iterable, as in the security scan above.
-        return
-
-    for prompt_config in prompts:
-        if getattr(prompt_config, "template", None) is not None:
-            raise ValueError(
-                f"Prompt '{getattr(prompt_config, 'prompt_id', 'unknown')}' declares the 'template' format, "
-                "which no flow runtime renders yet"
-            )
-
-
 def _engine_owned_chat_factory(
     config: Union[
         ExperimentalFlowConfig,
@@ -382,7 +350,7 @@ def _engine_owned_chat_factory(
         V1PartialFlowConfig,
     ],
 ) -> FlowFactory:
-    """Build ``ChatFlow`` for a chat-partial config listed in the engine table.
+    """Build ``ChatFlow`` for a chat-partial config that opts into the chat engine.
 
     The engine runs the declared graph through the shared builder, so two rules
     of the chat-partial environment that legacy ``chat.Workflow`` never had to
@@ -415,13 +383,13 @@ def flow_factory(
         V1FlowConfig,
         V1PartialFlowConfig,
     ],
-    *,
-    config_id: Optional[str] = None,
-    resolved_version: Optional[str] = None,
 ) -> FlowFactory:
     # Validate all prompts for security issues before creating the flow
     _validate_flow_config_prompts(config)
-    _refuse_template_prompts(config)
+
+    # Before the environment branch, so a version that declares ``template`` where nothing renders it is refused
+    # here rather than at the first model call.
+    on_the_engine = opts_into_chat_engine(config)
 
     if config.environment != CHAT_PARTIAL_ENVIRONMENT:
         return partial(flow_cls, config=config)
@@ -442,14 +410,19 @@ def flow_factory(
             f"but received {len(config.prompts)}"
         )
 
-    prompt_version = agent_component.get("prompt_version")
+    prompt_reference = prompt_reference_of(agent_component)
 
-    if config.prompts and prompt_version:
+    if config.prompts and prompt_reference and prompt_reference.is_stored:
         raise ValueError(
             "Chat-partial environment expects either inline or in repository prompt configuration, but received both"
         )
 
-    if (config_id, resolved_version) in ENGINE_OWNED_CONFIG_VERSIONS:
+    # A chat-partial version runs on the chat engine when its prompts declare ``template``, and on legacy
+    # ``chat.Workflow`` otherwise. The config is the only signal: legacy chat reads only ``prompt_template``, and
+    # it has nowhere to put what ``template.message`` renders, so the format a version declares already says which
+    # of the two can run it. Which sessions get a version is GitLab's call, through per-session version
+    # resolution behind a feature flag.
+    if on_the_engine:
         return _engine_owned_chat_factory(config)
 
     # Extract agent name from component for proper event tracking
@@ -532,12 +505,7 @@ def _load_flow_from_registry(
     try:
         config = flow_config_cls.from_yaml_config(config_id, version)
         return ResolvedFlow(
-            factory=flow_factory(
-                flow_cls,
-                config,
-                config_id=config_id,
-                resolved_version=config.resolved_version,
-            ),
+            factory=flow_factory(flow_cls, config),
             flow_id=config_id,
             schema_version=schema_version,
             flow_version=config.resolved_version,
@@ -607,7 +575,8 @@ def flow_config_from_fetched_definition(definition: Dict[str, Any]) -> V1FlowCon
 
     config = V1FlowConfig(**config_dict)
     _validate_flow_config_prompts(config)
-    _refuse_template_prompts(config)
+    # A fetched definition comes from the AI Catalog, so this refuses `template` with the reason an author can act on.
+    opts_into_chat_engine(config)
     return config
 
 

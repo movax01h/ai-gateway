@@ -39,6 +39,9 @@ from duo_workflow_service.agent_platform.v1.flows.inputs import (
     CANCELLED_TURN_CATEGORY,
     cancelled_turn_context,
 )
+from duo_workflow_service.agent_platform.v1.flows.prompt_format import (
+    opts_into_chat_engine,
+)
 from duo_workflow_service.agent_platform.v1.state import FlowState
 from duo_workflow_service.agent_platform.v1.state.base import FlowEvent, FlowEventType
 from duo_workflow_service.checkpointer.content_retention import ERROR_NOTICE_ID_PREFIX
@@ -359,10 +362,10 @@ class Flow(AbstractWorkflow):
     def _delivers_through_inbox(self) -> bool:
         """Whether this flow's runs get a run inbox to take their input from.
 
-        A version opts in by declaring a prompt in the `template` format, which has no `user` part to render the input
-        from. Any other version renders `goal` itself and gets no inbox.
+        A version opts in by declaring its prompts in the `template` format, which has no `user` part to render the
+        input from. Any other version renders `goal` itself and gets no inbox.
         """
-        return any(prompt.template is not None for prompt in self._config.prompts or [])
+        return opts_into_chat_engine(self._config)
 
     @override
     async def _resolve_graph_invocation(

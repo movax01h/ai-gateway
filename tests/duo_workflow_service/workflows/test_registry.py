@@ -1,5 +1,7 @@
 import copy
 from functools import partial
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from unittest.mock import Mock, patch
 
 import pytest
@@ -8,7 +10,6 @@ from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 from pydantic import ValidationError
 
-from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from duo_workflow_service.agent_platform import experimental, v1
 from duo_workflow_service.agent_platform.constants import (
     CHAT_PARTIAL_ENVIRONMENT,
@@ -36,7 +37,6 @@ from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
-    ENGINE_OWNED_CONFIG_VERSIONS,
     ResolvedFlow,
     _convert_struct_to_flow_config,
     _load_flow_from_inline_config,
@@ -55,6 +55,8 @@ def simple_flow_config():
     mock_flow_config_cls = Mock()
     mock_partial_flow_config_cls = Mock()
     mock_config_instance = Mock()
+    # A config with no prompts of its own, as the struct above declares.
+    mock_config_instance.prompts = None
     mock_flow_config_cls.return_value = mock_config_instance
 
     # Create mock flow class
@@ -462,7 +464,13 @@ def test_resolve_flow_with_chat_flow_config_forwards_component_inputs():
         ),
         (
             {
-                "components": [{"type": "AgentComponent", "prompt_version": "v1.0"}],
+                "components": [
+                    {
+                        "type": "AgentComponent",
+                        "prompt_id": "prompt1",
+                        "prompt_version": "v1.0",
+                    }
+                ],
                 "prompts": [
                     {
                         "prompt_id": "prompt1",
@@ -474,12 +482,17 @@ def test_resolve_flow_with_chat_flow_config_forwards_component_inputs():
             },
             "Chat-partial environment expects either inline or in repository prompt configuration, but received both",
         ),
+        (
+            {"components": [{"type": "AgentComponent", "prompt_version": "v1.0"}]},
+            "prompt_id",
+        ),
     ],
     ids=[
         "multiple_components",
         "invalid_component_type",
         "multiple_prompts",
         "both_prompts_and_version",
+        "version_without_prompt_id",
     ],
 )
 def test_resolve_flow_with_chat_flow_config_failure(config_params, expected_error):
@@ -976,9 +989,6 @@ class TestNormalizePromptTemplateOrder:
         assert list(loaded.prompts[0].prompt_template.keys()) == ["system", "user"]
 
 
-ENGINE_TABLE = "duo_workflow_service.workflows.registry.ENGINE_OWNED_CONFIG_VERSIONS"
-
-
 def shipped_chat_partial_configs():
     for config_file in FlowConfig.DIRECTORY_PATH.glob("*/*.yml"):
         environment = yaml.safe_load(config_file.read_text()).get("environment")
@@ -986,48 +996,86 @@ def shipped_chat_partial_configs():
             yield config_file.parent.name, config_file.stem
 
 
-def engine_owned_chat_partial_config(**overrides):
+def _as_registry_config(config_cls, data):
+    """Build a config the way the registry loader does, so it carries the identity of a flow shipped here."""
+    with NamedTemporaryFile("w", suffix=".yml") as written:
+        yaml.safe_dump(data, written)
+        written.flush()
+
+        return config_cls.from_registry_file(Path(written.name), "assistant", "1.0.0")
+
+
+def engine_owned_chat_partial_config(config_cls=PartialFlowConfig, **overrides):
+    """A chat-partial config that opts into the engine: its prompts declare `template`."""
     config = {
         "version": "v1",
         "environment": CHAT_PARTIAL_ENVIRONMENT,
-        "components": [{"name": "chat_agent", "type": "AgentComponent", "toolset": []}],
+        "components": [
+            {
+                "name": "chat_agent",
+                "type": "AgentComponent",
+                "toolset": [],
+                "prompt_id": "chat_agent_prompt",
+            }
+        ],
+        "prompts": [
+            {
+                "name": "chat_agent_prompt",
+                "prompt_id": "chat_agent_prompt",
+                "unit_primitives": ["duo_chat"],
+                "template": {"system": "You are a chat agent."},
+            }
+        ],
     }
     config.update(overrides)
-    return PartialFlowConfig(**config)
+
+    return _as_registry_config(config_cls, config)
 
 
 def engine_owned_factory(config):
-    with patch(ENGINE_TABLE, frozenset({("assistant", "1.0.0")})):
-        return flow_factory(
-            Mock(), config, config_id="assistant", resolved_version="1.0.0"
-        )
+    return flow_factory(Mock(), config)
 
 
-@pytest.mark.parametrize(
-    "environment",
-    [CHAT_PARTIAL_ENVIRONMENT, "ambient"],
-)
-def test_a_template_prompt_is_refused_while_no_runtime_renders_it(environment):
-    # The schema and the AI Catalog's validation accept the format from here on, so a flow could be saved with it
-    # before anything renders it. It would run with no system prompt and no user message, and say nothing.
+def test_a_template_version_outside_chat_partial_is_refused():
+    # Refused before the environment branch, so an ambient flow can't build with prompts nothing renders.
     config = engine_owned_chat_partial_config(
-        environment=environment,
-        prompts=[
-            InMemoryPromptConfig(
-                prompt_id="chat_agent_prompt",
-                name="Chat agent",
-                unit_primitives=["duo_chat"],
-                template={"system": "instructions"},
-            )
-        ],
+        environment="ambient",
+        routers=[{"from": "chat_agent", "to": "end"}],
+        flow={"entry_point": "chat_agent"},
     )
 
-    with pytest.raises(ValueError, match="which no flow runtime renders yet"):
+    with pytest.raises(ValueError, match="only in the 'chat-partial' environment"):
         flow_factory(Mock(), config)
 
 
-def test_engine_table_ships_empty():
-    assert ENGINE_OWNED_CONFIG_VERSIONS == frozenset()
+def test_a_template_version_from_the_registry_takes_the_engine_path(tmp_path):
+    # Loaded the way a session loads it. Until a chat-partial registry file may omit `routers` (!7516), the engine
+    # refuses the declared ones; what this pins is that the version reaches the engine instead of legacy chat.
+    data = yaml.safe_load(
+        (
+            Path(__file__).parents[2]
+            / "prompts"
+            / "config"
+            / "chat_partial_template.yml"
+        ).read_text()
+    )
+    data |= {
+        "routers": [{"from": "agent", "to": "end"}],
+        "flow": {"entry_point": "agent"},
+    }
+    (tmp_path / "assistant").mkdir()
+    (tmp_path / "assistant" / "1.0.0.yml").write_text(yaml.safe_dump(data))
+
+    with (
+        patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path),
+        patch.object(FlowConfig, "feature_config_roots", return_value={}),
+        pytest.raises(ValueError) as raised,
+    ):
+        _load_flow_from_registry("assistant", "v1", "^1.0.0")
+
+    assert "Engine-owned chat-partial flows reject declared routers" in str(
+        raised.value.__cause__
+    )
 
 
 def test_every_shipped_chat_partial_config_stays_on_legacy_chat():
@@ -1040,47 +1088,34 @@ def test_every_shipped_chat_partial_config_stays_on_legacy_chat():
         assert factory.func is chat.Workflow, f"{config_id}/{version}"
 
 
-def test_listed_config_version_builds_chat_flow():
-    with patch(ENGINE_TABLE, frozenset({("support_assistant", "1.0.0")})):
-        factory = _load_flow_from_registry("support_assistant", "v1", "1.0.0").factory
+def test_an_inline_template_flow_never_reaches_the_engine():
+    # An AI Catalog flow arrives inline, with no registry identity, so it may not use `template` yet.
+    struct = struct_pb2.Struct()
+    struct.update(
+        {
+            "version": "v1",
+            "environment": CHAT_PARTIAL_ENVIRONMENT,
+            "components": [
+                {
+                    "name": "chat_agent",
+                    "type": "AgentComponent",
+                    "prompt_id": "p",
+                    "toolset": [],
+                }
+            ],
+            "prompts": [
+                {
+                    "name": "p",
+                    "prompt_id": "p",
+                    "unit_primitives": ["duo_chat"],
+                    "template": {"system": "You are a chat agent."},
+                }
+            ],
+        }
+    )
 
-    assert factory.func is ChatFlow
-    assert factory.keywords["config"].resolved_version == "1.0.0"
-
-
-def test_engine_table_keys_on_the_resolved_version():
-    with patch(ENGINE_TABLE, frozenset({("support_assistant", "1.0.0")})):
-        resolved = _load_flow_from_registry("support_assistant", "v1", "^1.0.0")
-    assert resolved.factory.func is ChatFlow
-
-    with patch(ENGINE_TABLE, frozenset({("support_assistant", "^1.0.0")})):
-        resolved = _load_flow_from_registry("support_assistant", "v1", "^1.0.0")
-    assert resolved.factory.func is chat.Workflow
-
-
-def test_inline_chat_partial_config_is_never_engine_owned():
-    mocks = build_chat_flow_config(is_partial=True)
-
-    with (
-        patch(ENGINE_TABLE, frozenset({("chat_agent", "1.0.0")})),
-        patch(
-            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {
-                "v1": (
-                    mocks["flow_config_cls"],
-                    mocks["partial_flow_config_cls"],
-                    mocks["flow_cls"],
-                )
-            },
-        ),
-        patch(
-            "duo_workflow_service.workflows.registry.MessageToDict",
-            return_value=mocks["expected_dict"],
-        ),
-    ):
-        factory = _load_flow_from_inline_config(mocks["struct"], "v1")
-
-    assert factory.func is chat.Workflow
+    with pytest.raises(ValueError, match="outside the AI Gateway repository"):
+        _load_flow_from_inline_config(struct, "v1")
 
 
 def test_engine_owned_config_is_normalized_before_it_reaches_chat_flow():
@@ -1091,7 +1126,12 @@ def test_engine_owned_config_is_normalized_before_it_reaches_chat_flow():
     assert config.routers == [{"from": "chat_agent", "to": "end"}]
     assert config.flow.entry_point == "chat_agent"
     assert config.components == [
-        {"name": "chat_agent", "type": "AgentComponent", "toolset": []}
+        {
+            "name": "chat_agent",
+            "type": "AgentComponent",
+            "toolset": [],
+            "prompt_id": "chat_agent_prompt",
+        }
     ]
 
 
@@ -1126,10 +1166,8 @@ def test_engine_owned_config_keeps_the_chat_partial_validations():
 
 
 def test_engine_owned_config_requires_the_v1_schema():
-    config = ExperimentalPartialFlowConfig(
-        version="experimental",
-        environment=CHAT_PARTIAL_ENVIRONMENT,
-        components=[{"name": "chat_agent", "type": "AgentComponent", "toolset": []}],
+    config = engine_owned_chat_partial_config(
+        ExperimentalPartialFlowConfig, version="experimental"
     )
 
     with pytest.raises(ValueError, match="v1 config schema"):
@@ -1259,7 +1297,10 @@ def test_a_fetched_definition_with_a_template_prompt_is_refused():
         "template": {"system": "You help."},
     }
 
-    with pytest.raises(ValueError, match="which no flow runtime renders yet"):
+    # A fetched definition is never chat-partial, so the environment rule is the first to refuse it.
+    with pytest.raises(
+        ValueError, match="declares 'template' only in the 'chat-partial'"
+    ):
         flow_config_from_fetched_definition(definition)
 
 

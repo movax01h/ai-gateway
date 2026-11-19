@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -13,6 +14,7 @@ from duo_workflow_service.agent_platform.utils.validation import (
     placeholder_items_for,
 )
 from duo_workflow_service.agent_platform.v1.catalog import CatalogItemRef
+from duo_workflow_service.workflows.registry import get_flow_classes
 
 AI_CATALOG_REFERENCE = {
     "source": "ai-catalog",
@@ -227,6 +229,48 @@ class TestPromptVariableValidation:
         )
         with pytest.raises(ValueError, match="extra input variables"):
             validator.validate(yml)
+
+
+class TestTemplateFormat:
+    """The AI Catalog saves a flow through this validator, so it refuses what the runtime refuses."""
+
+    CONFIG: dict = {
+        "version": "v1",
+        "environment": "chat-partial",
+        "components": [
+            {
+                "name": "agent",
+                "type": "AgentComponent",
+                "prompt_id": "agent_prompt",
+                "toolset": [],
+            }
+        ],
+        "prompts": [
+            {
+                "name": "agent_prompt",
+                "prompt_id": "agent_prompt",
+                "unit_primitives": ["duo_agent_platform"],
+                "template": {"system": "You answer questions."},
+            }
+        ],
+    }
+
+    def test_a_flow_saved_in_the_ai_catalog_may_not_declare_it(
+        self, validator: FlowValidator
+    ):
+        with pytest.raises(ValueError, match="outside the AI Gateway repository"):
+            validator.validate(yaml.safe_dump(self.CONFIG))
+
+    def test_the_same_flow_shipped_in_this_repository_validates(
+        self, validator: FlowValidator, tmp_path: Path
+    ):
+        path = tmp_path / "1.0.0.yml"
+        path.write_text(yaml.safe_dump(self.CONFIG))
+        config_cls, flow_cls = get_flow_classes("v1", "chat-partial")
+
+        validator.validate_config(
+            config_cls.from_registry_file(path, "assistant", "1.0.0"), flow_cls
+        )
 
 
 class TestDryRunWithAiCatalogAgents:

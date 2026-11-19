@@ -22,7 +22,8 @@ That needs two things from the platform:
 
 The chat engine ([`chat_engine.md`](../chat_engine.md)) already defines turns: a turn is one invocation, the seeded
 `end` terminal commits the boundary and writes `INPUT_REQUIRED`, and tool approvals are interrupts inside a turn. A
-flow moves to the engine by shipping a new version and listing it in `ENGINE_OWNED_CONFIG_VERSIONS`. Its tracker
+flow moves to the engine by shipping a new version whose prompts declare the `template` format
+([ADR-004](adr-004-prompts-declare-a-prefix-and-a-tail.md)). Its tracker
 ([ai-assist issue 2780](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2780))
 lists the at-rest status as a follow-up.
 
@@ -73,12 +74,12 @@ stateDiagram-v2
     running --> ended_abnormally
 ```
 
-`IDLE` is seeded by `ChatGraphBuilder`, so it applies to every engine-listed version, including
+`IDLE` is seeded by `ChatGraphBuilder`, so it applies to every version on the engine, including
 `agentic_chat/2.0.0`. There is no per-flow switch. Everything in the engine that treats a rest point specially, such
 as stop recovery and entry dispatch, treats `IDLE` the same way.
 
 **`ChatFlow` doesn't wait for `IDLE`.** Older IDEs read a session's status through GraphQL and keep their input
-locked on `IDLE` (see below). If that isn't solved when an engine-listed flow reaches the IDE (`agentic_chat/2.0.0`,
+locked on `IDLE` (see below). If that isn't solved when a flow on the engine reaches the IDE (`agentic_chat/2.0.0`,
 or `developer/4.x` as the IDE's default flow), those sessions rest as `INPUT_REQUIRED` through a temporary exception
 until it is, for example Rails not declaring `idle_status_event` for IDE sessions. `group::agent developer` owns it,
 in [GitLab issue 638556](https://gitlab.com/gitlab-org/gitlab/-/work_items/638556).
@@ -109,7 +110,7 @@ gateway. GitLab declares `idle_status_event` as a server capability (Workhorse a
 ## Consequences
 
 - Flows outside the engine don't change. `chat` and `ambient` flows, including customer flows, keep their statuses.
-- An older GitLab that runs an engine-listed version, which only happens through an explicit version pin, sees
+- An older GitLab that runs a version on the engine, which only happens through an explicit version pin, sees
   `input_required` with today's to-do.
 - Sessions rarely reach `finished`. GitLab separates "a turn ended" from "the session ended" and delivers answers on
   the first.
