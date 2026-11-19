@@ -142,6 +142,24 @@ instructions:
       1. Changes without evidence: the MR should link a session trace pointing at the
         exact failing step, or a baseline-vs-variant eval run for bigger changes.
 
+  - name: LangGraph checkpointer integration
+    fileFilters:
+      - "duo_workflow_service/checkpointer/**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      The checkpointer sits on LangGraph's saver interface, and LangGraph upgrades can change anything
+      outside its documented surface. Verify:
+      1. Special channel names such as `__interrupt__` and `__error__` are imported from
+        `langgraph.checkpoint.base` (e.g. `INTERRUPT`, `ERROR`), not re-declared as string literals or
+        local constants. Why: a local copy keeps compiling after LangGraph renames the channel, and the
+        saver silently stops matching.
+      1. Flag hand-maintained lists of LangGraph's internal control channels, and helpers that infer a task's
+        state from which channels it wrote. Suggest a rule based on the few public names the code needs.
+        Why: such lists go stale on upgrade, and each one is more internal behaviour to re-verify.
+      1. When the code relies on an undocumented property of what LangGraph hands the saver (the order of
+        writes in a batch, which write comes first), it must say so in a comment and a test must pin it.
+        Why: an upgrade that changes the property otherwise breaks stored checkpoints with no failing test.
+
   - name: Dependency Injection
     fileFilters:
       - "**/*.py"
