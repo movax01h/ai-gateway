@@ -1,5 +1,5 @@
 # pylint: disable=file-naming-for-tests
-"""Guards for the deep_code_review_reviewer and standard_code_review_reviewer prompt definitions.
+"""Guards for the standard_code_review_reviewer prompt definitions.
 
 Managed Claude models must run at xhigh effort (gitlab#637410). They resolve to the ``claude`` family version and are
 served through LiteLLM, which reads ``provider_params.litellm.reasoning_effort``. Self-hosted models resolve to
@@ -14,10 +14,7 @@ import yaml
 from ai_gateway.prompts.config.base import PromptConfig
 
 _REVIEW_DIR = Path(__file__).parent.parent.parent
-_PROMPTS_DIRS = [
-    _REVIEW_DIR / "deep_code_review_reviewer" / "prompts",
-    _REVIEW_DIR / "standard_code_review_reviewer" / "prompts",
-]
+_PROMPTS_DIRS = [_REVIEW_DIR / "standard_code_review_reviewer" / "prompts"]
 _CLAUDE_YAML_FILES = sorted(
     f for d in _PROMPTS_DIRS for f in (d / "claude").glob("*.yml")
 )
