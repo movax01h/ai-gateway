@@ -14,7 +14,7 @@ def parse_deprecated_workflow_definition(value: str) -> tuple[str, str]:
 
     Returns (api_version, flow_name). Always resolves to the default flow version (1.0.0). Raises ValueError on any
     format violation or length excess. Path traversal safety is enforced downstream by _safe_resolve in
-    from_yaml_config.
+    resolve_registry_file.
     """
     if len(value) > _MAX_WORKFLOW_DEFINITION_LENGTH:
         raise ValueError(

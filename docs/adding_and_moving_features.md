@@ -325,7 +325,7 @@ Move the whole feature in one merge request:
    For a flow, run this command on `main` and on your branch, and compare the output:
 
    ```shell
-   poetry run python -c "from ai.serving.grpc.flows import register_served_flows; from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig, list_flow_configs; register_served_flows(); print(sorted(e['flow_version'] for e in list_flow_configs(FlowConfig) if e['flow_identifier'] == '<feature>'))"
+   poetry run python -c "from ai.serving.grpc.flows import register_served_flows; from duo_workflow_service.agent_platform.v1.flows.flow_config import list_configs; register_served_flows(); print(sorted(e['flow_version'] for e in list_configs() if e['flow_identifier'] == '<feature>'))"
    ```
 
 Two completed moves show the result:

@@ -14,6 +14,7 @@ from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
+from duo_workflow_service.workflows.registry import get_flow_schema
 from lib.events import GLReportingEventContext
 
 HEADER_TEXT = """
@@ -141,9 +142,13 @@ def main():
             output_file.write(f"\n## Graph: `{display_name}` (Flow Registry)\n\n")
 
             diagram = GRAPH_CONFIG
-            routers = data["routers"]
-            components = data["components"]
-            start_node = data["flow"]["entry_point"]
+            # Load and complete the file through its schema, as the registry does,
+            # so a chat-partial file without routers gets its graph.
+            schema = get_flow_schema(api_version)
+            config = schema.config_from_data(data).to_config()
+            routers = config.routers
+            components = config.components
+            start_node = config.flow.entry_point
 
             # Statically named subagents (``subagents: [{name: ...}]``) are folded
             # into their supervisor at runtime; style them apart and show the delegation.

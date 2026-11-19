@@ -7,12 +7,11 @@ from typing import (
     Any,
     Callable,
     Dict,
+    NamedTuple,
     Optional,
     Tuple,
-    Type,
     TypeAlias,
     Union,
-    overload,
 )
 
 import structlog
@@ -33,6 +32,15 @@ from duo_workflow_service.agent_platform.experimental.flows import (
 from duo_workflow_service.agent_platform.experimental.flows import (
     PartialFlowConfig as ExperimentalPartialFlowConfig,
 )
+from duo_workflow_service.agent_platform.experimental.flows import (
+    config_from_data as experimental_config_from_data,
+)
+from duo_workflow_service.agent_platform.experimental.flows import (
+    load_config as experimental_load_config,
+)
+from duo_workflow_service.agent_platform.experimental.flows import (
+    load_config_file as experimental_load_config_file,
+)
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs as experimental_list_configs,
 )
@@ -46,6 +54,13 @@ from duo_workflow_service.agent_platform.v1.flows import Flow as V1Flow
 from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
 from duo_workflow_service.agent_platform.v1.flows import (
     PartialFlowConfig as V1PartialFlowConfig,
+)
+from duo_workflow_service.agent_platform.v1.flows import (
+    config_from_data as v1_config_from_data,
+)
+from duo_workflow_service.agent_platform.v1.flows import load_config as v1_load_config
+from duo_workflow_service.agent_platform.v1.flows import (
+    load_config_file as v1_load_config_file,
 )
 from duo_workflow_service.agent_platform.v1.flows.prompt_format import (
     opts_into_chat_engine,
@@ -121,20 +136,23 @@ class ResolvedFlow:
         return {key: value for key, value in fields.items() if value}
 
 
-_FLOW_BY_VERSIONS: Dict[
-    str,
-    Tuple[
-        Type[Union[ExperimentalFlowConfig, V1FlowConfig]],
-        Type[Union[ExperimentalPartialFlowConfig, V1PartialFlowConfig]],
-        Any,
-    ],
-] = {
-    "experimental": (
-        ExperimentalFlowConfig,
-        ExperimentalPartialFlowConfig,
-        ExperimentalFlow,
+class FlowSchema(NamedTuple):
+    """How one flow config schema version builds configs and runs them."""
+
+    # Validates config data as the schema's class for its ``environment``.
+    config_from_data: Callable[..., Union[ExperimentalFlowConfig, V1FlowConfig]]
+    # Loads a registry file ``(flow_id, version constraint)`` the same way.
+    load_config: Callable[
+        [str, Optional[str]], Union[ExperimentalFlowConfig, V1FlowConfig]
+    ]
+    flow_cls: Any
+
+
+_FLOW_BY_VERSIONS: Dict[str, FlowSchema] = {
+    "experimental": FlowSchema(
+        experimental_config_from_data, experimental_load_config, ExperimentalFlow
     ),
-    "v1": (V1FlowConfig, V1PartialFlowConfig, V1Flow),
+    "v1": FlowSchema(v1_config_from_data, v1_load_config, V1Flow),
 }
 
 # A saved AI Catalog flow is always a full v1 flow.
@@ -207,41 +225,12 @@ def _normalize_prompt_template_order(config_dict: Dict[str, Any]) -> None:
             )
 
 
-@overload
 def _convert_struct_to_flow_config(
     struct: struct_pb2.Struct,
     flow_config_schema_version: str,
-    flow_config_cls: Type[ExperimentalFlowConfig],
-) -> ExperimentalFlowConfig: ...
-
-
-@overload
-def _convert_struct_to_flow_config(
-    struct: struct_pb2.Struct,
-    flow_config_schema_version: str,
-    flow_config_cls: Type[V1FlowConfig],
-) -> V1FlowConfig: ...
-
-
-def _convert_struct_to_flow_config(
-    struct: struct_pb2.Struct,
-    flow_config_schema_version: str,
-    flow_config_cls: Type[
-        Union[
-            ExperimentalFlowConfig,
-            ExperimentalPartialFlowConfig,
-            V1FlowConfig,
-            V1PartialFlowConfig,
-        ]
-    ],
-) -> Union[
-    ExperimentalFlowConfig,
-    V1FlowConfig,
-    ExperimentalPartialFlowConfig,
-    V1PartialFlowConfig,
-]:
+) -> Union[ExperimentalFlowConfig, V1FlowConfig]:
     try:
-        _FLOW_BY_VERSIONS[flow_config_schema_version]
+        schema = _FLOW_BY_VERSIONS[flow_config_schema_version]
     except KeyError:
         raise ValueError(
             f"Unsupported schema version: {flow_config_schema_version}. "
@@ -258,7 +247,7 @@ def _convert_struct_to_flow_config(
             )
         )
 
-    return flow_config_cls(**config_dict)
+    return schema.config_from_data(config_dict)
 
 
 def _validate_flow_config_prompts(
@@ -447,28 +436,34 @@ def flow_factory(
     return partial(chat.Workflow, **args)
 
 
-def get_flow_classes(
-    flow_config_schema_version: str, environment: Optional[str] = None
-) -> Tuple[
-    Type[
-        Union[
-            ExperimentalFlowConfig,
-            ExperimentalPartialFlowConfig,
-            V1FlowConfig,
-            V1PartialFlowConfig,
-        ]
-    ],
-    Any,
-]:
+def get_flow_schema(flow_config_schema_version: str) -> FlowSchema:
+    """Return how the schema version builds configs and which flow class runs them.
 
-    if environment == CHAT_PARTIAL_ENVIRONMENT:
-        _, partial_flow_config_cls, flow_cls = _FLOW_BY_VERSIONS[
-            flow_config_schema_version
-        ]
-        return partial_flow_config_cls, flow_cls
+    Build a config through the schema's ``config_from_data`` or ``load_config``, which
+    pick the class the config's ``environment`` validates as.
+    """
+    return _FLOW_BY_VERSIONS[flow_config_schema_version]
 
-    flow_config_cls, _, flow_cls = _FLOW_BY_VERSIONS[flow_config_schema_version]
-    return flow_config_cls, flow_cls
+
+_LOAD_CONFIG_FILE_BY_VERSION: Dict[
+    str, Callable[[Path, str, str], Union[ExperimentalFlowConfig, V1FlowConfig]]
+] = {
+    "experimental": experimental_load_config_file,
+    "v1": v1_load_config_file,
+}
+
+
+def load_config_file(
+    flow_config_schema_version: str, path: Path, flow_id: str, version: str
+) -> Union[ExperimentalFlowConfig, V1FlowConfig]:
+    """Load one known registry file as its schema's class for its ``environment``, with its registry identity.
+
+    For the config sweep in CI, which already knows each file and its version. A session resolves a version
+    constraint through ``get_flow_schema(...).load_config`` instead.
+    """
+    return _LOAD_CONFIG_FILE_BY_VERSION[flow_config_schema_version](
+        path, flow_id, version
+    )
 
 
 def _load_flow_from_registry(
@@ -489,7 +484,7 @@ def _load_flow_from_registry(
 
     Raises:
         ValueError: If schema_version is unsupported or the flow cannot be loaded.
-                    Path traversal is enforced by _safe_resolve inside from_yaml_config.
+                    Path traversal is enforced by _safe_resolve inside load_config.
     """
     if schema_version not in _FLOW_BY_VERSIONS:
         log.warning(
@@ -500,12 +495,12 @@ def _load_flow_from_registry(
         )
         raise ValueError(f"Invalid flowConfigSchemaVersion: '{schema_version}'.")
 
-    flow_config_cls, flow_cls = get_flow_classes(schema_version)
+    schema = get_flow_schema(schema_version)
 
     try:
-        config = flow_config_cls.from_yaml_config(config_id, version)
+        config = schema.load_config(config_id, version)
         return ResolvedFlow(
-            factory=flow_factory(flow_cls, config),
+            factory=flow_factory(schema.flow_cls, config),
             flow_id=config_id,
             schema_version=schema_version,
             flow_version=config.resolved_version,
@@ -533,16 +528,12 @@ def _load_flow_from_inline_config(
 ) -> FlowFactory:
     """Create a flow from an inline protobuf Struct config."""
     try:
-        config_dict: Dict[str, Any] = MessageToDict(config_struct)
-        flow_config_cls, flow_cls = get_flow_classes(
-            schema_version, config_dict.get("environment", None)
-        )
+        schema = get_flow_schema(schema_version)
         config = _convert_struct_to_flow_config(
             struct=config_struct,
             flow_config_schema_version=schema_version,
-            flow_config_cls=flow_config_cls,
         )
-        return flow_factory(flow_cls, config)
+        return flow_factory(schema.flow_cls, config)
     except SecurityException:
         raise
     except Exception as e:

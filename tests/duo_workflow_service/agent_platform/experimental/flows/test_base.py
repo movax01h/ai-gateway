@@ -1598,7 +1598,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         flow_instance._config = _convert_struct_to_flow_config(
             struct=struct,
             flow_config_schema_version="experimental",
-            flow_config_cls=FlowConfig,
         )
 
         components, _ = self.instantiate(

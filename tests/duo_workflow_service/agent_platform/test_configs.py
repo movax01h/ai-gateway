@@ -29,13 +29,14 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     MCP_AUTO_INJECT_ENVIRONMENTS,
     FlowConfig,
     FlowConfigMetadata,
+    config_from_data,
 )
 from duo_workflow_service.agent_platform.v1.flows.validation import (
     DryRunFlowValidator,
     _make_validation_tools_registry,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
-from duo_workflow_service.workflows.registry import get_flow_classes
+from duo_workflow_service.workflows.registry import load_config_file
 from lib.feature_roots import default_features_dir
 from lib.internal_events.client import InternalEventsClient
 
@@ -197,8 +198,13 @@ def _load_flow_config(config_path: Path) -> FlowConfig:
     outside that root can satisfy. Constructing the model directly keeps the sweep working on
     whatever path it was handed, while still going through ``FlowConfig`` validation rather than
     reading loose YAML.
+
+    ``config_from_data`` picks the class as the registry's ``load_config`` does, so a
+    ``chat-partial`` file that omits ``routers`` validates as ``PartialFlowConfig``. ``to_config()`` then
+    completes it into the config the graph builder reads.
     """
-    return FlowConfig(**(yaml.safe_load(config_path.read_text()) or {}))
+    yaml_content = yaml.safe_load(config_path.read_text()) or {}
+    return config_from_data(yaml_content).to_config()
 
 
 def _iter_entry_names(entries: Any) -> Iterator[str]:
@@ -378,7 +384,7 @@ class TestValidateFlowConfigs:
         that lost its wildcard `subagents` entry drops the items and still compiles
         unless its prompt happens to read `has_workspace_agents`.
         """
-        config = FlowConfig(**yaml.safe_load(config_path.read_text()))
+        config = _load_flow_config(config_path)
         items = CatalogItems(
             workspace_agents=[
                 WorkspaceAgent(
@@ -502,11 +508,10 @@ class TestValidateFlowConfigs:
             # runtime. A config written outside this repository has none, and is validated from text instead.
             flow_id, version = _config_id(config_path).split("/")
             data = yaml.safe_load(config_path.read_text())
-            # The class the registry picks for this schema and environment: a chat-partial config may omit `flow`
+            # Through the schema, which picks the class for the environment: a chat-partial config may omit `flow`
             # and `routers`, which only its partial class allows.
-            config_cls, _ = get_flow_classes(data["version"], data.get("environment"))
             validator.validate_config(
-                config_cls.from_registry_file(config_path, flow_id, version)
+                load_config_file(data["version"], config_path, flow_id, version)
             )
         except (
             MissingInputVariablesError,

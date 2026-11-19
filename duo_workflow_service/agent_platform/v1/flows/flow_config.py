@@ -1,6 +1,19 @@
 import json
 from pathlib import Path
-from typing import Callable, ClassVar, List, Literal, Optional, Self, override
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Protocol,
+    Self,
+    Sequence,
+    TypeVar,
+    override,
+)
 
 import structlog
 import yaml
@@ -8,6 +21,7 @@ from pydantic import BaseModel, PrivateAttr
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
+from duo_workflow_service.agent_platform.constants import CHAT_PARTIAL_ENVIRONMENT
 from duo_workflow_service.agent_platform.v1.catalog import CatalogItemRef
 from duo_workflow_service.agent_platform.v1.components import (
     BaseComponent,
@@ -20,20 +34,30 @@ from lib.feature_roots import default_features_dir
 from lib.version import resolve_version
 
 __all__ = [
+    "CONFIG_CLASSES",
     "DEFAULT_FLOW_VERSION",
     "BaseFlowConfig",
+    "ChatPartialMixin",
     "FlowConfig",
     "FlowConfigInput",
     "FlowConfigMetadata",
     "PartialFlowConfig",
+    "config_from_data",
     "discover_feature_flow_configs",
     "list_configs",
     "list_flow_configs",
     "load_component_class",
+    "load_config",
+    "load_config_file",
+    "load_registry_config",
+    "load_registry_file",
     "register_flow_config_root",
+    "select_config_class",
 ]
 
 logger = structlog.stdlib.get_logger(__name__)
+
+_ConfigT = TypeVar("_ConfigT", bound="BaseFlowConfig")
 
 INPUT_JSONSCHEMA_VERSION = "https://json-schema.org/draft/2020-12/schema#"
 DEFAULT_FLOW_VERSION = "1.0.0"
@@ -145,6 +169,9 @@ class FlowConfigMetadata(BaseModel):
 
 class BaseFlowConfig(BaseModel):
     DIRECTORY_PATH: ClassVar[Path]
+    # The environments a config class claims within its schema. Empty on a schema's full
+    # class, which takes every environment no class in ``CONFIG_CLASSES`` claims.
+    SUPPORTED_ENVIRONMENTS: ClassVar[frozenset[str]] = frozenset()
 
     # Feature ``config/`` subdir for this tier: ``None`` = none, ``""`` = v1.
     FEATURE_CONFIG_SUBDIR: ClassVar[Optional[str]] = None
@@ -164,8 +191,8 @@ class BaseFlowConfig(BaseModel):
     routers: list[dict]
     environment: str
     version: str
-    # The concrete semver this config represents (e.g. "2.1.0"), set when loaded via
-    # ``from_yaml_config`` from the filename stem. This is the flow's own identity — the
+    # The concrete semver this config represents (e.g. "2.1.0"), set when loaded from
+    # the registry, from the filename stem. This is the flow's own identity — the
     # version actually run — as opposed to ``version`` (the schema version, e.g. "v1") or
     # the constraint a client requested (e.g. "^2.0.0"). ``None`` for configs built
     # directly (inline flows, tests), which have no registry resolution step.
@@ -177,7 +204,7 @@ class BaseFlowConfig(BaseModel):
     product_group: Optional[str] = None
 
     # The registry flow id and concrete version this config was loaded from. Set only by
-    # ``from_registry_file`` and the loaders that call it, so a config built from
+    # ``load_registry_file`` and the loaders that call it, so a config built from
     # caller-supplied data (an inline flow) cannot claim a registry identity. Private
     # attributes are not part of the schema: input cannot set them and ``model_dump``
     # does not emit them.
@@ -257,86 +284,33 @@ class BaseFlowConfig(BaseModel):
 
     @classmethod
     def from_yaml_config(cls, flow_id: str, flow_version: Optional[str] = None) -> Self:
-        """Load a flow config from its YAML file.
+        """Load a registry file as this class, whatever its ``environment``.
 
-        Version candidates come from both the feature root (for a flow moved
-        under ai/features/) and the legacy ``DIRECTORY_PATH`` root; on a
-        ``(flow, version)`` collision the legacy copy wins, matching
-        ``list_flow_configs``.
+        For tests and tools that know the class a file validates as. The registry loads
+        through its schema module's ``load_config``, which picks the class from the file's
+        ``environment``.
 
         Args:
             flow_id: Flow name (e.g. "developer").
             flow_version: Version constraint (e.g. "1.0.0", "^1.0.0"). None uses the default (1.0.0).
-                Supports the same constraint syntax as Poetry — see
-                https://python-poetry.org/docs/dependency-specification/#version-constraints
-                Path traversal is prevented by _safe_resolve.
 
         Returns:
-            The loaded config, with ``resolved_version`` and ``config_version`` set to the
-            concrete semver the constraint resolved to (e.g. "2.1.0"), and ``config_id``
-            set to ``flow_id``.
+            The loaded config, with the registry identity ``load_registry_config`` sets.
         """
-        # A registry id is a bare directory name. A path that resolves to the same
-        # directory would load the flow under an id it does not match.
-        if flow_id in ("", ".", "..") or Path(flow_id).name != flow_id:
-            raise ValueError(f"Invalid flow id: '{flow_id}' is not a bare name")
-
-        version_query = flow_version or DEFAULT_FLOW_VERSION
-
-        # Version candidates from the feature root (ai/features/<domain>/<feature>/config/)
-        # and the legacy <DIRECTORY_PATH>/<flow_id>/. Legacy wins per version, matching
-        # list_flow_configs, so a config fetched into the writable legacy root overrides
-        # the bundled feature copy.
-        candidates: dict[str, Path] = {}
-        feature_config_dir = cls.feature_config_roots().get(flow_id)
-        if feature_config_dir is not None:
-            feature_base = feature_config_dir.resolve()
-            for f in feature_base.glob("*.yml"):
-                try:
-                    candidates[f.stem] = _safe_resolve(f, feature_base)
-                except ValueError as e:
-                    logger.warning(
-                        "Security validation failed for config file",
-                        config_file=str(f),
-                        error=str(e),
-                    )
-        legacy_base = cls.DIRECTORY_PATH.resolve()
-        try:
-            legacy_dir = _safe_resolve(legacy_base / flow_id, legacy_base)
-        except ValueError as e:
-            # An unsafe legacy dir must not discard the feature candidates:
-            # list_flow_configs skips it per file and still lists the feature
-            # copy, and loading must agree with the listing.
-            if not candidates:
-                raise
-            logger.warning(
-                "Security validation failed for legacy flow dir",
-                flow_id=flow_id,
-                error=str(e),
-            )
-        else:
-            for f in legacy_dir.glob("*.yml"):
-                try:
-                    candidates[f.stem] = _safe_resolve(f, legacy_base)
-                except ValueError as e:
-                    logger.warning(
-                        "Security validation failed for config file",
-                        config_file=str(f),
-                        error=str(e),
-                    )
-
-        version = resolve_version(list(candidates), version_query)
-        # resolve_version only returns a member of its input, so the lookup
-        # cannot miss; a file deleted in between still hits the handler below.
-        return cls.from_registry_file(candidates[version], flow_id, version)
+        return load_registry_config(
+            cls,
+            flow_id,
+            flow_version,
+            parse=lambda data, **fields: cls(**data, **fields),
+        )
 
     @classmethod
     def from_registry_file(cls, path: Path, flow_id: str, version: str) -> Self:
-        """Load one registry file, with the identity it has at runtime.
+        """Load one registry file as this class, with the identity it has at runtime.
 
-        Every registry load goes through here: ``from_yaml_config`` after it resolves the version, and the config
-        sweep in CI. An inline flow or a flow from the AI Catalog never does, so it has no identity, which is what
-        rules reserved for repository flows read.
+        For tests that already know the file, its version and the class it validates as. The config sweep in CI goes
+        through the registry's ``load_config_file``, which picks the class from the file's ``environment``. See
+        ``load_registry_file``.
 
         Args:
             path: The config file.
@@ -346,35 +320,179 @@ class BaseFlowConfig(BaseModel):
         Returns:
             The loaded config, with ``resolved_version`` set to ``version``.
         """
-        try:
-            with open(path, "r", encoding="utf-8") as file:
-                data = yaml.safe_load(file) or {}
-        except FileNotFoundError:
-            raise FileNotFoundError(f"{flow_id}/{version} file not found at {path}")
-        except yaml.YAMLError as e:
-            raise yaml.YAMLError(f"Error parsing YAML file: {e}") from e
-
-        return cls._with_registry_identity(
-            cls(**data, resolved_version=version), flow_id, version
+        return load_registry_file(
+            path,
+            flow_id,
+            version,
+            parse=lambda data, **fields: cls(**data, **fields),
         )
 
-    @classmethod
-    def _with_registry_identity(cls, config: Self, flow_id: str, version: str) -> Self:
-        config._config_id = flow_id
-        config._config_version = version
-        return config
+
+def resolve_registry_file(
+    config_cls: type[BaseFlowConfig], flow_id: str, flow_version: Optional[str]
+) -> tuple[Path, str]:
+    """Find the registry file of *flow_id* that *flow_version* resolves to.
+
+    Version candidates come from both the feature root (for a flow moved
+    under ai/features/) and the legacy ``DIRECTORY_PATH`` root of *config_cls*; on a
+    ``(flow, version)`` collision the legacy copy wins, matching
+    ``list_flow_configs``.
+
+    Args:
+        config_cls: The schema's config class, whose roots to search.
+        flow_id: Flow name (e.g. "developer").
+        flow_version: Version constraint (e.g. "1.0.0", "^1.0.0"). None uses the default (1.0.0).
+            Supports the same constraint syntax as Poetry — see
+            https://python-poetry.org/docs/dependency-specification/#version-constraints
+            Path traversal is prevented by _safe_resolve.
+
+    Returns:
+        The file and the concrete semver the constraint resolved to (e.g. "2.1.0").
+    """
+
+    # A registry id is a bare directory name. A path that resolves to the same
+    # directory would load the flow under an id it does not match.
+    if flow_id in ("", ".", "..") or Path(flow_id).name != flow_id:
+        raise ValueError(f"Invalid flow id: '{flow_id}' is not a bare name")
+
+    version_query = flow_version or DEFAULT_FLOW_VERSION
+
+    # Version candidates from the feature root (ai/features/<domain>/<feature>/config/)
+    # and the legacy <DIRECTORY_PATH>/<flow_id>/. Legacy wins per version, matching
+    # list_flow_configs, so a config fetched into the writable legacy root overrides
+    # the bundled feature copy.
+    candidates: dict[str, Path] = {}
+    feature_config_dir = config_cls.feature_config_roots().get(flow_id)
+    if feature_config_dir is not None:
+        feature_base = feature_config_dir.resolve()
+        for f in feature_base.glob("*.yml"):
+            try:
+                candidates[f.stem] = _safe_resolve(f, feature_base)
+            except ValueError as e:
+                logger.warning(
+                    "Security validation failed for config file",
+                    config_file=str(f),
+                    error=str(e),
+                )
+    legacy_base = config_cls.DIRECTORY_PATH.resolve()
+    try:
+        legacy_dir = _safe_resolve(legacy_base / flow_id, legacy_base)
+    except ValueError as e:
+        # An unsafe legacy dir must not discard the feature candidates:
+        # list_flow_configs skips it per file and still lists the feature
+        # copy, and loading must agree with the listing.
+        if not candidates:
+            raise
+        logger.warning(
+            "Security validation failed for legacy flow dir",
+            flow_id=flow_id,
+            error=str(e),
+        )
+    else:
+        for f in legacy_dir.glob("*.yml"):
+            try:
+                candidates[f.stem] = _safe_resolve(f, legacy_base)
+            except ValueError as e:
+                logger.warning(
+                    "Security validation failed for config file",
+                    config_file=str(f),
+                    error=str(e),
+                )
+
+    version = resolve_version(list(candidates), version_query)
+    # resolve_version only returns a member of its input, so the lookup
+    # cannot miss; a file deleted in between still hits the handler below.
+    return candidates[version], version
 
 
-def list_flow_configs(flow_config_cls: type[BaseFlowConfig]) -> List[dict[str, str]]:
+def _read_registry_file(path: Path, flow_id: str, version: str) -> Any:
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            return yaml.safe_load(file)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"{flow_id}/{version} file not found at {path}")
+    except yaml.YAMLError as e:
+        raise yaml.YAMLError(f"Error parsing YAML file: {e}") from e
+
+
+def load_registry_config(
+    config_cls: type[BaseFlowConfig],
+    flow_id: str,
+    flow_version: Optional[str],
+    parse: Callable[..., _ConfigT],
+) -> _ConfigT:
+    """Load a registry file of *config_cls*'s schema with *parse* and set its registry identity.
+
+    Args:
+        config_cls: The schema's config class, whose roots to search.
+        flow_id: Flow name (e.g. "developer").
+        flow_version: Version constraint; see ``resolve_registry_file``.
+        parse: Builds the config from the file's data and ``resolved_version``.
+
+    Returns:
+        The config, with ``resolved_version`` and ``config_version`` set to the concrete
+        semver the constraint resolved to, and ``config_id`` set to ``flow_id``.
+    """
+    path, version = resolve_registry_file(config_cls, flow_id, flow_version)
+    return load_registry_file(path, flow_id, version, parse)
+
+
+def load_registry_file(
+    path: Path, flow_id: str, version: str, parse: Callable[..., _ConfigT]
+) -> _ConfigT:
+    """Load one registry file with *parse*, with the identity it has at runtime.
+
+    Every registry load goes through here: ``load_registry_config`` after it resolves the version, and the config
+    sweep in CI. An inline flow or a flow from the AI Catalog never does, so it has no identity, which is what rules
+    reserved for repository flows read.
+
+    Args:
+        path: The config file.
+        flow_id: The registry flow id the file belongs to.
+        version: The concrete version the file holds.
+        parse: Builds the config from the file's data and ``resolved_version``.
+
+    Returns:
+        The config, with ``resolved_version`` and ``config_version`` set to *version*, and ``config_id`` set to
+        *flow_id*.
+    """
+    config = parse(
+        _read_registry_file(path, flow_id, version) or {}, resolved_version=version
+    )
+    config._config_id = flow_id
+    config._config_version = version
+    return config
+
+
+def select_config_class(
+    environment: object,
+    environment_classes: Sequence[type[_ConfigT]],
+    full_cls: type[_ConfigT],
+) -> type[_ConfigT]:
+    """Return the class in *environment_classes* that claims *environment*, else *full_cls*.
+
+    A missing or unknown environment selects *full_cls*, whose own validation reports it.
+    """
+    if isinstance(environment, str):
+        for config_cls in environment_classes:
+            if environment in config_cls.SUPPORTED_ENVIRONMENTS:
+                return config_cls
+    return full_cls
+
+
+def list_flow_configs(
+    flow_config_cls: type[BaseFlowConfig], parse: Callable[..., BaseFlowConfig]
+) -> List[dict[str, str]]:
     """List all available flow configurations for the given config class.
 
     Scans the legacy ``DIRECTORY_PATH`` root and every feature root from
     ``feature_config_roots()``, de-duplicating by ``(flow, version)`` with the
-    legacy copy winning, matching ``from_yaml_config``. Errors during loading
+    legacy copy winning, matching ``resolve_registry_file``. Errors during loading
     are logged for observability but do not stop processing.
 
     Args:
         flow_config_cls: FlowConfig class whose roots to scan.
+        parse: Builds a config from a file's data, as the schema's registry loading does.
 
     Returns:
         List of dicts containing flow metadata and JSON-serialized configuration.
@@ -408,14 +526,14 @@ def list_flow_configs(flow_config_cls: type[BaseFlowConfig]) -> List[dict[str, s
             continue
 
         # A path-safe entry shadows later duplicates even when it fails to load,
-        # matching from_yaml_config, where a malformed legacy file still wins
+        # matching resolve_registry_file, where a malformed legacy file still wins
         # over the feature copy (and then fails to parse).
         seen.add((flow_name, flow_version))
         try:
             with open(yaml_path, "r", encoding="utf-8") as f:
                 config_data = yaml.safe_load(f)
 
-            config = flow_config_cls(**config_data)
+            config = parse(config_data)
             configs.append(
                 {
                     "flow_identifier": flow_name,
@@ -448,6 +566,76 @@ def list_flow_configs(flow_config_cls: type[BaseFlowConfig]) -> List[dict[str, s
     return configs
 
 
+class _ChatPartialConfig(Protocol):
+    """The parts of a schema's config class that ``ChatPartialMixin`` reads."""
+
+    components: list[dict]
+    flow: Optional[FlowConfigMetadata]
+    routers: Optional[list[dict]]
+    _config_id: Optional[str]
+    _config_version: Optional[str]
+
+    def __iter__(self) -> Iterator[tuple[str, Any]]: ...
+
+
+class ChatPartialMixin:
+    """The ``chat-partial`` environment's rules, shared by the v1 and experimental schemas.
+
+    Mix it in before a schema's ``FlowConfig``. It declares no Pydantic fields, so the
+    schema keeps its own field types; the partial class declares the fields it relaxes.
+    """
+
+    SUPPORTED_ENVIRONMENTS: ClassVar[frozenset[str]] = frozenset(
+        {CHAT_PARTIAL_ENVIRONMENT}
+    )
+
+    def _complete_as(
+        self: _ChatPartialConfig, complete_cls: type[_ConfigT]
+    ) -> _ConfigT:
+        """Return this config as *complete_cls*, filling in what ``chat-partial`` lets authors omit.
+
+        A missing ``flow.entry_point`` defaults to the single component, and missing or empty ``routers`` to that
+        component's route to ``end``, which is also how the engine treats ``routers: []``. A declared entry point and
+        non-empty routers are kept. This config is not mutated, and the result keeps its ``config_id`` and
+        ``config_version``.
+
+        Raises:
+            ValueError: If the entry point is missing and the first component has no ``name`` to default it to.
+                Validation doesn't require one, because the legacy chat path runs such a config without it.
+        """
+        flow = self.flow
+        entry_point = flow.entry_point if flow else None
+        if entry_point is None:
+            first = self.components[0] if self.components else {}
+            entry_point = first.get("name")
+            if not isinstance(entry_point, str):
+                raise ValueError(
+                    "A chat-partial config without 'flow.entry_point' needs a first "
+                    "component with a 'name'"
+                )
+            flow = FlowConfigMetadata(
+                entry_point=entry_point,
+                inputs=flow.inputs if flow else None,
+            )
+
+        config = complete_cls.model_validate(
+            {
+                **dict(self),
+                "flow": flow,
+                "routers": self.routers or [{"from": entry_point, "to": "end"}],
+            }
+        )
+        # Validation builds the config from public fields only, so carry the private
+        # registry identity over explicitly.
+        config._config_id = self._config_id
+        config._config_version = self._config_version
+        return config
+
+
+# A complete v1 flow config: the graph the builder reads, in any environment.
+# ``config_from_data`` loads a ``chat-partial`` config as ``PartialFlowConfig``, whose
+# ``to_config()`` completes it into a ``FlowConfig``. A comment, not a docstring, so it
+# stays out of the published JSON schema's ``description``.
 class FlowConfig(BaseFlowConfig):
     DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
     FEATURE_CONFIG_SUBDIR: ClassVar[Optional[str]] = ""
@@ -464,42 +652,50 @@ class FlowConfig(BaseFlowConfig):
         return self
 
 
-class PartialFlowConfig(FlowConfig):
+class PartialFlowConfig(ChatPartialMixin, FlowConfig):
+    """A ``chat-partial`` flow config as its author declares it, which may omit ``routers`` and ``flow``."""
+
+    environment: Literal["chat-partial"]
     flow: Optional[FlowConfigMetadata] = None  # type: ignore[assignment]
     routers: Optional[list[dict]] = None  # type: ignore[assignment]
 
     @override
     def to_config(self) -> FlowConfig:
-        """Complete the fields the chat-partial environment lets authors omit.
+        """Return the complete ``FlowConfig``, with what the ``chat-partial`` environment lets authors omit."""
+        return self._complete_as(FlowConfig)
 
-        ``flow.entry_point`` defaults to the single component, and ``routers`` to that component's route to ``end``.
-        Declared values are kept.
 
-        Returns:
-            A ``FlowConfig`` that keeps this config's ``config_id`` and ``config_version``.
-            This config is not mutated.
-        """
-        flow = self.flow
-        entry_point = flow.entry_point if flow else None
-        if entry_point is None:
-            entry_point = self.components[0]["name"]
-            flow = FlowConfigMetadata(
-                entry_point=entry_point,
-                inputs=flow.inputs if flow else None,
-            )
+# The classes that claim an environment in the v1 schema; any other environment
+# (``ambient``, ``chat``) validates as ``FlowConfig``.
+CONFIG_CLASSES: tuple[type[FlowConfig], ...] = (PartialFlowConfig,)
 
-        config = FlowConfig.model_validate(
-            {
-                **dict(self),
-                "flow": flow,
-                "routers": self.routers or [{"from": entry_point, "to": "end"}],
-            }
-        )
-        # Validation builds the config from public fields only, so carry the private
-        # registry identity over explicitly.
-        config._config_id = self._config_id
-        config._config_version = self._config_version
-        return config
+
+def config_from_data(data: dict[str, Any], **fields: Any) -> FlowConfig:
+    """Validate *data* as the v1 class of its ``environment``.
+
+    Args:
+        data: The config as read from YAML, a protobuf Struct, or a request.
+        **fields: Extra fields the loader sets, such as ``resolved_version``.
+
+    Returns:
+        The validated config; call ``to_config()`` for the graph the builder reads.
+    """
+    config_cls = select_config_class(
+        data.get("environment"), CONFIG_CLASSES, FlowConfig
+    )
+    return config_cls(**data, **fields)
+
+
+def load_config(flow_id: str, flow_version: Optional[str] = None) -> FlowConfig:
+    """Load a v1 registry file as the class of its ``environment``; see ``resolve_registry_file``."""
+    return load_registry_config(
+        FlowConfig, flow_id, flow_version, parse=config_from_data
+    )
+
+
+def load_config_file(path: Path, flow_id: str, version: str) -> FlowConfig:
+    """Load one known v1 registry file as the class of its ``environment``; see ``load_registry_file``."""
+    return load_registry_file(path, flow_id, version, parse=config_from_data)
 
 
 def load_component_class(
@@ -547,4 +743,4 @@ def load_component_class(
 
 
 def list_configs() -> List[dict[str, str]]:
-    return list_flow_configs(FlowConfig)
+    return list_flow_configs(FlowConfig, parse=config_from_data)

@@ -21,11 +21,19 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     PartialFlowConfig as ExperimentalPartialFlowConfig,
 )
+from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
+    config_from_data as experimental_config_from_data,
+)
+from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
+    load_config as experimental_load_config,
+)
 from duo_workflow_service.agent_platform.v1.chat_engine import ChatFlow
 from duo_workflow_service.agent_platform.v1.flows import FetchedFlow
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     PartialFlowConfig,
+    config_from_data,
+    load_config,
 )
 from duo_workflow_service.flow_request import (
     FetchedFlowRequest,
@@ -37,6 +45,7 @@ from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
+    FlowSchema,
     ResolvedFlow,
     _convert_struct_to_flow_config,
     _load_flow_from_inline_config,
@@ -44,7 +53,9 @@ from duo_workflow_service.workflows.registry import (
     _normalize_prompt_template_order,
     flow_config_from_fetched_definition,
     flow_factory,
+    get_flow_schema,
     list_configs,
+    load_config_file,
     resolve_flow,
 )
 from duo_workflow_service.workflows.software_development import Workflow
@@ -53,7 +64,6 @@ from duo_workflow_service.workflows.software_development import Workflow
 @pytest.fixture
 def simple_flow_config():
     mock_flow_config_cls = Mock()
-    mock_partial_flow_config_cls = Mock()
     mock_config_instance = Mock()
     # A config with no prompts of its own, as the struct above declares.
     mock_config_instance.prompts = None
@@ -81,7 +91,10 @@ def simple_flow_config():
 
     return {
         "flow_config_cls": mock_flow_config_cls,
-        "partial_flow_config_cls": mock_partial_flow_config_cls,
+        # Validates every config as the mock class, as the real schemas do for a full config.
+        "config_from_data": lambda data, **fields: mock_flow_config_cls(
+            **data, **fields
+        ),
         "flow_cls": mock_flow_cls,
         "struct": struct,
         "config_instance": mock_config_instance,
@@ -147,8 +160,7 @@ def build_chat_flow_config(
     struct.update(struct_data)
 
     return {
-        "flow_config_cls": FlowConfig,
-        "partial_flow_config_cls": PartialFlowConfig,
+        "config_from_data": config_from_data,
         "flow_cls": mock_flow_cls,
         "struct": struct,
         "expected_dict": expected_data,
@@ -195,6 +207,56 @@ def test_registry_flow_versions_return_correct_classes(version):
         assert result.func == v1.flows.Flow
 
 
+@pytest.mark.parametrize(
+    ("schema_version", "expected"),
+    [
+        ("v1", (config_from_data, load_config, v1.flows.Flow)),
+        (
+            "experimental",
+            (
+                experimental_config_from_data,
+                experimental_load_config,
+                experimental.flows.Flow,
+            ),
+        ),
+    ],
+)
+def test_get_flow_schema_returns_the_schema_functions(schema_version, expected):
+    assert get_flow_schema(schema_version) == expected
+
+
+@pytest.mark.parametrize(
+    ("schema_version", "environment", "expected_config_cls"),
+    [
+        ("v1", CHAT_PARTIAL_ENVIRONMENT, PartialFlowConfig),
+        ("v1", "chat", FlowConfig),
+        ("v1", "ambient", FlowConfig),
+        ("experimental", CHAT_PARTIAL_ENVIRONMENT, ExperimentalPartialFlowConfig),
+        ("experimental", "chat", ExperimentalFlowConfig),
+        ("experimental", "ambient", ExperimentalFlowConfig),
+    ],
+)
+def test_an_inline_config_validates_as_the_class_its_environment_selects(
+    schema_version, environment, expected_config_cls
+):
+    struct = struct_pb2.Struct()
+    struct.update(
+        {
+            "version": schema_version,
+            "environment": environment,
+            "components": [{"name": "agent", "type": "AgentComponent"}],
+            "routers": [{"from": "agent", "to": "end"}],
+            "flow": {"entry_point": "agent"},
+        }
+    )
+    config = _convert_struct_to_flow_config(
+        struct=struct,
+        flow_config_schema_version=schema_version,
+    )
+
+    assert type(config) is expected_config_cls
+
+
 def test_registry_resolve_unknown_flow_version():
     """Test resolving flow with unknown version raises ValidationError."""
     with pytest.raises(ValidationError, match="Invalid flowConfigSchemaVersion"):
@@ -207,14 +269,11 @@ def test_registry_resolve_unknown_flow_version():
 
 def test_registry_resolve_flow_config_error():
     """Test that config loading errors are handled properly."""
-    mock_flow_config_cls = Mock()
-    mock_flow_config_cls.from_yaml_config.side_effect = FileNotFoundError(
-        "Config not found"
-    )
+    mock_load_config = Mock(side_effect=FileNotFoundError("Config not found"))
 
     with patch(
         "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-        {"experimental": (mock_flow_config_cls, Mock(), Mock())},
+        {"experimental": FlowSchema(Mock(), mock_load_config, Mock())},
     ):
         with pytest.raises(ValueError, match="Unknown flow"):
             resolve_flow(
@@ -236,10 +295,8 @@ def test_resolve_flow_with_flow_config(
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
             {
-                "experimental": (
-                    mocks["flow_config_cls"],
-                    mocks["partial_flow_config_cls"],
-                    mocks["flow_cls"],
+                "experimental": FlowSchema(
+                    mocks["config_from_data"], Mock(), mocks["flow_cls"]
                 )
             },
         ),
@@ -280,13 +337,7 @@ def test_resolve_flow_with_chat_flow_config_success(config_params):
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {
-                "v1": (
-                    mocks["flow_config_cls"],
-                    mocks["partial_flow_config_cls"],
-                    mocks["flow_cls"],
-                )
-            },
+            {"v1": FlowSchema(mocks["config_from_data"], Mock(), mocks["flow_cls"])},
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -324,13 +375,7 @@ def test_resolve_flow_with_chat_flow_config_extracts_agent_name():
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {
-                "v1": (
-                    mocks["flow_config_cls"],
-                    mocks["partial_flow_config_cls"],
-                    mocks["flow_cls"],
-                )
-            },
+            {"v1": FlowSchema(mocks["config_from_data"], Mock(), mocks["flow_cls"])},
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -369,13 +414,7 @@ def test_resolve_flow_with_chat_flow_config_treats_omitted_toolset_as_empty(
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {
-                "v1": (
-                    mocks["flow_config_cls"],
-                    mocks["partial_flow_config_cls"],
-                    mocks["flow_cls"],
-                )
-            },
+            {"v1": FlowSchema(mocks["config_from_data"], Mock(), mocks["flow_cls"])},
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -411,13 +450,7 @@ def test_resolve_flow_with_chat_flow_config_forwards_component_inputs():
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {
-                "v1": (
-                    mocks["flow_config_cls"],
-                    mocks["partial_flow_config_cls"],
-                    mocks["flow_cls"],
-                )
-            },
+            {"v1": FlowSchema(mocks["config_from_data"], Mock(), mocks["flow_cls"])},
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -501,13 +534,7 @@ def test_resolve_flow_with_chat_flow_config_failure(config_params, expected_erro
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {
-                "v1": (
-                    mocks["flow_config_cls"],
-                    mocks["partial_flow_config_cls"],
-                    mocks["flow_cls"],
-                )
-            },
+            {"v1": FlowSchema(mocks["config_from_data"], Mock(), mocks["flow_cls"])},
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -532,9 +559,9 @@ def test_routers_and_flow_required_for_chat_optional_for_chat_partial():
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
             {
-                "v1": (
-                    chat_partial_config["flow_config_cls"],
-                    chat_partial_config["partial_flow_config_cls"],
+                "v1": FlowSchema(
+                    chat_partial_config["config_from_data"],
+                    Mock(),
                     chat_partial_config["flow_cls"],
                 )
             },
@@ -558,10 +585,8 @@ def test_routers_and_flow_required_for_chat_optional_for_chat_partial():
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
             {
-                "v1": (
-                    chat_config["flow_config_cls"],
-                    chat_config["partial_flow_config_cls"],
-                    chat_config["flow_cls"],
+                "v1": FlowSchema(
+                    chat_config["config_from_data"], Mock(), chat_config["flow_cls"]
                 )
             },
         ),
@@ -671,38 +696,34 @@ class TestLoadFlowFromRegistry:
     """Tests for _load_flow_from_registry (YAML-based flow loader)."""
 
     def test_explicit_version_passes_correct_path(self):
-        """Verify that the version argument is forwarded verbatim to from_yaml_config."""
-        mock_config_cls = Mock()
+        """Verify that the version argument is forwarded verbatim to load_config."""
         mock_config = Mock()
         mock_config.environment = "ambient"
         mock_config.components = []
         mock_config.prompts = None
         mock_config.resolved_version = "2.0.0"
-        mock_config_cls.from_yaml_config = Mock(return_value=mock_config)
+        mock_load_config = Mock(return_value=mock_config)
 
         with patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"v1": (mock_config_cls, Mock(), Mock())},
+            {"v1": FlowSchema(Mock(), mock_load_config, Mock())},
         ):
             with patch("duo_workflow_service.workflows.registry.flow_factory"):
                 _load_flow_from_registry("developer", "v1", "2.0.0")
-                mock_config_cls.from_yaml_config.assert_called_once_with(
-                    "developer", "2.0.0"
-                )
+                mock_load_config.assert_called_once_with("developer", "2.0.0")
 
     def test_returns_resolved_version_from_config(self):
         """The loaded flow's identity is surfaced: resolved semver plus flow_id/schema_version."""
-        mock_config_cls = Mock()
         mock_config = Mock()
         mock_config.environment = "ambient"
         mock_config.components = []
         mock_config.prompts = None
         mock_config.resolved_version = "2.1.0"
-        mock_config_cls.from_yaml_config = Mock(return_value=mock_config)
+        mock_load_config = Mock(return_value=mock_config)
 
         with patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"v1": (mock_config_cls, Mock(), Mock())},
+            {"v1": FlowSchema(Mock(), mock_load_config, Mock())},
         ):
             with patch("duo_workflow_service.workflows.registry.flow_factory"):
                 resolved = _load_flow_from_registry("developer", "v1", "^2.0.0")
@@ -716,17 +737,16 @@ class TestResolveFlowTrackingFields:
     """resolve_flow surfaces the identity of what was *resolved* for tracing."""
 
     def test_registry_flow_tracks_resolved_version(self):
-        mock_config_cls = Mock()
         mock_config = Mock()
         mock_config.environment = "ambient"
         mock_config.components = []
         mock_config.prompts = None
         mock_config.resolved_version = "2.1.0"
-        mock_config_cls.from_yaml_config = Mock(return_value=mock_config)
+        mock_load_config = Mock(return_value=mock_config)
 
         with patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"v1": (mock_config_cls, Mock(), Mock())},
+            {"v1": FlowSchema(Mock(), mock_load_config, Mock())},
         ):
             with patch("duo_workflow_service.workflows.registry.flow_factory"):
                 resolved = resolve_flow(
@@ -749,10 +769,8 @@ class TestResolveFlowTrackingFields:
             patch(
                 "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
                 {
-                    "experimental": (
-                        mocks["flow_config_cls"],
-                        mocks["partial_flow_config_cls"],
-                        mocks["flow_cls"],
+                    "experimental": FlowSchema(
+                        mocks["config_from_data"], Mock(), mocks["flow_cls"]
                     )
                 },
             ),
@@ -791,10 +809,8 @@ class TestResolveFlowTrackingFields:
             patch(
                 "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
                 {
-                    "experimental": (
-                        mocks["flow_config_cls"],
-                        mocks["partial_flow_config_cls"],
-                        mocks["flow_cls"],
+                    "experimental": FlowSchema(
+                        mocks["config_from_data"], Mock(), mocks["flow_cls"]
                     )
                 },
             ),
@@ -983,7 +999,6 @@ class TestNormalizePromptTemplateOrder:
             loaded = _convert_struct_to_flow_config(
                 struct=struct,
                 flow_config_schema_version="experimental",
-                flow_config_cls=ExperimentalFlowConfig,
             )
 
         assert list(loaded.prompts[0].prompt_template.keys()) == ["system", "user"]
@@ -1039,6 +1054,7 @@ def engine_owned_factory(config):
 def test_a_template_version_outside_chat_partial_is_refused():
     # Refused before the environment branch, so an ambient flow can't build with prompts nothing renders.
     config = engine_owned_chat_partial_config(
+        config_cls=FlowConfig,
         environment="ambient",
         routers=[{"from": "chat_agent", "to": "end"}],
         flow={"entry_point": "chat_agent"},
@@ -1049,9 +1065,9 @@ def test_a_template_version_outside_chat_partial_is_refused():
 
 
 def test_a_template_version_from_the_registry_takes_the_engine_path(tmp_path):
-    # Loaded the way a session loads it. Until a chat-partial registry file may omit `routers` (!7516), the engine
-    # refuses the declared ones; what this pins is that the version reaches the engine instead of legacy chat.
-    data = yaml.safe_load(
+    # Loaded the way a session loads it: a chat-partial file declares no `routers`, and the engine completes them.
+    (tmp_path / "assistant").mkdir()
+    (tmp_path / "assistant" / "1.0.0.yml").write_text(
         (
             Path(__file__).parents[2]
             / "prompts"
@@ -1059,23 +1075,39 @@ def test_a_template_version_from_the_registry_takes_the_engine_path(tmp_path):
             / "chat_partial_template.yml"
         ).read_text()
     )
-    data |= {
-        "routers": [{"from": "agent", "to": "end"}],
-        "flow": {"entry_point": "agent"},
-    }
-    (tmp_path / "assistant").mkdir()
-    (tmp_path / "assistant" / "1.0.0.yml").write_text(yaml.safe_dump(data))
 
     with (
         patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path),
         patch.object(FlowConfig, "feature_config_roots", return_value={}),
-        pytest.raises(ValueError) as raised,
     ):
-        _load_flow_from_registry("assistant", "v1", "^1.0.0")
+        resolved = _load_flow_from_registry("assistant", "v1", "^1.0.0")
 
-    assert "Engine-owned chat-partial flows reject declared routers" in str(
-        raised.value.__cause__
+    assert resolved.factory.func is ChatFlow
+    assert resolved.factory.keywords["config"].config_id == "assistant"
+
+
+@pytest.mark.parametrize("schema_version", ["experimental", "v1"])
+def test_a_known_registry_file_loads_as_its_environment_class_with_its_identity(
+    tmp_path, schema_version
+):
+    path = tmp_path / "1.0.0.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "version": schema_version,
+                "environment": CHAT_PARTIAL_ENVIRONMENT,
+                "components": [
+                    {"name": "agent", "type": "AgentComponent", "prompt_id": "p"}
+                ],
+            }
+        )
     )
+
+    config = load_config_file(schema_version, path, "assistant", "1.0.0")
+
+    # Chat-partial, so the partial class, which may leave out `routers`.
+    assert type(config).__name__ == "PartialFlowConfig"
+    assert (config.config_id, config.config_version) == ("assistant", "1.0.0")
 
 
 def test_every_shipped_chat_partial_config_stays_on_legacy_chat():
@@ -1199,23 +1231,27 @@ class TestRegistryIdentity:
         assert resolved.factory.keywords["config"].config_id in METADATA_ONLY_FLOWS
 
     @pytest.mark.parametrize("schema_version", ["experimental", "v1"])
-    def test_an_inline_config_has_no_registry_id(self, schema_version):
+    @pytest.mark.parametrize("environment", ["ambient", CHAT_PARTIAL_ENVIRONMENT])
+    def test_an_inline_config_has_no_registry_id(self, schema_version, environment):
         struct = struct_pb2.Struct()
         struct.update(
             {
                 "version": schema_version,
-                "environment": "ambient",
+                "environment": environment,
                 "name": "bl_security",
                 "config_id": "bl_security",
-                "components": [],
+                "_config_id": "bl_security",
+                "_config_version": "1.0.0",
+                "components": [{"name": "a", "type": "AgentComponent"}],
                 "routers": [],
                 "flow": {"entry_point": "a"},
             }
         )
 
-        factory = _load_flow_from_inline_config(struct, schema_version)
+        config = _convert_struct_to_flow_config(struct, schema_version)
 
-        assert factory.keywords["config"].config_id is None
+        assert config.config_id is None
+        assert config.config_version is None
 
 
 # Resolving a fetched flow request, and building a config from a fetched definition.
