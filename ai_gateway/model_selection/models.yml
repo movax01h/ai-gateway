@@ -1159,6 +1159,27 @@ models:
     prompt_params:
       vertex_location: global
 
+  - name: "Gemini 4 Neon"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "gemini_4_neon_vertex"
+    requires_paid_credits: false
+    description: "Google's low-latency Gemini 4 model for coding, multi-step reasoning, and agentic workflows."
+    cost_indicator: "$$$"
+    max_context_tokens: 1_000_000
+    supports_vision: true  # 2026-11-19 - https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/4-neon and confirmed via manual testing
+    proxy_provider: vertex-ai
+    model_class_provider: google_genai
+    family:
+      - gemini
+    effort_levels: *gemini_3_effort
+    params:
+      model: "gemini-4-neon"
+      max_tokens: 65_536
+      thinking_level: "medium"
+      streaming: "true"
+    prompt_params:
+      vertex_location: global
+
   - name: "GPT-6 Astra"
     provider: "OpenAI"
     gitlab_identifier: "gpt_6_astra"
