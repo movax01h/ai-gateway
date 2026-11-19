@@ -959,12 +959,32 @@
     }
   },
   "required": [
-    "flow",
     "components",
-    "routers",
     "environment",
     "version"
   ],
   "title": "FlowConfig",
-  "type": "object"
+  "type": "object",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "environment": {
+            "enum": [
+              "chat-partial"
+            ]
+          }
+        },
+        "required": [
+          "environment"
+        ]
+      },
+      "else": {
+        "required": [
+          "flow",
+          "routers"
+        ]
+      }
+    }
+  ]
 }

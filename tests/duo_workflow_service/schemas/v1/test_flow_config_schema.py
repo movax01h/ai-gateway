@@ -1,8 +1,11 @@
 import json
-from typing import Optional
+from typing import ClassVar, Literal, Optional
 
+import jsonschema
+import pytest
 from pydantic import BaseModel, ConfigDict
 
+from duo_workflow_service.agent_platform.v1.flows import flow_config
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     INPUT_JSONSCHEMA_VERSION,
     FlowConfig,
@@ -13,6 +16,16 @@ from duo_workflow_service.schemas.v1.flow_config_schema import (
     generate_flow_config_schema,
     write_flow_config_schema,
 )
+
+_CHAT_PARTIAL_WITHOUT_ROUTERS = {
+    "version": "v1",
+    "environment": "chat-partial",
+    "components": [{"name": "agent", "type": "AgentComponent"}],
+}
+_ROUTED = {
+    "routers": [{"from": "agent", "to": "end"}],
+    "flow": {"entry_point": "agent"},
+}
 
 
 class TestFlowConfigJsonSchemaGenerator:
@@ -63,11 +76,17 @@ class TestGenerateFlowConfigSchema:
 
         This is the invariant the CI lint job (``make check-duo-workflow-flow-schema``)
         relies on: if ``FlowConfig`` changes without regenerating the checked-in file,
-        the two fall out of sync and the job fails.
+        the two fall out of sync and the job fails. Only ``required`` and the
+        environment clauses in ``allOf`` differ from the model's own schema.
         """
-        assert generate_flow_config_schema() == FlowConfig.model_json_schema(
+        model_schema = FlowConfig.model_json_schema(
             schema_generator=FlowConfigJsonSchemaGenerator
         )
+        schema = generate_flow_config_schema()
+
+        assert {k: v for k, v in schema.items() if k not in ("required", "allOf")} == {
+            k: v for k, v in model_schema.items() if k != "required"
+        }
 
     def test_closes_every_model_object(self):
         """Every model object rejects unknown keys, although ``FlowConfig`` ignores them at runtime."""
@@ -88,13 +107,84 @@ class TestGenerateFlowConfigSchema:
 
         assert schema["title"] == "FlowConfig"
         assert schema["type"] == "object"
-        assert set(schema["required"]) == {
-            "flow",
-            "components",
-            "routers",
-            "environment",
-            "version",
-        }
+        assert set(schema["required"]) == {"components", "environment", "version"}
+        assert schema["allOf"] == [
+            {
+                "if": {
+                    "properties": {"environment": {"enum": ["chat-partial"]}},
+                    "required": ["environment"],
+                },
+                "else": {"required": ["flow", "routers"]},
+            }
+        ]
+
+    @pytest.mark.parametrize(
+        ("config", "errors"),
+        [
+            (_CHAT_PARTIAL_WITHOUT_ROUTERS, []),
+            ({**_CHAT_PARTIAL_WITHOUT_ROUTERS, **_ROUTED}, []),
+            ({**_CHAT_PARTIAL_WITHOUT_ROUTERS, **_ROUTED, "environment": "chat"}, []),
+            (
+                {**_CHAT_PARTIAL_WITHOUT_ROUTERS, "environment": "chat"},
+                [
+                    "'flow' is a required property",
+                    "'routers' is a required property",
+                ],
+            ),
+            (
+                {**_CHAT_PARTIAL_WITHOUT_ROUTERS, "flow": {"entry_point": "agent"}}
+                | {"environment": "ambient"},
+                ["'routers' is a required property"],
+            ),
+        ],
+        ids=[
+            "chat-partial without routers",
+            "chat-partial with routers",
+            "chat with routers",
+            "chat without routers",
+            "ambient without routers",
+        ],
+    )
+    def test_names_what_the_environment_requires(self, config, errors):
+        validator = jsonschema.Draft202012Validator(generate_flow_config_schema())
+
+        assert (
+            sorted(error.message for error in validator.iter_errors(config)) == errors
+        )
+
+    def test_requires_what_a_listed_class_adds_for_its_environment(self, monkeypatch):
+        """A listed class that requires more than the others gets its own ``then`` clause."""
+
+        class _ChatWithTitle(FlowConfig):
+            SUPPORTED_ENVIRONMENTS: ClassVar[frozenset[str]] = frozenset({"chat"})
+            environment: Literal["chat"]
+            title: str
+
+        monkeypatch.setattr(
+            flow_config,
+            "CONFIG_CLASSES",
+            (*flow_config.CONFIG_CLASSES, _ChatWithTitle),
+        )
+
+        schema = generate_flow_config_schema()
+
+        assert set(schema["required"]) == {"components", "environment", "version"}
+        assert schema["allOf"] == [
+            {
+                "if": {
+                    "properties": {"environment": {"enum": ["chat"]}},
+                    "required": ["environment"],
+                },
+                "then": {"required": ["flow", "routers", "title"]},
+            },
+            {
+                "if": {
+                    "properties": {"environment": {"enum": ["chat-partial", "chat"]}},
+                    "required": ["environment"],
+                },
+                "else": {"required": ["flow", "routers"]},
+            },
+        ]
 
     def test_is_json_serializable(self):
         schema = generate_flow_config_schema()

@@ -14,7 +14,7 @@ from duo_workflow_service.agent_platform.utils.validation import (
     placeholder_items_for,
 )
 from duo_workflow_service.agent_platform.v1.catalog import CatalogItemRef
-from duo_workflow_service.workflows.registry import get_flow_classes
+from duo_workflow_service.workflows.registry import get_flow_schema, load_config_file
 
 AI_CATALOG_REFERENCE = {
     "source": "ai-catalog",
@@ -202,6 +202,23 @@ class TestFlowConfigStructure:
         with pytest.raises(ValueError, match="Missing required field 'environment'"):
             validator.validate(yml_without_environment)
 
+    @pytest.mark.parametrize("environment", ["ambient", "chat"])
+    def test_missing_routers_names_the_field(
+        self, validator: FlowValidator, environment: str
+    ):
+        """The AI Catalog shows these strings, so a missing field keeps its plain location.
+
+        Validating through a tagged union would prefix it with the branch (``chat.routers``).
+        """
+        yml_dict = yaml.safe_load(_build_yaml())
+        yml_dict["environment"] = environment
+        del yml_dict["routers"]
+
+        with pytest.raises(FlowValidationError) as exc_info:
+            validator.validate(yaml.dump(yml_dict))
+
+        assert exc_info.value.errors == ["routers: Field required"]
+
 
 class TestPromptVariableValidation:
     def test_happy_path(self, validator: FlowValidator):
@@ -266,10 +283,9 @@ class TestTemplateFormat:
     ):
         path = tmp_path / "1.0.0.yml"
         path.write_text(yaml.safe_dump(self.CONFIG))
-        config_cls, flow_cls = get_flow_classes("v1", "chat-partial")
-
         validator.validate_config(
-            config_cls.from_registry_file(path, "assistant", "1.0.0"), flow_cls
+            load_config_file("v1", path, "assistant", "1.0.0"),
+            get_flow_schema("v1").flow_cls,
         )
 
 

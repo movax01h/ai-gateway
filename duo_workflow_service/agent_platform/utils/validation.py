@@ -26,7 +26,7 @@ from duo_workflow_service.agent_platform.v1.flows.validation import (
     _DISABLED_INTERNAL_EVENT_CLIENT,
     DryRunFlowValidator,
 )
-from duo_workflow_service.workflows.registry import flow_factory, get_flow_classes
+from duo_workflow_service.workflows.registry import flow_factory, get_flow_schema
 
 # Re-export so existing callers can still import from here.
 __all__ = [
@@ -78,8 +78,8 @@ class FlowValidator:
 
         A config validated from text has no registry identity, which is what a flow written outside this
         repository has at runtime too, so rules that only repository flows may use are refused here as they would
-        be there. To validate a config that ships here, load it with ``from_registry_file`` on the config class
-        that ``get_flow_classes`` returns for its version and environment, and pass it to ``validate_config``.
+        be there. To validate a config that ships here, load it with the registry's ``load_config_file``, which picks
+        the class for its version and environment, and pass it to ``validate_config``.
 
         Args:
             yaml_content: Raw YAML text of the flow configuration.
@@ -124,20 +124,20 @@ class FlowValidator:
 
         self._check_component_count(config_dict)
 
-        flow_config_cls, flow_cls = get_flow_classes(schema_version, environment)
+        schema = get_flow_schema(schema_version)
         try:
-            config = flow_config_cls(**config_dict)
+            config = schema.config_from_data(config_dict)
         except PydanticValidationError as exc:
             raise FlowValidationError.from_pydantic(exc) from exc
 
-        self.validate_config(config, flow_cls)
+        self.validate_config(config, schema.flow_cls)
 
     def validate_config(self, config: Any, flow_cls: Optional[Any] = None) -> None:
         """Validate a flow configuration that is already built.
 
         Takes the config as the registry loaded it, identity included, so a rule that only this repository's flows
         may use is checked here exactly as it is when the flow runs. Only loading a registry file
-        (``from_registry_file``) sets that identity.
+        (``load_registry_file``, behind ``load_config`` and ``load_config_file``) sets that identity.
 
         Args:
             config: The built flow configuration.
@@ -148,7 +148,7 @@ class FlowValidator:
         """
         environment = config.environment
         if flow_cls is None:
-            _, flow_cls = get_flow_classes(config.version, environment)
+            flow_cls = get_flow_schema(config.version).flow_cls
 
         # Environment-level checks: component count for chat-partial, prompt
         # security scan, which prompt format may be used, etc.

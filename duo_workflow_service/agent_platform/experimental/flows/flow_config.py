@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Callable, ClassVar, List, Literal, Optional
+from typing import Any, Callable, ClassVar, List, Literal, Optional, override
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
@@ -10,18 +10,26 @@ from duo_workflow_service.agent_platform.experimental.components import (
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     MCP_AUTO_INJECT_ENVIRONMENTS,
     BaseFlowConfig,
+    ChatPartialMixin,
     FlowConfigInput,
     FlowConfigMetadata,
     list_flow_configs,
+    load_registry_config,
+    load_registry_file,
+    select_config_class,
 )
 
 __all__ = [
+    "CONFIG_CLASSES",
     "FlowConfig",
     "FlowConfigInput",
     "FlowConfigMetadata",
     "PartialFlowConfig",
+    "config_from_data",
     "list_configs",
     "load_component_class",
+    "load_config",
+    "load_config_file",
 ]
 
 _EXPERIMENTAL_MCP_AUTO_INJECT_ENVIRONMENTS = MCP_AUTO_INJECT_ENVIRONMENTS | frozenset(
@@ -53,10 +61,47 @@ class FlowConfig(BaseFlowConfig):
         """
         return self.environment in _EXPERIMENTAL_MCP_AUTO_INJECT_ENVIRONMENTS
 
+    def to_config(self) -> "FlowConfig":
+        """Return the complete config the graph builder reads, which a full config already is."""
+        return self
 
-class PartialFlowConfig(FlowConfig):
+
+class PartialFlowConfig(ChatPartialMixin, FlowConfig):
+    """A ``chat-partial`` flow config as its author declares it, which may omit ``routers`` and ``flow``."""
+
+    environment: Literal["chat-partial"]
     flow: Optional[FlowConfigMetadata] = None  # type: ignore[assignment]
     routers: Optional[list[dict]] = None  # type: ignore[assignment]
+
+    @override
+    def to_config(self) -> FlowConfig:
+        """Return the complete ``FlowConfig``, with what the ``chat-partial`` environment lets authors omit."""
+        return self._complete_as(FlowConfig)
+
+
+# The classes that claim an environment in the experimental schema. It leaves
+# ``environment`` open, so any other environment validates as ``FlowConfig``.
+CONFIG_CLASSES: tuple[type[FlowConfig], ...] = (PartialFlowConfig,)
+
+
+def config_from_data(data: dict[str, Any], **fields: Any) -> FlowConfig:
+    """Validate *data* as the experimental class of its ``environment``."""
+    config_cls = select_config_class(
+        data.get("environment"), CONFIG_CLASSES, FlowConfig
+    )
+    return config_cls(**data, **fields)
+
+
+def load_config(flow_id: str, flow_version: Optional[str] = None) -> FlowConfig:
+    """Load an experimental registry file as the class of its ``environment``."""
+    return load_registry_config(
+        FlowConfig, flow_id, flow_version, parse=config_from_data
+    )
+
+
+def load_config_file(path: Path, flow_id: str, version: str) -> FlowConfig:
+    """Load one known experimental registry file as the class of its ``environment``."""
+    return load_registry_file(path, flow_id, version, parse=config_from_data)
 
 
 def load_component_class(
@@ -104,4 +149,4 @@ def load_component_class(
 
 
 def list_configs() -> List[dict[str, str]]:
-    return list_flow_configs(FlowConfig)
+    return list_flow_configs(FlowConfig, parse=config_from_data)

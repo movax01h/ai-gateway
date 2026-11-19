@@ -164,6 +164,41 @@ class TestFromYamlConfig:
         config = flow_config.FlowConfig.from_yaml_config("moved_flow", "1.0.0")
         assert config.name == "moved_flow"
 
+    def test_symlinked_legacy_dir_without_feature_copy_is_rejected(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # With no feature candidates to fall back to, an escaping legacy dir fails the load.
+        outside = tmp_path / "outside_config"
+        outside.mkdir()
+        (outside / "1.0.0.yml").write_text(_YAML.format(name="outside"))
+        legacy = tmp_path / "configs"
+        legacy.mkdir()
+        (legacy / "escaping_flow").symlink_to(outside)
+        monkeypatch.setattr(flow_config.FlowConfig, "DIRECTORY_PATH", legacy)
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            flow_config.load_config("escaping_flow", "1.0.0")
+
+    def test_a_file_removed_after_version_resolution_raises_file_not_found(
+        self, tmp_path: Path, monkeypatch
+    ):
+        legacy = tmp_path / "configs"
+        (legacy / "vanishing_flow").mkdir(parents=True)
+        config_file = legacy / "vanishing_flow" / "1.0.0.yml"
+        config_file.write_text(_YAML.format(name="vanishing_flow"))
+        monkeypatch.setattr(flow_config.FlowConfig, "DIRECTORY_PATH", legacy)
+
+        def resolve_then_remove(candidates, version_query):
+            config_file.unlink()
+            return "1.0.0"
+
+        monkeypatch.setattr(flow_config, "resolve_version", resolve_then_remove)
+
+        with pytest.raises(
+            FileNotFoundError, match="vanishing_flow/1.0.0 file not found"
+        ):
+            flow_config.load_config("vanishing_flow", "1.0.0")
+
     def test_real_tree_discovery_is_clean(self):
         # Discovery over the repo's real ai/features tree must not raise, so a
         # duplicate feature id is caught in CI, not at production boot.

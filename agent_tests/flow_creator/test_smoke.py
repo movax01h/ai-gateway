@@ -20,6 +20,7 @@ from agent_tests.flow_creator.helpers import (
     missing_top_level_keys,
     supervisor_components,
 )
+from duo_workflow_service.agent_platform.v1.flows.flow_config import config_from_data
 
 CASE_PARAMS = [
     pytest.param(case, id=case.case_id, marks=pytest.mark.xdist_group(case.case_id))
@@ -72,28 +73,19 @@ async def test_produces_one_complete_flow_yaml(generated_flow, case):
 @pytest.mark.parametrize("case", CASE_PARAMS)
 async def test_generated_yaml_matches_flow_config_schema(generated_flow, case):
     """The generated YAML must satisfy the framework's own config schema."""
-    from duo_workflow_service.agent_platform.v1.flows.flow_config import (
-        FlowConfig,
-        PartialFlowConfig,
-    )
-
     flow = await generated_flow(case)
     config = flow.config
     if config is None:
         pytest.skip(f"no parseable flow YAML to validate: {flow.parse_error}")
 
     # A chat-partial flow is embedded in Duo Chat, which owns the graph, so its
-    # `flow` and `routers` sections are optional.
-    config_class = (
-        PartialFlowConfig if config.get("environment") == "chat-partial" else FlowConfig
-    )
-
+    # `flow` and `routers` sections are optional; `config_from_data` applies that rule.
     try:
-        config_class(**config)
+        config_from_data(config)
     except ValidationError as exc:
         pytest.fail(
-            f"Generated flow for '{case.title}' does not satisfy "
-            f"{config_class.__name__}:\n{exc}\n\nYAML:\n{flow.yaml_text}"
+            f"Generated flow for '{case.title}' does not satisfy the v1 flow config "
+            f"schema:\n{exc}\n\nYAML:\n{flow.yaml_text}"
         )
 
 

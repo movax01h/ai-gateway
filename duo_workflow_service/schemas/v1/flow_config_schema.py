@@ -5,6 +5,13 @@ source of truth for the structure of a v1 flow definition YAML file. This module
 a JSON Schema from it via Pydantic's ``model_json_schema()`` and writes it to
 ``flow_config.schema.json`` next to this file.
 
+Which fields are required depends on ``environment``: an environment a class in the v1
+``CONFIG_CLASSES`` claims (``SUPPORTED_ENVIRONMENTS``) requires what that class
+requires (a ``chat-partial`` file may omit ``routers`` and ``flow``), and any other
+environment requires what ``FlowConfig`` requires. The schema says so with ``if``/``then``/``else``
+clauses derived from those classes, so the root stays one object and a validator names
+the missing field.
+
 Whenever ``FlowConfig`` (or any model it references, e.g. flow inputs) changes, regenerate
 the checked-in schema and commit it:
 
@@ -19,9 +26,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema, JsonSchemaMode, JsonSchemaValue
 from pydantic_core import CoreSchema, core_schema
 
+from duo_workflow_service.agent_platform.v1.flows import flow_config
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     INPUT_JSONSCHEMA_VERSION,
     FlowConfig,
@@ -64,9 +73,65 @@ class FlowConfigJsonSchemaGenerator(GenerateJsonSchema):
         return {"$schema": self.schema_dialect, **super().generate(schema, mode)}
 
 
+def _required_fields(config_cls: type[BaseModel]) -> list[str]:
+    return [
+        field.alias or name
+        for name, field in config_cls.model_fields.items()
+        if field.is_required()
+    ]
+
+
+def _environment_is(environments: list[str]) -> dict[str, Any]:
+    return {
+        "properties": {"environment": {"enum": environments}},
+        "required": ["environment"],
+    }
+
+
+def _require_by_environment(schema: dict[str, Any]) -> dict[str, Any]:
+    """Make the fields only some environments require conditional on ``environment``.
+
+    The root keeps the fields every environment requires. Each class in
+    ``CONFIG_CLASSES`` adds what it requires beyond those for the environments
+    it claims, and every other environment adds the rest of what ``FlowConfig`` requires.
+    """
+    environment_classes = flow_config.CONFIG_CLASSES
+    full_required = schema["required"]
+    common = set(full_required).intersection(
+        *(_required_fields(config_cls) for config_cls in environment_classes)
+    )
+
+    clauses: list[dict[str, Any]] = []
+    claimed: list[str] = []
+    for config_cls in environment_classes:
+        environments = sorted(config_cls.SUPPORTED_ENVIRONMENTS)
+        claimed.extend(environments)
+        extra = [name for name in _required_fields(config_cls) if name not in common]
+        if extra:
+            clauses.append(
+                {"if": _environment_is(environments), "then": {"required": extra}}
+            )
+    clauses.append(
+        {
+            "if": _environment_is(claimed),
+            "else": {
+                "required": [name for name in full_required if name not in common]
+            },
+        }
+    )
+
+    return {
+        **schema,
+        "required": [name for name in full_required if name in common],
+        "allOf": clauses,
+    }
+
+
 def generate_flow_config_schema() -> dict[str, Any]:
     """Return the JSON Schema dict for FlowConfig, built with ``FlowConfigJsonSchemaGenerator``."""
-    return FlowConfig.model_json_schema(schema_generator=FlowConfigJsonSchemaGenerator)
+    return _require_by_environment(
+        FlowConfig.model_json_schema(schema_generator=FlowConfigJsonSchemaGenerator)
+    )
 
 
 def write_flow_config_schema() -> None:

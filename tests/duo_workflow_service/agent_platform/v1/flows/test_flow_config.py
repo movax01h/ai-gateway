@@ -1,7 +1,7 @@
 # pylint: disable=too-many-lines
 import json
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 from unittest.mock import patch
 
 import pytest
@@ -14,12 +14,15 @@ from duo_workflow_service.agent_platform.v1.components import (
     RouterProtocol,
 )
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    CONFIG_CLASSES,
     FlowConfig,
     FlowConfigMetadata,
     PartialFlowConfig,
     _safe_resolve,
+    config_from_data,
     list_configs,
     load_component_class,
+    load_config,
 )
 from duo_workflow_service.agent_platform.v1.routers.base import BaseRouter
 from lib.feature_roots import default_features_dir
@@ -289,6 +292,188 @@ class TestFlowConfig:
         assert config.environment == "chat"
         assert config.version == "v1"
         assert config.resolved_version == "1.0.0"
+
+    @staticmethod
+    def _write_config(tmp_path, flow_id, config_data):
+        config_file = tmp_path / flow_id / "1.0.0.yml"
+        config_file.parent.mkdir()
+        config_file.write_text(yaml.dump(config_data))
+
+    def test_a_chat_partial_file_without_routers_loads_as_partial_config(
+        self, tmp_path
+    ):
+        self._write_config(
+            tmp_path,
+            "assistant",
+            {
+                "version": "v1",
+                "environment": "chat-partial",
+                "components": [
+                    {"name": "chat_agent", "type": "AgentComponent", "toolset": []}
+                ],
+            },
+        )
+
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            config = load_config("assistant")
+
+        assert type(config) is PartialFlowConfig
+        assert config.routers is None
+        assert config.flow is None
+        assert config.resolved_version == "1.0.0"
+        assert config.config_id == "assistant"
+        assert config.config_version == "1.0.0"
+
+        completed = config.to_config()
+        assert type(completed) is FlowConfig
+        assert completed.routers == [{"from": "chat_agent", "to": "end"}]
+        assert completed.flow.entry_point == "chat_agent"
+        assert completed.config_id == "assistant"
+        assert completed.config_version == "1.0.0"
+
+    @pytest.mark.parametrize("environment", ["chat", "ambient"])
+    def test_a_full_environment_file_still_loads_as_flow_config(
+        self, tmp_path, environment
+    ):
+        config_data = {
+            "version": "v1",
+            "environment": environment,
+            "components": [{"name": "agent", "type": "AgentComponent"}],
+            "routers": [{"from": "agent", "to": "end"}],
+            "flow": {"entry_point": "agent"},
+        }
+        self._write_config(tmp_path, "full", config_data)
+
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            config = load_config("full")
+
+        assert type(config) is FlowConfig
+        assert config.to_config() is config
+
+    def test_from_yaml_config_loads_as_its_own_class(self, tmp_path):
+        """Unlike ``load_config``, it doesn't pick a class from ``environment``."""
+        self._write_config(
+            tmp_path,
+            "declared",
+            {
+                "version": "v1",
+                "environment": "chat-partial",
+                "components": [{"name": "agent", "type": "AgentComponent"}],
+                "routers": [{"from": "agent", "to": "end"}],
+                "flow": {"entry_point": "agent"},
+            },
+        )
+
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            config = FlowConfig.from_yaml_config("declared")
+
+        assert type(config) is FlowConfig
+        assert config.config_id == "declared"
+        assert config.config_version == "1.0.0"
+
+    def test_every_listed_class_claims_v1_environments_matching_its_own(self):
+        """A listed class must claim v1 environments, exactly the ones its ``environment`` field takes."""
+        environments = set(get_args(FlowConfig.model_fields["environment"].annotation))
+
+        for config_cls in CONFIG_CLASSES:
+            assert issubclass(config_cls, FlowConfig)
+            assert config_cls.SUPPORTED_ENVIRONMENTS <= environments
+            assert set(
+                get_args(config_cls.model_fields["environment"].annotation)
+            ) == set(config_cls.SUPPORTED_ENVIRONMENTS)
+
+    def test_partial_config_relaxes_only_what_chat_partial_lets_authors_omit(self):
+        """The mixin must not loosen ``FlowConfig``'s other fields (``version``, ``prompts``, …).
+
+        ``flow`` and ``routers`` become optional. ``environment`` stays required and narrows to ``chat-partial``.
+        """
+        relaxed = {"flow", "routers", "environment"}
+        full = FlowConfig.model_fields
+        partial = PartialFlowConfig.model_fields
+
+        assert partial.keys() == full.keys()
+        assert {
+            name: (field.annotation, field.is_required())
+            for name, field in partial.items()
+            if name not in relaxed
+        } == {
+            name: (field.annotation, field.is_required())
+            for name, field in full.items()
+            if name not in relaxed
+        }
+        assert not partial["flow"].is_required()
+        assert not partial["routers"].is_required()
+        assert partial["environment"].is_required()
+        assert get_args(partial["environment"].annotation) == ("chat-partial",)
+
+    @pytest.mark.parametrize(
+        "components",
+        [[], [{"type": "AgentComponent"}]],
+        ids=["no components", "component without name"],
+    )
+    def test_completing_without_entry_point_needs_a_named_component(self, components):
+        """Validation accepts such a config, as before; only completing it needs the name."""
+        config = config_from_data(
+            {"version": "v1", "environment": "chat-partial", "components": components}
+        )
+
+        with pytest.raises(ValueError, match="needs a first component with a 'name'"):
+            config.to_config()
+
+    def test_a_chat_partial_config_with_entry_point_takes_any_components(self):
+        config = config_from_data(
+            {
+                "version": "v1",
+                "environment": "chat-partial",
+                "components": [],
+                "flow": {"entry_point": "agent"},
+            }
+        )
+
+        assert config.to_config().routers == [{"from": "agent", "to": "end"}]
+
+    def test_an_environment_class_rejects_another_environment(self):
+        with pytest.raises(ValidationError, match="environment"):
+            PartialFlowConfig(
+                **{
+                    "version": "v1",
+                    "environment": "chat",
+                    "components": [{"name": "agent", "type": "AgentComponent"}],
+                    "routers": [{"from": "agent", "to": "end"}],
+                    "flow": {"entry_point": "agent"},
+                }
+            )
+
+    @pytest.mark.parametrize("environment", ["chat", "ambient"])
+    def test_a_full_environment_file_still_requires_routers(
+        self, tmp_path, environment
+    ):
+        config_data = {
+            "version": "v1",
+            "environment": environment,
+            "components": [{"name": "agent", "type": "AgentComponent"}],
+            "flow": {"entry_point": "agent"},
+        }
+        self._write_config(tmp_path, "no_routers", config_data)
+
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            with pytest.raises(ValidationError, match="routers"):
+                load_config("no_routers")
+
+    @pytest.mark.parametrize(
+        ("config_id", "version"),
+        [("duo_permissions_assistant", "2.0.0"), ("flow_creator", "1.0.0")],
+    )
+    def test_a_shipped_chat_partial_file_keeps_its_declared_fields(
+        self, config_id, version
+    ):
+        config = load_config(config_id, version)
+        path = FlowConfig.DIRECTORY_PATH / config_id / f"{version}.yml"
+        declared = yaml.safe_load(path.read_text())
+
+        assert type(config) is PartialFlowConfig
+        assert config.routers == declared["routers"]
+        assert config.flow == FlowConfigMetadata(**declared["flow"])
 
     def test_flowconfig_from_yaml_config_file_not_found(self):
         """Test loading YAML config raises ValueError for missing flow."""
@@ -787,6 +972,23 @@ class TestListConfigs:
 
         assert len(result) == 1
         assert result[0]["flow_identifier"] == flow_name
+
+    def test_list_configs_lists_a_chat_partial_config_without_routers(self, tmp_path):
+        config_data = {
+            "version": "v1",
+            "environment": "chat-partial",
+            "components": [{"name": "chat_agent", "type": "AgentComponent"}],
+        }
+        config_file = tmp_path / "assistant" / "1.0.0.yml"
+        config_file.parent.mkdir()
+        config_file.write_text(yaml.dump(config_data))
+
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            result = list_configs()
+
+        assert [(c["flow_identifier"], c["environment"]) for c in result] == [
+            ("assistant", "chat-partial")
+        ]
 
     def test_list_configs_multiple_valid_configs(self, tmp_path):
         """Test list_configs returns multiple configs when multiple valid files exist."""
