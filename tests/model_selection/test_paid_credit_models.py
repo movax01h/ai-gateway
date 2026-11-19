@@ -196,6 +196,46 @@ def test_tag_with_only_paid_models_falls_back_to_default(
     assert "large" not in by_tag
 
 
+@pytest.mark.usefixtures("models")
+@pytest.mark.parametrize(
+    ("claim", "mode", "tag_models", "logged"),
+    [
+        (
+            False,
+            "enforce",
+            [PAID_MODEL, FREE_MODEL],
+            [([PAID_MODEL], "enforce", False)],
+        ),
+        (False, "enforce", [PAID_MODEL], [([PAID_MODEL], "enforce", True)]),
+        # The log gate filters nothing, but still names what enforce would drop.
+        (False, "log", [PAID_MODEL, FREE_MODEL], [([PAID_MODEL], "log", False)]),
+        (False, "enforce", [FREE_MODEL], []),
+        (True, "enforce", [PAID_MODEL, FREE_MODEL], []),
+        (None, "enforce", [PAID_MODEL, FREE_MODEL], []),
+    ],
+)
+def test_tag_logs_gated_paid_models(
+    config: ModelSelectionConfig, tag_models: list[str], logged: list
+):
+    duo_developer = config.get_unit_primitive_config_map()["duo_developer"]
+    duo_developer.models_for_tags = {"large": ModelTagEntry(models=tag_models)}
+
+    with (
+        capture_logs() as logs,
+        patch(
+            "ai_gateway.model_metadata.resolve_provider_aware_metadata",
+            side_effect=_metadata_for,
+        ),
+    ):
+        build_model_metadata_by_tag("duo_developer")
+
+    assert [
+        (log["model_ids"], log["mode"], log["fell_back_to_default"])
+        for log in logs
+        if log["event"] == "Dropping model tag candidates"
+    ] == logged
+
+
 def test_validate_accepts_shipped_config(config: ModelSelectionConfig):
     config.validate()
 

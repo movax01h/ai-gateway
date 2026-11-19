@@ -379,13 +379,30 @@ def build_model_metadata_by_tag(
     configs = ModelSelectionConfig.instance()
     unit_primitive_config = configs.get_unit_primitive_config_map().get(feature_setting)
     if unit_primitive_config:
-        exclude_paid = paid_credit_models_gate_mode() == "enforce"
+        gate_mode = paid_credit_models_gate_mode()
         for tag, entry in unit_primitive_config.models_for_tags.items():
-            candidates = [
-                model_id
-                for model_id in entry.models
-                if not (exclude_paid and configs.paid_credit_models_for([model_id]))
-            ]
+            paid_ids = (
+                set(configs.paid_credit_models_for(entry.models))
+                if gate_mode
+                else set()
+            )
+            paid = [model_id for model_id in entry.models if model_id in paid_ids]
+            # Only the enforce gate filters. The log gate names what enforce would drop.
+            candidates = (
+                [model_id for model_id in entry.models if model_id not in paid_ids]
+                if gate_mode == "enforce"
+                else entry.models
+            )
+            if paid:
+                log.info(
+                    "Dropping model tag candidates",
+                    feature_setting=feature_setting,
+                    tag=tag,
+                    model_ids=paid,
+                    reason="requires_paid_credits",
+                    mode=gate_mode,
+                    fell_back_to_default=not candidates,
+                )
             if not candidates:
                 continue
             # The interceptor builds this once per gRPC call, so a tag's model
