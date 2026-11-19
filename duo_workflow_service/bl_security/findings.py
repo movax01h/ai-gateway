@@ -99,6 +99,11 @@ class Finding:
     verdict: str
     clause: str
     evidence: str
+    # Written by the report writer's anchor check (see ``with_changes``).
+    anchor_status: str
+    anchor_reason: str
+    anchor_claimed_line: str
+    claimed_file: str
 
     @classmethod
     def from_dict(cls, raw: FindingDict) -> "Finding":
@@ -121,11 +126,41 @@ class Finding:
             evidence=str(
                 raw.get("evidence") or raw.get("triage_evidence") or ""
             ).strip(),
+            anchor_status=str(raw.get("anchor_status") or ""),
+            anchor_reason=str(raw.get("anchor_reason") or ""),
+            anchor_claimed_line=str(raw.get("anchor_claimed_line") or ""),
+            claimed_file=str(raw.get("claimed_file") or ""),
         )
 
     def to_dict(self) -> FindingDict:
         """A copy of the dict this finding was parsed from."""
         return dict(self.raw)
+
+    def with_changes(
+        self,
+        *,
+        claimed_file: str | None = None,
+        file: str | None = None,
+        new_line: int | None = None,
+        anchor_status: str | None = None,
+        anchor_reason: str | None = None,
+        anchor_claimed_line: int | None = None,
+    ) -> "Finding":
+        """A copy with the given keys written into ``raw`` and parsed again.
+
+        A key left ``None`` is not written. The typed fields and :meth:`to_dict` therefore never disagree.
+        """
+        changes = {
+            "claimed_file": claimed_file,
+            "file": file,
+            "new_line": new_line,
+            "anchor_status": anchor_status,
+            "anchor_reason": anchor_reason,
+            "anchor_claimed_line": anchor_claimed_line,
+        }
+        return Finding.from_dict(
+            {**self.raw, **{k: v for k, v in changes.items() if v is not None}}
+        )
 
     @property
     def text(self) -> str:

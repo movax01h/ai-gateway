@@ -11,7 +11,7 @@ from structlog.testing import capture_logs
 import duo_workflow_service.tools.bl_report as dedup_mod
 import duo_workflow_service.tools.bl_write_sast_report as bl
 from contract import contract_pb2
-from duo_workflow_service.bl_security.findings import TRIAGE_CLAUSE_MAX
+from duo_workflow_service.bl_security.findings import TRIAGE_CLAUSE_MAX, Finding
 from duo_workflow_service.tools.bl_report import BlDedupFindings
 from duo_workflow_service.tools.bl_write_sast_report import (
     BlWriteSastReport,
@@ -28,10 +28,32 @@ def _writer():
     return BlWriteSastReport(metadata={"outbox": object()})
 
 
+# The writer's helpers take parsed findings. These run them on the dicts the
+# tests are written in, and hand dicts back, so assertions read the keys the
+# writer records (``Finding.to_dict`` carries them).
+def _parsed(findings):
+    return [Finding.from_dict(f) for f in findings]
+
+
+async def _verify_anchors(writer, findings, *args):
+    parsed = _parsed(findings)
+    counts = await writer._verify_anchors(parsed, *args)
+    findings[:] = [f.to_dict() for f in parsed]
+    return counts
+
+
+def _build_report(findings, *args, **kwargs):
+    return _writer()._build_report(_parsed(findings), *args, **kwargs)
+
+
+def _collapse_after_reanchor(findings, *args):
+    return [f.to_dict() for f in bl._collapse_after_reanchor(_parsed(findings), *args)]
+
+
 def _audit(findings, **kwargs):
     """The per-finding audit records ``_build_report`` logs, in report order."""
     with capture_logs() as logs:
-        _writer()._build_report(findings, **kwargs)
+        _build_report(findings, **kwargs)
     return [log for log in logs if log["event"] == "bl_write_sast_report finding"]
 
 
@@ -114,7 +136,7 @@ class TestBuildReport:
                 "code_excerpt": "Record.find(params[:id])",
             }
         ]
-        report = _writer()._build_report(findings)
+        report = _build_report(findings)
         # 15.2.2 is the first schema version defining `scan.partial_scan`.
         assert report["version"] == bl._REPORT_SCHEMA_VERSION == "15.2.2"
         # analyzer + scanner identity
@@ -137,7 +159,7 @@ class TestBuildReport:
 
     def test_no_cwe_fallback_identifier_and_differential(self):
         findings = [{"file": "a.py", "line": 3, "body": "some finding"}]
-        report = _writer()._build_report(findings, partial=True)
+        report = _build_report(findings, partial=True)
         assert report["scan"]["partial_scan"] == {"mode": "differential"}
         v = report["vulnerabilities"][0]
         # no cwe -> synthetic bl_finding identifier, name without CWE prefix
@@ -145,7 +167,7 @@ class TestBuildReport:
         assert not v["name"].startswith("CWE-")
 
     def test_empty_body_defaults_to_finding_name(self):
-        report = _writer()._build_report([{"file": "a.py"}])
+        report = _build_report([{"file": "a.py"}])
         assert report["vulnerabilities"][0]["name"] == "Business-logic finding in a.py"
 
 
@@ -163,14 +185,14 @@ class TestReanchor:
         findings = [
             {"file": "a.rb", "new_line": 99, "code_excerpt": "Record.find(params[:id])"}
         ]
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
         assert counts[bl._ANCHOR_CORRECTED] == 1
         assert findings[0]["new_line"] == 3  # relocated to the real line
 
     def test_skips_findings_without_excerpt_or_file(self):
         findings = [{"file": "a.rb"}, {"code_excerpt": "x"}]
         with patch.object(bl, "_execute_action", new_callable=AsyncMock) as read:
-            counts = asyncio.run(_writer()._verify_anchors(findings))
+            counts = asyncio.run(_verify_anchors(_writer(), findings))
         read.assert_not_called()
         assert counts == {
             bl._ANCHOR_VERIFIED: 0,
@@ -196,7 +218,7 @@ class TestReanchor:
             {"file": "secret/a.rb", "new_line": 1, "code_excerpt": "Record.find"}
         ]
 
-        counts = asyncio.run(writer._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(writer, findings))
 
         assert counts[bl._ANCHOR_UNVERIFIED] == 1
         assert findings[0]["anchor_reason"] == bl._ANCHOR_EXCLUDED
@@ -216,7 +238,7 @@ class TestReanchor:
         monkeypatch.setattr(bl, "_execute_action", _fake)
         findings = [{"file": path, "new_line": 1, "code_excerpt": "SECRET"}]
 
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
 
         assert counts[bl._ANCHOR_UNVERIFIED] == 1
         assert findings[0]["anchor_reason"] == bl._ANCHOR_EXCLUDED
@@ -235,10 +257,24 @@ class TestReanchor:
         monkeypatch.setattr(bl, "_execute_action", _fake)
         findings = [{"file": "id_rsa", "new_line": 1, "code_excerpt": "KEY"}]
 
-        asyncio.run(_writer()._verify_anchors(findings))
+        asyncio.run(_verify_anchors(_writer(), findings))
 
         assert reads == ["id_rsa"]
         assert findings[0]["file"] == "id_rsa"
+        assert findings[0]["anchor_reason"] == bl._ANCHOR_UNREADABLE
+
+    def test_a_list_valued_file_is_unverified_not_raised(self, monkeypatch):
+        """A non-string ``file`` is read as text, so the pass records it unreadable instead of raising."""
+
+        async def _fake(metadata, action):
+            return ""
+
+        monkeypatch.setattr(bl, "_execute_action", _fake)
+        findings = [{"file": ["a.rb"], "new_line": 1, "code_excerpt": "Record.find"}]
+
+        asyncio.run(_verify_anchors(_writer(), findings))
+
+        assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
         assert findings[0]["anchor_reason"] == bl._ANCHOR_UNREADABLE
 
     def test_read_failure_leaves_finding_and_caches_none(self, monkeypatch):
@@ -254,7 +290,7 @@ class TestReanchor:
                 "code_excerpt": "x",
             },  # second: cache hit -> None
         ]
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
         assert counts[bl._ANCHOR_UNVERIFIED] == 2
         # The line is KEPT (a correct finding is never discarded over a bad
         # coordinate), but it is marked as unchecked.
@@ -267,13 +303,14 @@ class TestReanchor:
 
         monkeypatch.setattr(bl, "_execute_action", _fake)
 
-        class _BadDict(dict):
-            def get(self, *a, **k):
-                raise RuntimeError("boom in .get")
+        def _boom(path):
+            raise RuntimeError("boom in the path check")
+
+        monkeypatch.setattr(bl, "validate_duo_context_exclusions", _boom)
 
         # the per-finding try/except must swallow this and keep going
-        findings = [_BadDict()]
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        findings = [{"file": "a.py", "code_excerpt": "x = 1"}]
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
         assert counts[bl._ANCHOR_VERIFIED] == 0
         # A finding whose verification BLEW UP is unverified, not fine.
         assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
@@ -468,7 +505,7 @@ def _site(idx, line, cwe="CWE-639", excerpt=None, body=None):
 
 class TestVulnerabilityIdDistinctness:
     def _ids(self, findings):
-        report = _writer()._build_report(findings)
+        report = _build_report(findings)
         return [v["id"] for v in report["vulnerabilities"]]
 
     def test_sites_sharing_a_statement_get_distinct_ids(self):
@@ -534,7 +571,7 @@ class TestVulnerabilityIdDistinctness:
     def test_cwe_is_still_reported_though_it_is_not_identity(self):
         # Out of the id is not out of the report: the CWE stays in `identifiers`,
         # which is what the Vulnerability Report displays and filters on.
-        report = _writer()._build_report([_site(0, 100, cwe="CWE-862")])
+        report = _build_report([_site(0, 100, cwe="CWE-862")])
         ident = report["vulnerabilities"][0]["identifiers"][0]
         assert ident["type"] == "cwe"
         assert ident["name"] == "CWE-862"
@@ -592,7 +629,7 @@ class TestTriageVerdictAudit:
             )
         )
         assert len(out) == 1
-        report = _writer()._build_report(out)
+        report = _build_report(out)
         vuln = report["vulnerabilities"][0]
         # The vulnerability object must not grow audit fields: it carries only
         # the fixed set below. The anchor state and the triage clause + verdict
@@ -671,7 +708,7 @@ _SCHEMA_LEVELS = {"info", "warn", "fatal"}
 class TestTriageClauseReachesTheLog:
     def test_the_clause_and_verdict_are_logged_and_not_reported(self):
         findings = [_finding(verdict="KEEP", clause="KEEP-incorrect-guard")]
-        report = _writer()._build_report(findings)
+        report = _build_report(findings)
         (audit,) = _audit(findings)
 
         # THE assertion: the arm that let this finding survive is in the log
@@ -703,7 +740,7 @@ class TestTriageClauseReachesTheLog:
                 ]
             )
         )
-        report = _writer()._build_report(out)
+        report = _build_report(out)
 
         assert [v["location"]["file"] for v in report["vulnerabilities"]] == ["keep.py"]
         (audit,) = _audit(out)
@@ -773,7 +810,7 @@ class TestScanCoverageIsDisclosedInTheReport:
     """
 
     def test_every_message_is_shaped_the_way_the_schema_defines(self):
-        report = _writer()._build_report(
+        report = _build_report(
             [{"file": "a.py"}],
             [_REVIEW_COVERAGE, _COMPLETE_COVERAGE, _TRIAGE_COVERAGE],
         )
@@ -789,7 +826,7 @@ class TestScanCoverageIsDisclosedInTheReport:
             assert isinstance(message["value"], str) and message["value"]
 
     def test_a_capped_stage_states_the_files_and_the_truncation(self):
-        report = _writer()._build_report([{"file": "a.py"}], [_REVIEW_COVERAGE])
+        report = _build_report([{"file": "a.py"}], [_REVIEW_COVERAGE])
         levels = [(m["level"], m["value"]) for m in _messages(report)]
 
         # What was covered is INFO; a cap that actually bound is a WARNing,
@@ -803,7 +840,7 @@ class TestScanCoverageIsDisclosedInTheReport:
         assert "519 distinct files, out of 1341 distinct files" in levels[0][1]
 
     def test_a_complete_stage_gets_no_truncation_warning(self):
-        report = _writer()._build_report([{"file": "a.py"}], [_COMPLETE_COVERAGE])
+        report = _build_report([{"file": "a.py"}], [_COMPLETE_COVERAGE])
 
         assert _messages(report) == [
             {"level": "info", "value": _COMPLETE_COVERAGE["summary"]}
@@ -812,7 +849,7 @@ class TestScanCoverageIsDisclosedInTheReport:
     def test_findings_truncated_by_triage_are_disclosed_too(self):
         # The SECOND cap. Discovery coverage alone would still let a report of
         # 150 adjudicated findings out of 432 candidates read as the whole set.
-        report = _writer()._build_report([{"file": "a.py"}], [_TRIAGE_COVERAGE])
+        report = _build_report([{"file": "a.py"}], [_TRIAGE_COVERAGE])
         warnings = [m["value"] for m in _messages(report) if m["level"] == "warn"]
 
         assert warnings == [_TRIAGE_COVERAGE["truncation"]]
@@ -821,7 +858,7 @@ class TestScanCoverageIsDisclosedInTheReport:
     def test_a_run_that_reports_no_coverage_says_so(self):
         # THE failure mode this exists to close: silence is what made a partial
         # scan look complete, so an absent record must be stated, not skipped.
-        report = _writer()._build_report([{"file": "a.py"}], [None, None])
+        report = _build_report([{"file": "a.py"}], [None, None])
         (message,) = _messages(report)
 
         assert message["level"] == "warn"
@@ -831,9 +868,7 @@ class TestScanCoverageIsDisclosedInTheReport:
     def test_a_stage_record_that_arrives_as_json_text_still_counts(self):
         # Context values reach a tool as whatever the graph put there; a record
         # that survived a JSON round-trip must not silently disappear.
-        report = _writer()._build_report(
-            [{"file": "a.py"}], [json.dumps(_COMPLETE_COVERAGE)]
-        )
+        report = _build_report([{"file": "a.py"}], [json.dumps(_COMPLETE_COVERAGE)])
 
         assert _messages(report) == [
             {"level": "info", "value": _COMPLETE_COVERAGE["summary"]}
@@ -845,14 +880,14 @@ class TestScanCoverageIsDisclosedInTheReport:
         # falls back to saying coverage is unknown.
         assert bl._coverage_record("{not json") is None
         assert bl._coverage_record(7) is None
-        report = _writer()._build_report([{"file": "a.py"}], ["{not json", 7])
+        report = _build_report([{"file": "a.py"}], ["{not json", 7])
 
         assert _messages(report) == [
             {"level": "warn", "value": bl._COVERAGE_UNAVAILABLE}
         ]
 
     def test_a_record_with_no_sentences_contributes_nothing(self):
-        report = _writer()._build_report(
+        report = _build_report(
             [{"file": "a.py"}], [{"unit_noun": "review units", "emitted": 3}]
         )
 
@@ -924,7 +959,7 @@ class TestDiscardedUnitsAreDisclosedInTheReport:
     """
 
     def test_a_lossy_stage_warns_even_though_no_cap_bound(self):
-        report = _writer()._build_report([{"file": "a.py"}], [_LOSSY_COVERAGE])
+        report = _build_report([{"file": "a.py"}], [_LOSSY_COVERAGE])
         levels = [(m["level"], m["value"]) for m in _messages(report)]
 
         assert levels == [
@@ -935,7 +970,7 @@ class TestDiscardedUnitsAreDisclosedInTheReport:
 
     def test_a_stage_that_lost_nothing_adds_no_warning(self):
         clean = {**_LOSSY_COVERAGE, "errored": 0, "loss": None}
-        report = _writer()._build_report([{"file": "a.py"}], [clean])
+        report = _build_report([{"file": "a.py"}], [clean])
 
         assert _messages(report) == [{"level": "info", "value": clean["summary"]}]
 
@@ -943,13 +978,13 @@ class TestDiscardedUnitsAreDisclosedInTheReport:
         # A cap that bound is a CHOICE; a discarded unit is a DEFECT. Collapsing
         # them into one message would let the second hide behind the first.
         both = {**_LOSSY_COVERAGE, "truncation": _REVIEW_COVERAGE["truncation"]}
-        report = _writer()._build_report([{"file": "a.py"}], [both])
+        report = _build_report([{"file": "a.py"}], [both])
         warnings = [m["value"] for m in _messages(report) if m["level"] == "warn"]
 
         assert warnings == [_REVIEW_COVERAGE["truncation"], _LOSSY_COVERAGE["loss"]]
 
     def test_every_loss_message_still_matches_the_schema(self):
-        report = _writer()._build_report([{"file": "a.py"}], [_LOSSY_COVERAGE])
+        report = _build_report([{"file": "a.py"}], [_LOSSY_COVERAGE])
 
         for message in _messages(report):
             assert set(message) == {"level", "value"}
@@ -1004,7 +1039,7 @@ class TestAnchorVerificationOutcomes:
             }
         ]
 
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
 
         assert counts == {
             bl._ANCHOR_VERIFIED: 1,
@@ -1035,7 +1070,7 @@ class TestAnchorVerificationOutcomes:
             }
         ]
 
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
 
         assert counts == {
             bl._ANCHOR_VERIFIED: 0,
@@ -1058,7 +1093,7 @@ class TestAnchorVerificationOutcomes:
             }
         ]
 
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
 
         assert counts == {
             bl._ANCHOR_VERIFIED: 0,
@@ -1079,7 +1114,7 @@ class TestAnchorVerificationOutcomes:
         monkeypatch.setattr(bl, "_execute_action", _reader(_TWO_FUNCS))
         findings = [{"file": "container.go", "new_line": 5, "cwe": "CWE-639"}]
 
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
 
         assert counts[bl._ANCHOR_UNVERIFIED] == 1
         assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
@@ -1089,7 +1124,7 @@ class TestAnchorVerificationOutcomes:
         monkeypatch.setattr(bl, "_execute_action", _reader(_TWO_FUNCS))
         findings = [{"new_line": 5, "code_excerpt": "upload.Commit()"}]
 
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
 
         assert counts[bl._ANCHOR_UNVERIFIED] == 1
         assert "no file path" in findings[0]["anchor_reason"]
@@ -1107,7 +1142,7 @@ class TestAnchorVerificationOutcomes:
         monkeypatch.setattr(bl, "_execute_action", _reader(_TWO_FUNCS))
         findings = [{"file": "container.go", "code_excerpt": "upload.Commit()"}]
 
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
 
         assert counts[bl._ANCHOR_CORRECTED] == 1
         assert findings[0]["new_line"] == 10
@@ -1123,7 +1158,7 @@ class TestAnchorVerificationOutcomes:
             {"file": "c.go", "new_line": 5},
         ]
 
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
 
         assert counts == {
             bl._ANCHOR_VERIFIED: 1,
@@ -1203,7 +1238,7 @@ class TestAnchorVerificationIsDisclosed:
         assert audit[bl._ANCHOR_REASON_DETAIL_KEY] == bl._ANCHOR_NOT_RUN
 
     def test_the_verbatim_quote_travels_with_the_finding(self):
-        report = _writer()._build_report(
+        report = _build_report(
             [
                 {
                     "file": "a.go",
@@ -1220,7 +1255,7 @@ class TestAnchorVerificationIsDisclosed:
         )
 
     def test_no_quote_means_no_empty_extract_field(self):
-        report = _writer()._build_report([{"file": "a.go", "new_line": 3}])
+        report = _build_report([{"file": "a.go", "new_line": 3}])
 
         assert "raw_source_code_extract" not in report["vulnerabilities"][0]
 
@@ -1230,10 +1265,10 @@ class TestAnchorVerificationIsDisclosed:
         The vulnerability ``id`` is the identity downstream joins on. Anchor
         verification is disclosure and must not move IDs.
         """
-        bare = _writer()._build_report(
+        bare = _build_report(
             [{"cwe": "CWE-862", "file": "a.go", "code_excerpt": "x()"}]
         )["vulnerabilities"][0]["id"]
-        annotated = _writer()._build_report(
+        annotated = _build_report(
             [
                 {
                     "cwe": "CWE-862",
@@ -1248,7 +1283,7 @@ class TestAnchorVerificationIsDisclosed:
         assert bare == annotated
 
     def test_a_clean_run_says_so_at_info_level(self):
-        report = _writer()._build_report(
+        report = _build_report(
             [{"file": "a.go", "new_line": 3, "anchor_status": bl._ANCHOR_VERIFIED}],
         )
         message = _anchor_message(report)
@@ -1257,7 +1292,7 @@ class TestAnchorVerificationIsDisclosed:
         assert "1 were found at the reported line" in message["value"]
 
     def test_any_unverified_anchor_makes_the_disclosure_a_warning(self):
-        report = _writer()._build_report(
+        report = _build_report(
             [
                 {"file": "a.go", "new_line": 3, "anchor_status": bl._ANCHOR_VERIFIED},
                 {"file": "b.go", "new_line": 4, "anchor_status": bl._ANCHOR_CORRECTED},
@@ -1272,7 +1307,7 @@ class TestAnchorVerificationIsDisclosed:
         assert "1 could not be checked" in message["value"]
 
     def test_a_report_with_no_findings_still_states_the_anchor_position(self):
-        report = _writer()._build_report([])
+        report = _build_report([])
         message = _anchor_message(report)
 
         assert message["level"] == "info"
@@ -1401,13 +1436,13 @@ class TestPostReanchorCollapse:
             }
             for claimed in (196, 222, 244, 270, 280, 379)
         ]
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
         assert counts[bl._ANCHOR_CORRECTED] == 6
         assert {f["new_line"] for f in findings} == {4}, (
             "all six should re-anchor to one line"
         )
 
-        out = bl._collapse_after_reanchor(findings)
+        out = _collapse_after_reanchor(findings)
         assert len(out) == 1, (
             f"six reports of one site should collapse to 1, got {len(out)}"
         )
@@ -1432,8 +1467,8 @@ class TestPostReanchorCollapse:
             }
             for i in range(5)
         ]
-        asyncio.run(_writer()._verify_anchors(findings))
-        out = bl._collapse_after_reanchor(findings)
+        asyncio.run(_verify_anchors(_writer(), findings))
+        out = _collapse_after_reanchor(findings)
         assert len(out) == 5, (
             f"five distinct copy-pasted sites must survive, got {len(out)}"
         )
@@ -1458,9 +1493,9 @@ class TestPostReanchorCollapse:
                 "body": "deactivate misses a role check",
             },
         ]
-        asyncio.run(_writer()._verify_anchors(findings))
+        asyncio.run(_verify_anchors(_writer(), findings))
         # lines 1 and 2 -> same bucket (1//4 == 2//4 == 0); the excerpt keeps them apart
-        out = bl._collapse_after_reanchor(findings)
+        out = _collapse_after_reanchor(findings)
         assert len(out) == 2, "different statements must not merge on a shared bucket"
 
     def test_unverified_anchors_are_not_merged_on_a_guessed_line(self, monkeypatch):
@@ -1483,9 +1518,9 @@ class TestPostReanchorCollapse:
                 "body": "two",
             },
         ]
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
         assert counts[bl._ANCHOR_UNVERIFIED] == 2
-        out = bl._collapse_after_reanchor(findings)
+        out = _collapse_after_reanchor(findings)
         assert len(out) == 2, "unverified anchors keep claimed lines and stay distinct"
 
 
@@ -1530,8 +1565,8 @@ class TestContainmentCollapse:
                 "body": "revoke accepts a token without client authentication",
             },
         ]
-        asyncio.run(_writer()._verify_anchors(findings))
-        out = bl._collapse_after_reanchor(findings)
+        asyncio.run(_verify_anchors(_writer(), findings))
+        out = _collapse_after_reanchor(findings)
         assert len(out) == 1, (
             f"a trailing `end` is not a second defect, got {len(out)} findings"
         )
@@ -1559,8 +1594,8 @@ class TestContainmentCollapse:
                 "body": "the revoke token is read without authenticating the client",
             },
         ]
-        asyncio.run(_writer()._verify_anchors(findings))
-        out = bl._collapse_after_reanchor(findings)
+        asyncio.run(_verify_anchors(_writer(), findings))
+        out = _collapse_after_reanchor(findings)
         assert len(out) == 1, (
             f"a sub-span quote of one site is not a second defect, got {len(out)}"
         )
@@ -1600,8 +1635,8 @@ class TestContainmentCollapse:
                 "body": "update writes another user's record",
             },
         ]
-        asyncio.run(_writer()._verify_anchors(findings))
-        out = bl._collapse_after_reanchor(findings)
+        asyncio.run(_verify_anchors(_writer(), findings))
+        out = _collapse_after_reanchor(findings)
         assert len(out) == 1, (
             f"one extra `with` clause is not a second defect, got {len(out)}"
         )
@@ -1634,11 +1669,11 @@ class TestContainmentCollapse:
                 "body": "activate misses an admin role check",
             },
         ]
-        asyncio.run(_writer()._verify_anchors(findings))
+        asyncio.run(_verify_anchors(_writer(), findings))
         assert {f["new_line"] for f in findings} == {1, 2}, (
             "both must land in one line bucket for this guard to be exercised"
         )
-        out = bl._collapse_after_reanchor(findings)
+        out = _collapse_after_reanchor(findings)
         assert len(out) == 2, (
             "substring containment must NOT merge activate/deactivate, "
             f"got {len(out)} findings"
@@ -1664,8 +1699,8 @@ class TestContainmentCollapse:
                 "body": "a block terminator quoted on its own",
             },
         ]
-        asyncio.run(_writer()._verify_anchors(findings))
-        out = bl._collapse_after_reanchor(findings)
+        asyncio.run(_verify_anchors(_writer(), findings))
+        out = _collapse_after_reanchor(findings)
         assert len(out) == 2, (
             f"a structural-only excerpt must not be merged away, got {len(out)}"
         )
@@ -1691,11 +1726,11 @@ class TestContainmentCollapse:
                 "body": "second site interpolates user input",
             },
         ]
-        asyncio.run(_writer()._verify_anchors(findings))
+        asyncio.run(_verify_anchors(_writer(), findings))
         assert {f["new_line"] for f in findings} == {1, 41}, (
             "the two sites must re-anchor to different buckets"
         )
-        out = bl._collapse_after_reanchor(findings)
+        out = _collapse_after_reanchor(findings)
         assert len(out) == 2, (
             f"containment must not reach across line buckets, got {len(out)}"
         )
@@ -1778,8 +1813,8 @@ def cancel_order(order_id):
             for start, end, cwe in spans
         ]
         contents: dict = {}
-        asyncio.run(_writer()._verify_anchors(findings, contents))
-        return [f["body"] for f in bl._collapse_after_reanchor(findings, contents)]
+        asyncio.run(_verify_anchors(_writer(), findings, contents))
+        return [f["body"] for f in _collapse_after_reanchor(findings, contents)]
 
     @pytest.mark.parametrize(
         "first,second",
@@ -1840,8 +1875,8 @@ def other(request):
             for exc in excerpts
         ]
         sources: dict = {}
-        asyncio.run(_writer()._verify_anchors(findings, sources))
-        return findings, bl._collapse_after_reanchor(findings, sources)
+        asyncio.run(_verify_anchors(_writer(), findings, sources))
+        return findings, _collapse_after_reanchor(findings, sources)
 
     def test_a_decorator_first_quote_does_not_reach_the_next_function(
         self, monkeypatch
@@ -1866,7 +1901,7 @@ def other(request):
             # Lines in different buckets, so only this pass could merge them.
             for line, status in ((2, bl._ANCHOR_VERIFIED), (9, bl._ANCHOR_UNVERIFIED))
         ]
-        out = bl._collapse_after_reanchor(findings, {"views.py": self.VIEWS_PY})
+        out = _collapse_after_reanchor(findings, {"views.py": self.VIEWS_PY})
         assert len(out) == 2
 
     def _merge(self, *specs):
@@ -1881,7 +1916,7 @@ def other(request):
             }
             for start, end, status in specs
         ]
-        out = bl._collapse_after_reanchor(findings, {"app/orders.py": self.ORDERS_PY})
+        out = _collapse_after_reanchor(findings, {"app/orders.py": self.ORDERS_PY})
         return [f["new_line"] for f in out]
 
     def test_a_verified_finding_is_kept_over_a_corrected_one(self):
@@ -2044,7 +2079,7 @@ class TestAnchorVerificationReadsTheWholeFile:
             }
         ]
 
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
 
         assert findings[0]["new_line"] == _TRUE_LINE, (
             f"anchor MOVED to line {findings[0]['new_line']} instead of "
@@ -2075,7 +2110,7 @@ class TestAnchorVerificationReadsTheWholeFile:
             }
         ]
 
-        asyncio.run(_writer()._verify_anchors(findings))
+        asyncio.run(_verify_anchors(_writer(), findings))
 
         assert findings[0]["anchor_status"] != bl._ANCHOR_UNVERIFIED, (
             "a quote that IS in the file was reported absent -- the read was truncated"
@@ -2092,7 +2127,7 @@ class TestAnchorVerificationReadsTheWholeFile:
             {"file": "container.go", "new_line": 10, "code_excerpt": "upload.Commit()"}
         ]
 
-        counts = asyncio.run(_writer()._verify_anchors(findings))
+        counts = asyncio.run(_verify_anchors(_writer(), findings))
 
         assert counts[bl._ANCHOR_VERIFIED] == 1
         assert findings[0]["new_line"] == 10
@@ -2242,7 +2277,7 @@ TOP = load()
         ]
         if sources is None:
             sources = {"app/orders.py": self.SOURCE}
-        return _writer()._build_report(findings, sources=sources)["vulnerabilities"]
+        return _build_report(findings, sources=sources)["vulnerabilities"]
 
     def _signature(self, vuln):
         return vuln["tracking"]["items"][0]["signatures"][0]["value"]
@@ -2287,9 +2322,7 @@ TOP = load()
             )
         ]
         sources = {"app/orders.py": self.SOURCE}
-        first, second = _writer()._build_report(findings, sources=sources)[
-            "vulnerabilities"
-        ]
+        first, second = _build_report(findings, sources=sources)["vulnerabilities"]
         assert "tracking" not in first
         assert self._signature(second) == "app/orders.py|refund[0]:639"
 
@@ -2305,9 +2338,9 @@ TOP = load()
                 }
                 for quote in order
             ]
-            vulns = _writer()._build_report(
-                findings, sources={"app/orders.py": self.SOURCE}
-            )["vulnerabilities"]
+            vulns = _build_report(findings, sources={"app/orders.py": self.SOURCE})[
+                "vulnerabilities"
+            ]
             return {v["raw_source_code_extract"]: self._signature(v) for v in vulns}
 
         quotes = ["db.update(order_id)", "update(order_id)"]
@@ -2387,16 +2420,21 @@ class TestPathRepair:
 
         return _fake
 
-    def _run(self, monkeypatch, listing, files):
+    def _run(self, monkeypatch, listing, files, line=3):
         calls: list = []
         monkeypatch.setattr(bl, "_execute_action", self._fake(listing, calls))
         findings = [
-            {"cwe": "CWE-639", "file": file, "new_line": 3, "code_excerpt": self.QUOTE}
+            {
+                "cwe": "CWE-639",
+                "file": file,
+                "new_line": line,
+                "code_excerpt": self.QUOTE,
+            }
             for file in files
         ]
         sources: dict = {}
-        asyncio.run(_writer()._verify_anchors(findings, sources))
-        return findings, bl._collapse_after_reanchor(findings, sources), calls
+        asyncio.run(_verify_anchors(_writer(), findings, sources))
+        return findings, _collapse_after_reanchor(findings, sources), calls
 
     def test_a_dropped_prefix_is_repaired_and_merges_with_its_twin(self, monkeypatch):
         findings, out, calls = self._run(
@@ -2432,7 +2470,7 @@ class TestPathRepair:
 
         monkeypatch.setattr(bl, "_execute_action", _fake)
         findings = [{"cwe": "CWE-639", "file": "vpn/x.py", "code_excerpt": "x()"}]
-        asyncio.run(_writer()._verify_anchors(findings, {}))
+        asyncio.run(_verify_anchors(_writer(), findings, {}))
         assert findings[0]["file"] == "vpn/x.py"
         assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
 
@@ -2473,7 +2511,20 @@ class TestPathRepair:
 
     def test_the_report_records_the_claimed_path(self, monkeypatch):
         _, out, _ = self._run(monkeypatch, [self.REAL], ["vpn/graphql/schema.py"])
-        (vuln,) = _writer()._build_report(out)["vulnerabilities"]
+        (vuln,) = _build_report(out)["vulnerabilities"]
         (audit,) = _audit(out)
         assert audit[bl._ANCHOR_CLAIMED_FILE_DETAIL_KEY] == "vpn/graphql/schema.py"
         assert vuln["location"]["file"] == self.REAL
+
+    def test_a_repaired_path_keeps_its_line_correction(self, monkeypatch):
+        """A finding that needs both a path repair and a line correction keeps both."""
+        _, out, _ = self._run(
+            monkeypatch, [self.REAL], ["vpn/graphql/schema.py"], line=1
+        )
+        (vuln,) = _build_report(out)["vulnerabilities"]
+        (audit,) = _audit(out)
+        assert vuln["location"]["file"] == self.REAL
+        assert vuln["location"]["start_line"] == 3
+        assert audit[bl._ANCHOR_DETAIL_KEY] == bl._ANCHOR_CORRECTED
+        assert audit[bl._ANCHOR_CLAIMED_DETAIL_KEY] == "1"
+        assert audit[bl._ANCHOR_CLAIMED_FILE_DETAIL_KEY] == "vpn/graphql/schema.py"

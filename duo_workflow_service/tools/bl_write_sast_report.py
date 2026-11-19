@@ -30,15 +30,9 @@ from duo_workflow_service.bl_security.finding_text import (
 from duo_workflow_service.bl_security.findings import (
     TRIAGE_CLAUSE_MAX,
     WHITESPACE_RUN,
-    audit_clause_of,
+    Finding,
     coerce_to_list,
-    cwe_digits,
-    dedup_key,
-    excerpt_of,
     findings_input,
-    line_of,
-    norm_excerpt,
-    verdict_of,
 )
 from duo_workflow_service.bl_security.model_text import model_impact, model_title
 from duo_workflow_service.bl_security.target_files import resolve_target_files
@@ -96,10 +90,10 @@ def _is_structural_line(line: str) -> bool:
     return not any(ch.isalnum() for ch in stripped)
 
 
-def _excerpt_line_set(finding: dict) -> frozenset:
+def _excerpt_line_set(finding: Finding) -> frozenset:
     """The finding's excerpt as a set of non-empty, stripped, lowercased lines."""
     return frozenset(
-        ln.strip().lower() for ln in excerpt_of(finding).splitlines() if ln.strip()
+        ln.strip().lower() for ln in finding.excerpt.splitlines() if ln.strip()
     )
 
 
@@ -108,7 +102,7 @@ def _has_substantive_line(lines) -> bool:
     return any(not _is_structural_line(ln) for ln in lines)
 
 
-def _collapse_contained_excerpts(findings: List[dict]) -> List[dict]:
+def _collapse_contained_excerpts(findings: List[Finding]) -> List[Finding]:
     """Collapse re-reports that quote a LONGER OR SHORTER SPAN of one site, keeping the fuller quote.
 
     The exact key in :func:`dedup_key` demands a byte-identical normalized excerpt, so three
@@ -126,7 +120,7 @@ def _collapse_contained_excerpts(findings: List[dict]) -> List[dict]:
     """
     groups: dict = {}
     for idx, f in enumerate(findings):
-        key = (cwe_digits(f), f.get("file") or f.get("path") or "", line_of(f) // 4)
+        key = (f.cwe, f.file, f.line // 4)
         groups.setdefault(key, []).append(idx)
 
     dropped: set = set()
@@ -146,7 +140,7 @@ def _collapse_contained_excerpts(findings: List[dict]) -> List[dict]:
     return [f for i, f in enumerate(findings) if i not in dropped]
 
 
-def _merge_overlapping_spans(findings: List[dict], contents: dict) -> List[dict]:
+def _merge_overlapping_spans(findings: List[Finding], contents: dict) -> List[Finding]:
     """Merge same-CWE findings in one file whose located quotes share a line unique in that file.
 
     Re-reports that quote different parts of one handler (its decorator, then its query) share no excerpt, so neither
@@ -158,19 +152,18 @@ def _merge_overlapping_spans(findings: List[dict], contents: dict) -> List[dict]
         for file, text in contents.items()
         if text
     }
-    kept: List[dict] = []
+    kept: List[Finding] = []
     owner: dict = {}
     for f in findings:
-        file = f.get("file") or f.get("path") or ""
         keys: set = set()
-        if file in counts and f.get("anchor_status") in (
+        if f.file in counts and f.anchor_status in (
             _ANCHOR_VERIFIED,
             _ANCHOR_CORRECTED,
         ):
             keys = {
-                (cwe_digits(f), file, ln.strip())
-                for ln in excerpt_of(f).splitlines()
-                if not _is_structural_line(ln) and counts[file][ln.strip()] == 1
+                (f.cwe, f.file, ln.strip())
+                for ln in f.excerpt.splitlines()
+                if not _is_structural_line(ln) and counts[f.file][ln.strip()] == 1
             }
         hit = min((owner[k] for k in keys if k in owner), default=None)
         if hit is None:
@@ -182,13 +175,13 @@ def _merge_overlapping_spans(findings: List[dict], contents: dict) -> List[dict]
     return kept
 
 
-def _merge_rank(finding: dict) -> tuple:
-    return (finding.get("anchor_status") != _ANCHOR_VERIFIED, line_of(finding))
+def _merge_rank(finding: Finding) -> tuple:
+    return (finding.anchor_status != _ANCHOR_VERIFIED, finding.line)
 
 
 def _collapse_after_reanchor(
-    findings: List[dict], contents: Optional[dict] = None
-) -> List[dict]:
+    findings: List[Finding], contents: Optional[dict] = None
+) -> List[Finding]:
     """Re-apply the exact-dedup key AFTER anchor correction, keeping the first of each group in input order.
 
     WHY A SECOND PASS. Dedup (`BlDedupFindings`) never reads the source files, so the only line it can key on is the one
@@ -203,10 +196,10 @@ def _collapse_after_reanchor(
     distinct lines and survive, while N re-reports of a single site all converge on that site's one line and collapse.
     Findings whose excerpt was never located stay `unverified` on their claimed lines and are likewise left alone.
     """
-    kept: List[dict] = []
+    kept: List[Finding] = []
     seen: set = set()
     for f in findings:
-        key = dedup_key(f)
+        key = f.dedup_key()
         if key in seen:
             continue
         seen.add(key)
@@ -219,11 +212,10 @@ def _collapse_after_reanchor(
     return _merge_overlapping_spans(_collapse_contained_excerpts(kept), contents or {})
 
 
-def _fingerprint_of(finding: dict) -> str:
+def _fingerprint_of(finding: Finding) -> str:
     """The location-independent identity of a finding: its normalized code excerpt, or a body prefix when the pass that
     produced it emits no excerpt."""
-    body = finding.get("body") or finding.get("description") or ""
-    return norm_excerpt(finding) or str(body)[:200]
+    return finding.norm_excerpt or finding.text[:200]
 
 
 # A function or method declaration: Python/Ruby/Elixir, Go, JS/TS/PHP functions, JS/TS function or arrow assignments,
@@ -280,20 +272,18 @@ def _enclosing_function(text: str, line: int) -> str:
     return _MODULE_SCOPE
 
 
-def _tracking_signatures(findings: List[dict], sources: dict) -> List[Optional[str]]:
+def _tracking_signatures(findings: List[Finding], sources: dict) -> List[Optional[str]]:
     """Each finding's ``scope_offset`` value, ``<file>|<function>[<k>]:<cwe>``; ``None`` when its file was not read.
 
     ``k`` numbers the same-CWE findings in one function by anchored line, never by model output order.
     """
     located = []
     for i, f in enumerate(findings):
-        file = f.get("file") or f.get("path") or ""
-        text = sources.get(file)
+        text = sources.get(f.file)
         # An unlocated quote has no reliable line, so no stable scope either.
         if text and _anchor_status_of(f) in (_ANCHOR_VERIFIED, _ANCHOR_CORRECTED):
-            fn = _enclosing_function(text, line_of(f))
-            key = (file, fn, cwe_digits(f))
-            located.append((key, line_of(f), _fingerprint_of(f), i))
+            key = (f.file, _enclosing_function(text, f.line), f.cwe)
+            located.append((key, f.line, _fingerprint_of(f), i))
     out: List[Optional[str]] = [None] * len(findings)
     seen: Counter = Counter()
     for key, _, _, i in sorted(located):
@@ -302,7 +292,7 @@ def _tracking_signatures(findings: List[dict], sources: dict) -> List[Optional[s
     return out
 
 
-def _shared_fingerprints(findings: List[dict]) -> set:
+def _shared_fingerprints(findings: List[Finding]) -> set:
     """The (file, fingerprint) pairs carried by MORE THAN ONE finding.
 
     N separate sites that miss the same control quote near-identical (often byte-identical) code, so they collide on
@@ -316,10 +306,7 @@ def _shared_fingerprints(findings: List[dict]) -> set:
     """
     counts: dict = {}
     for f in findings:
-        key = (
-            f.get("file") or f.get("path") or "",
-            _fingerprint_of(f),
-        )
+        key = (f.file, _fingerprint_of(f))
         counts[key] = counts.get(key, 0) + 1
     return {k for k, n in counts.items() if n > 1}
 
@@ -456,30 +443,30 @@ _ANCHOR_NOT_RUN = "anchor verification did not run for this report"
 
 
 def _mark_anchor(
-    finding: dict,
+    finding: Finding,
     status: str,
     reason: str = "",
     claimed_line: Optional[int] = None,
-) -> None:
-    """Record one finding's anchor outcome ON the finding."""
-    finding["anchor_status"] = status
-    if reason:
-        finding["anchor_reason"] = reason
-    # Only when the model actually stated a line. `line_of` returns 0 for a
-    # finding that carried none, and writing `anchor_claimed_line: 0` would
-    # assert a claim of line 0 that was never made.
-    if claimed_line:
-        finding["anchor_claimed_line"] = claimed_line
+) -> Finding:
+    """The finding with its anchor outcome recorded ON it."""
+    # The claimed line only when the model actually stated one. `Finding.line`
+    # is 0 for a finding that carried none, and writing `anchor_claimed_line: 0`
+    # would assert a claim of line 0 that was never made.
+    return finding.with_changes(
+        anchor_status=status,
+        anchor_reason=reason or None,
+        anchor_claimed_line=claimed_line or None,
+    )
 
 
-def _anchor_status_of(finding: dict) -> str:
+def _anchor_status_of(finding: Finding) -> str:
     """The recorded outcome, defaulting to UNVERIFIED.
 
     An unannotated finding is one verification never saw - ``_verify_anchors``
     is best-effort and ``_execute`` swallows its failure - and "not checked"
     must not read as "checked and fine".
     """
-    status = str(finding.get("anchor_status") or "").strip().lower()
+    status = finding.anchor_status.strip().lower()
     return status if status in _ANCHOR_STATES else _ANCHOR_UNVERIFIED
 
 
@@ -490,7 +477,7 @@ _ANCHOR_STATES = (_ANCHOR_VERIFIED, _ANCHOR_CORRECTED, _ANCHOR_UNVERIFIED)
 UNVERIFIED_LINE_NOTE = "This line could not be matched to the quoted code; the issue may be elsewhere in the file."
 
 
-def _add_line_note(finding: dict, vuln: dict) -> None:
+def _add_line_note(finding: Finding, vuln: dict) -> None:
     """Add :data:`UNVERIFIED_LINE_NOTE` as the last paragraph of ``vuln``'s description when its line is unverified."""
     if _anchor_status_of(finding) != _ANCHOR_UNVERIFIED:
         return
@@ -500,7 +487,7 @@ def _add_line_note(finding: dict, vuln: dict) -> None:
     )
 
 
-def _anchor_audit(finding: dict) -> dict:
+def _anchor_audit(finding: Finding) -> dict:
     """The anchor state, for the per-finding audit log.
 
     Recorded for EVERY finding, including verified ones. Recording only the bad cases would make absence mean "fine".
@@ -508,18 +495,15 @@ def _anchor_audit(finding: dict) -> dict:
     status = _anchor_status_of(finding)
     audit = {_ANCHOR_DETAIL_KEY: status}
     if status == _ANCHOR_UNVERIFIED:
-        audit[_ANCHOR_REASON_DETAIL_KEY] = (
-            finding.get("anchor_reason") or _ANCHOR_NOT_RUN
-        )
-    claimed = finding.get("anchor_claimed_line")
-    if status == _ANCHOR_CORRECTED and claimed:
-        audit[_ANCHOR_CLAIMED_DETAIL_KEY] = str(claimed)
-    if finding.get("claimed_file"):
-        audit[_ANCHOR_CLAIMED_FILE_DETAIL_KEY] = str(finding["claimed_file"])
+        audit[_ANCHOR_REASON_DETAIL_KEY] = finding.anchor_reason or _ANCHOR_NOT_RUN
+    if status == _ANCHOR_CORRECTED and finding.anchor_claimed_line:
+        audit[_ANCHOR_CLAIMED_DETAIL_KEY] = finding.anchor_claimed_line
+    if finding.claimed_file:
+        audit[_ANCHOR_CLAIMED_FILE_DETAIL_KEY] = finding.claimed_file
     return audit
 
 
-def _anchor_message(findings: List[dict]) -> dict:
+def _anchor_message(findings: List[Finding]) -> dict:
     """The scan-level ``scan.messages`` entry for the run's anchor outcomes.
 
     Per-vulnerability detail answers "is THIS line trustworthy"; this answers "how much of this report is located and
@@ -567,7 +551,7 @@ _TRIAGE_CLAUSE_UNSPECIFIED = (
 )
 
 
-def _triage_audit(finding: dict) -> dict:
+def _triage_audit(finding: Finding) -> dict:
     """The triage decision, for the per-finding audit log.
 
     Recorded for EVERY finding, annotated or not, for the same reason as :func:`_anchor_audit`: a key that appears only
@@ -577,9 +561,9 @@ def _triage_audit(finding: dict) -> dict:
     verdict is KEEP or nothing. It is still recorded, because "adjudicated KEEP under KEEP-incorrect-guard" and "never
     adjudicated" are different claims about the same reported line.
     """
-    verdict = verdict_of(finding)
+    verdict = finding.verdict
     # Model-written text bound for the service log: redacted before truncation, like the sibling triage logger.
-    clause = str(redact_secrets(audit_clause_of(finding), "bl_write_sast_report"))[
+    clause = str(redact_secrets(finding.clause, "bl_write_sast_report"))[
         :TRIAGE_CLAUSE_MAX
     ]
     if not verdict and not clause:
@@ -590,7 +574,7 @@ def _triage_audit(finding: dict) -> dict:
     return audit
 
 
-def _audit_record(finding: dict) -> dict:
+def _audit_record(finding: Finding) -> dict:
     """The finding's anchor and triage state: pipeline internals, logged once per finding and kept out of the report.
 
     The report is read by the customer, so these are not put in ``vulnerability.details``. The log line carries the
@@ -728,7 +712,7 @@ class BlWriteSastReport(DuoBaseTool):
         return f"Writing SAST report for {count} findings"
 
     async def _verify_anchors(
-        self, findings: List[dict], cache: Optional[dict] = None
+        self, findings: List[Finding], cache: Optional[dict] = None
     ) -> dict:
         """Check every finding's line against the file, and RECORD WHICH of the three outcomes it was.
 
@@ -746,16 +730,16 @@ class BlWriteSastReport(DuoBaseTool):
         Reads each unique file ONCE and IN FULL, via ``_read_file_fully`` -- a bare ``runReadFile`` would hand this
         check the first page only and it would relocate quotes onto lookalikes in that prefix. Best-effort: it MUST
         NEVER fail report generation, so every step is defensively guarded - but a guard that fires yields
-        ``unverified`` rather than silence. Mutates findings in place; returns the per-outcome counts. The file contents
-        it read are left in ``cache``.
+        ``unverified`` rather than silence. Replaces each finding in the list with its annotated copy; returns the
+        per-outcome counts. The file contents it read are left in ``cache``.
         """
         cache = {} if cache is None else cache
         counts = dict.fromkeys(_ANCHOR_STATES, 0)
 
         def _record(
-            finding: dict, status: str, reason: str = "", claimed: Optional[int] = None
+            i: int, status: str, reason: str = "", claimed: Optional[int] = None
         ) -> None:
-            _mark_anchor(finding, status, reason, claimed)
+            findings[i] = _mark_anchor(findings[i], status, reason, claimed)
             counts[status] += 1
 
         listed: dict = {}
@@ -785,46 +769,47 @@ class BlWriteSastReport(DuoBaseTool):
                     cache[path] = None
             return cache.get(path)
 
-        for f in findings:
+        for i, f in enumerate(findings):
             try:
-                exc = excerpt_of(f)
-                file = f.get("file") or f.get("path") or ""
+                exc = f.excerpt
+                file = f.file
                 if not file:
-                    _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_NO_FILE)
+                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_NO_FILE)
                     continue
                 if not exc.strip():
                     # No quote was ever emitted, so this anchor is uncheckable
                     # by construction, not merely unchecked.
-                    _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_NO_EXCERPT)
+                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_NO_EXCERPT)
                     continue
                 if not _allowed(file):
-                    _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_EXCLUDED)
+                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_EXCLUDED)
                     continue
                 content = await _read(file)
                 repaired = "" if content else await self._repair_path(file, listed)
                 if repaired and _allowed(repaired) and await _read(repaired):
-                    f["claimed_file"], f["file"], file = file, repaired, repaired
+                    f = findings[i] = f.with_changes(claimed_file=file, file=repaired)
+                    file = repaired
                     content = cache[file]
                 if not content:
-                    _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_UNREADABLE)
+                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_UNREADABLE)
                     continue
-                claimed = line_of(f)
+                claimed = f.line
                 ln = _find_excerpt_line(content, exc, hint=claimed)
                 if not ln:
-                    _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_NOT_PRESENT)
+                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_NOT_PRESENT)
                 elif ln == claimed:
-                    _record(f, _ANCHOR_VERIFIED)
+                    _record(i, _ANCHOR_VERIFIED)
                 else:
-                    f["new_line"] = ln
+                    findings[i] = f.with_changes(new_line=ln)
                     _record(
-                        f,
+                        i,
                         _ANCHOR_CORRECTED,
                         "" if claimed else _ANCHOR_NO_CLAIM,
                         claimed,
                     )
             except Exception as loop_err:
                 _log.info("bl_anchor finding skipped", err=str(loop_err))
-                _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_RAISED)
+                _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_RAISED)
                 continue
         return counts
 
@@ -857,7 +842,7 @@ class BlWriteSastReport(DuoBaseTool):
 
     def _build_report(
         self,
-        findings: List[dict],
+        findings: List[Finding],
         coverage: Optional[List[Any]] = None,
         partial: bool = False,
         sources: Optional[dict] = None,
@@ -881,11 +866,8 @@ class BlWriteSastReport(DuoBaseTool):
         signatures = _tracking_signatures(findings, sources or {})
         vulns = []
         for f, signature in zip(findings, signatures):
-            cwe = cwe_digits(f)
-            file = f.get("file") or f.get("path") or ""
-            line = line_of(f)
-            body = f.get("body") or f.get("description") or ""
-            sev = _SEVERITY_MAP.get(str(f.get("severity", "")).lower(), "Unknown")
+            cwe, file, line, body = f.cwe, f.file, f.line, f.text
+            sev = _SEVERITY_MAP.get(f.severity.lower(), "Unknown")
             # ID keyed on the code excerpt rather than the LLM-emitted line number,
             # which is often wrong. It still changes when the quote does, so GitLab
             # tracks the vulnerability by the scope_offset signature below.
@@ -923,9 +905,9 @@ class BlWriteSastReport(DuoBaseTool):
                     cwe=cwe,
                     file=file,
                     line=line,
-                    excerpt=excerpt_of(f),
+                    excerpt=f.excerpt,
                     body=body,
-                    impact=model_impact(f.get("impact")),
+                    impact=model_impact(f.raw.get("impact")),
                 ),
                 "severity": sev,
                 "location": {"file": file, "start_line": line},
@@ -939,12 +921,11 @@ class BlWriteSastReport(DuoBaseTool):
             # source code" - the quote the check above was made against. Without
             # it the verdict is unauditable downstream: a reader cannot re-derive
             # `verified` from the report alone.
-            excerpt = excerpt_of(f)
-            if excerpt:
-                vuln["raw_source_code_extract"] = excerpt
+            if f.excerpt:
+                vuln["raw_source_code_extract"] = f.excerpt
             # The model's own title, when it gave a usable one: it is written
             # for the customer. Otherwise the fixed title above stays.
-            title = model_title(f.get("title"))
+            title = model_title(f.raw.get("title"))
             if title:
                 vuln["name"] = title
             # Only a scope_offset signature: GitLab matches on the highest-priority
@@ -998,7 +979,7 @@ class BlWriteSastReport(DuoBaseTool):
         target_files: Optional[Any] = None,
     ) -> str:
         parsed = [
-            f
+            Finding.from_dict(f)
             for f in coerce_to_list(findings_input(findings, "findings"))
             if isinstance(f, dict)
         ]

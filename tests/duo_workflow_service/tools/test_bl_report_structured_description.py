@@ -7,16 +7,16 @@ import pytest
 
 import duo_workflow_service.tools.bl_write_sast_report as bl
 from duo_workflow_service.bl_security.finding_text import IMPACTS
-from tests.duo_workflow_service.tools.test_bl_write_sast_report import _writer
+from tests.duo_workflow_service.tools.test_bl_write_sast_report import _build_report
 
 
 def test_no_cwe_and_no_file_has_the_generic_name():
-    report = _writer()._build_report([{}])
+    report = _build_report([{}])
     assert report["vulnerabilities"][0]["name"] == "Business-logic finding"
 
 
 def test_the_title_names_the_weakness_and_the_file():
-    (v,) = _writer()._build_report(
+    (v,) = _build_report(
         [{"cwe": "CWE-639", "file": "a.ts", "body": "Any user can refund any order."}]
     )["vulnerabilities"]
 
@@ -32,7 +32,7 @@ def test_the_description_is_structured_and_keeps_the_model_text():
         "body": "Any user can read any basket. The id is not scoped.",
         "anchor_status": bl._ANCHOR_VERIFIED,
     }
-    (v,) = _writer()._build_report([finding])["vulnerabilities"]
+    (v,) = _build_report([finding])["vulnerabilities"]
 
     assert v["description"] == (
         f"**What**\n\n{IMPACTS['639']}\n\n"
@@ -51,7 +51,7 @@ def test_the_model_text_is_escaped_in_the_written_description():
         "body": "Send <token> as @admin. See #12.",
         "anchor_status": bl._ANCHOR_VERIFIED,
     }
-    (v,) = _writer()._build_report([finding])["vulnerabilities"]
+    (v,) = _build_report([finding])["vulnerabilities"]
 
     details = v["description"].split("**Details**\n\n")[1]
     assert details == "- Send \\<token> as `@admin`.\n- See \\#12."
@@ -60,7 +60,7 @@ def test_the_model_text_is_escaped_in_the_written_description():
 def test_the_id_still_comes_from_the_raw_model_text():
     """The description is rebuilt, but identity is keyed on the excerpt or the raw body, as before."""
     finding = {"cwe": "CWE-639", "file": "a.ts", "body": "raw body"}
-    (v,) = _writer()._build_report([finding])["vulnerabilities"]
+    (v,) = _build_report([finding])["vulnerabilities"]
 
     assert v["id"] == hashlib.sha256(b"a.ts|raw body").hexdigest()
 
@@ -74,7 +74,7 @@ def test_the_model_title_and_impact_lead_the_structured_text():
         "impact": "Any signed-in user can check out another user's basket.",
         "anchor_status": bl._ANCHOR_VERIFIED,
     }
-    (v,) = _writer()._build_report([finding])["vulnerabilities"]
+    (v,) = _build_report([finding])["vulnerabilities"]
 
     assert v["name"] == "Checkout accepts another user's basket"
     assert v["description"] == (
@@ -103,7 +103,7 @@ def test_the_model_title_and_impact_lead_the_structured_text():
 )
 def test_the_fixed_text_is_used_when_the_model_text_is_not_sane(title, impact):
     finding = {"cwe": "CWE-862", "file": "a.ts", "title": title, "impact": impact}
-    (v,) = _writer()._build_report([finding])["vulnerabilities"]
+    (v,) = _build_report([finding])["vulnerabilities"]
 
     assert v["name"] == "Missing authorization in a.ts"
     assert v["description"].startswith(f"**What**\n\n{IMPACTS['862']}")
