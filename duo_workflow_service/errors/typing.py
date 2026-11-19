@@ -60,8 +60,7 @@ class WorkflowTokenRejectedError(Exception):
         details: The gRPC status detail, fixed text written by the server.
         drop_reason: The reason recorded on the Rails row when it is dropped.
         user_message: The safe text shown to the user, raised as the ``NotifiableException`` message. A subclass for
-            a different rejection (e.g. a token carrying no workflow binding, which asks the user to update their
-            client) overrides it while reusing the same reject-and-drop path.
+            a different rejection overrides it while reusing the same reject-and-drop path.
     """
 
     drop_reason = "token_rejected"

@@ -232,6 +232,7 @@ CATALOG_FETCH_FAILED_DETAILS = "The AI Catalog items for this flow could not be 
 FETCHED_FLOW_BINDING_DETAILS = (
     "fetch_flow_config requires a plain workflow ID and a workflow token bound to it"
 )
+UNBOUND_WORKFLOW_TOKEN_DETAILS = "Workflow token is not bound to a workflow"
 # Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
 # these get workflow tokens that unlock the restricted models of the flow they are
 # minted for, and ExecuteWorkflow accepts their instance token's flow claim for
@@ -926,11 +927,20 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                             grpc.StatusCode.PERMISSION_DENIED, WORKFLOW_BINDING_DETAILS
                         )
             elif claims_extra.get(BINDS_WORKFLOW_CLAIM) is True:
-                log.info(
+                log.warning(
                     "Workflow token without a workflow binding",
                     token_issuer=user.claims.issuer if user.claims else None,
                     requested_workflow_id=start_req.workflowID[:64],
                 )
+                if _names_a_session(start_req.workflowID):
+                    token_rejection = WorkflowTokenRejectedError(
+                        UNBOUND_WORKFLOW_TOKEN_DETAILS
+                    )
+                else:
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        UNBOUND_WORKFLOW_TOKEN_DETAILS,
+                    )
 
         workflow_definition = map_workflow_definition(
             flow_request.to_legacy_identifier()
