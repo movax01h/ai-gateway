@@ -198,12 +198,19 @@ before the first node runs.
 
 ## Selection and rollout
 
-Engine selection is a registry-level table of engine-owned config versions, keyed by `config_id` and `version`, and
-consulted by `flow_factory`. A listed version builds `ChatFlow`. Every other chat-partial version builds
-`chat.Workflow`. No shipped version is listed at launch, so existing configs are unchanged by construction. An owner
-moves a flow to the engine by shipping a new config version and listing it.
+The prompt format selects the engine ([ADR-004](decisions/adr-004-prompts-declare-a-prefix-and-a-tail.md) §5). In
+`flow_factory`, a chat-partial version whose prompts declare `template` builds `ChatFlow`, and every other
+chat-partial version builds `chat.Workflow`. No shipped version declares `template` yet, so existing configs are
+unchanged by construction. An owner moves a flow to the engine by shipping a new config version whose prompts use
+`template`. Rails pins a session's version, so a session never switches engine mid-life.
 
-`agentic_chat/2.0.0` is the first listed version. It is reachable by explicit pin:
+Two limits apply for now, both in `opts_into_chat_engine`: the version ships in this repository (a flow from the AI
+Catalog can't use `template` yet), and its prompts are declared inline in the config. A prompt file can't declare
+`template` yet, because a flow that references one can't be routed by its format before the prompt is loaded.
+
+`agentic_chat/2.0.0` is planned as an early version on the engine. It references the file-based `chat/agent` prompt,
+so it needs that prompt in the new format and the registry support for file-based `template` prompts first. It is
+reachable by explicit pin, on `chat.Workflow` until then:
 
 ```shell
 duo --flow-config-id agentic_chat --flow-version 2.0.0 --flow-config-schema-version v1

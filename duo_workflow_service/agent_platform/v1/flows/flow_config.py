@@ -13,6 +13,9 @@ from duo_workflow_service.agent_platform.v1.components import (
     BaseComponent,
     ComponentRegistry,
 )
+from duo_workflow_service.agent_platform.v1.components.prompt_reference import (
+    prompt_reference_of,
+)
 from lib.feature_roots import default_features_dir
 from lib.version import resolve_version
 
@@ -174,9 +177,10 @@ class BaseFlowConfig(BaseModel):
     product_group: Optional[str] = None
 
     # The registry flow id and concrete version this config was loaded from. Set only by
-    # ``from_yaml_config``, so a config built from caller-supplied data (an inline flow)
-    # cannot claim a registry identity. Private attributes are not part of the schema:
-    # input cannot set them and ``model_dump`` does not emit them.
+    # ``from_registry_file`` and the loaders that call it, so a config built from
+    # caller-supplied data (an inline flow) cannot claim a registry identity. Private
+    # attributes are not part of the schema: input cannot set them and ``model_dump``
+    # does not emit them.
     _config_id: Optional[str] = PrivateAttr(default=None)
     _config_version: Optional[str] = PrivateAttr(default=None)
 
@@ -189,6 +193,15 @@ class BaseFlowConfig(BaseModel):
     def config_version(self) -> Optional[str]:
         """The concrete version this config was loaded from; ``None`` when not loaded from the registry."""
         return self._config_version
+
+    @property
+    def components_with_repository_prompt(self) -> list[str]:
+        """The names of the components that reference a prompt file instead of declaring theirs inline."""
+        return [
+            component.get("name", "<unnamed>")
+            for component in self.components
+            if (reference := prompt_reference_of(component)) and reference.is_stored
+        ]
 
     def input_json_schemas_by_category(self):
         json_schemas_by_category: dict[str, dict] = {}
@@ -315,18 +328,38 @@ class BaseFlowConfig(BaseModel):
         version = resolve_version(list(candidates), version_query)
         # resolve_version only returns a member of its input, so the lookup
         # cannot miss; a file deleted in between still hits the handler below.
-        yaml_path = candidates[version]
+        return cls.from_registry_file(candidates[version], flow_id, version)
+
+    @classmethod
+    def from_registry_file(cls, path: Path, flow_id: str, version: str) -> Self:
+        """Load one registry file, with the identity it has at runtime.
+
+        Every registry load goes through here: ``from_yaml_config`` after it resolves the version, and the config
+        sweep in CI. An inline flow or a flow from the AI Catalog never does, so it has no identity, which is what
+        rules reserved for repository flows read.
+
+        Args:
+            path: The config file.
+            flow_id: The registry flow id the file belongs to.
+            version: The concrete version the file holds.
+
+        Returns:
+            The loaded config, with ``resolved_version`` set to ``version``.
+        """
         try:
-            with open(yaml_path, "r", encoding="utf-8") as file:
-                yaml_content = yaml.safe_load(file)
-            config = cls(**yaml_content, resolved_version=version)
+            with open(path, "r", encoding="utf-8") as file:
+                data = yaml.safe_load(file) or {}
         except FileNotFoundError:
-            raise FileNotFoundError(
-                f"{flow_id}/{version} file not found at {yaml_path}"
-            )
+            raise FileNotFoundError(f"{flow_id}/{version} file not found at {path}")
         except yaml.YAMLError as e:
             raise yaml.YAMLError(f"Error parsing YAML file: {e}") from e
 
+        return cls._with_registry_identity(
+            cls(**data, resolved_version=version), flow_id, version
+        )
+
+    @classmethod
+    def _with_registry_identity(cls, config: Self, flow_id: str, version: str) -> Self:
         config._config_id = flow_id
         config._config_version = version
         return config

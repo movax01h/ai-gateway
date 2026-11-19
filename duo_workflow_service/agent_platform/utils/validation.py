@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
 from dependency_injector.wiring import Provide, inject
@@ -76,6 +76,11 @@ class FlowValidator:
     def validate(self, yaml_content: str) -> None:
         """Validate a flow configuration YAML string end-to-end.
 
+        A config validated from text has no registry identity, which is what a flow written outside this
+        repository has at runtime too, so rules that only repository flows may use are refused here as they would
+        be there. To validate a config that ships here, load it with ``from_registry_file`` on the config class
+        that ``get_flow_classes`` returns for its version and environment, and pass it to ``validate_config``.
+
         Args:
             yaml_content: Raw YAML text of the flow configuration.
 
@@ -105,8 +110,8 @@ class FlowValidator:
                 prompt-variable errors. The ``errors`` attribute contains
                 a list of human-readable error strings.
         """
-        version = config_dict.get("version")
-        if not version:
+        schema_version = config_dict.get("version")
+        if not schema_version:
             raise FlowValidationError(
                 ["Missing required field 'version' in flow config"]
             )
@@ -119,14 +124,34 @@ class FlowValidator:
 
         self._check_component_count(config_dict)
 
-        flow_config_cls, flow_cls = get_flow_classes(version, environment)
+        flow_config_cls, flow_cls = get_flow_classes(schema_version, environment)
         try:
             config = flow_config_cls(**config_dict)
         except PydanticValidationError as exc:
             raise FlowValidationError.from_pydantic(exc) from exc
 
+        self.validate_config(config, flow_cls)
+
+    def validate_config(self, config: Any, flow_cls: Optional[Any] = None) -> None:
+        """Validate a flow configuration that is already built.
+
+        Takes the config as the registry loaded it, identity included, so a rule that only this repository's flows
+        may use is checked here exactly as it is when the flow runs. Only loading a registry file
+        (``from_registry_file``) sets that identity.
+
+        Args:
+            config: The built flow configuration.
+            flow_cls: The flow class for its schema, resolved from the config when not given.
+
+        Raises:
+            FlowValidationError: On any validation error.
+        """
+        environment = config.environment
+        if flow_cls is None:
+            _, flow_cls = get_flow_classes(config.version, environment)
+
         # Environment-level checks: component count for chat-partial, prompt
-        # security scan, etc.
+        # security scan, which prompt format may be used, etc.
         flow_factory(flow_cls, config)
 
         if environment == "chat-partial":

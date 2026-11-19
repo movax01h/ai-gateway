@@ -3145,7 +3145,14 @@ _OLD_FORMAT_PROMPTS = [
 
 def _flow_with_prompts(prompts: list[InMemoryPromptConfig] | None) -> Flow:
     flow = Flow.__new__(Flow)
-    flow._config = Mock(spec=FlowConfig, prompts=prompts)
+    # A chat-partial version from this repository: what may opt into the chat engine.
+    flow._config = Mock(
+        spec=FlowConfig,
+        prompts=prompts,
+        environment="chat-partial",
+        config_id="developer",
+        components_with_repository_prompt=[],
+    )
 
     return flow
 

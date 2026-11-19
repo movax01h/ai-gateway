@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from ai_gateway.model_selection.models import MAX_MODEL_RETRIES
-from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.config.base import PromptConfig, is_legacy_prompt
 
 
 def _prompt_config(max_retries: int) -> dict:
@@ -46,3 +46,17 @@ def test_the_format_renders_with_the_security_setting_it_is_given(
     assert (
         len(prefix) == 3
     ) is tool_output_security  # system, security block, history placeholder
+
+
+@pytest.mark.parametrize(
+    "declared,expected",
+    [
+        ({"prompt_template": {"system": "instructions"}}, True),
+        ({"template": {"system": "instructions"}}, False),
+    ],
+    ids=["prompt_template", "template"],
+)
+def test_a_prompt_is_legacy_when_it_declares_the_old_roles(declared, expected):
+    config = PromptConfig(name="x", unit_primitive="duo_chat", **declared)
+
+    assert is_legacy_prompt(config) is expected

@@ -67,6 +67,9 @@ from duo_workflow_service.agent_platform.v1.components.base import (
     MissingInputVariablesError,
     RouterProtocol,
 )
+from duo_workflow_service.agent_platform.v1.components.prompt_reference import (
+    PromptReference,
+)
 from duo_workflow_service.agent_platform.v1.routers.router import Router
 from duo_workflow_service.agent_platform.v1.state import (
     FlowEventType,
@@ -207,7 +210,7 @@ class MaxCyclesConfig(BaseModel):
         return self
 
 
-class AgentComponentBase(BaseComponent):
+class AgentComponentBase(PromptReference, BaseComponent):
     """Shared base for agent-style components (AgentComponent, SupervisorAgentComponent).
 
     Holds the common field declarations, shared routing methods, and protected
@@ -252,8 +255,6 @@ class AgentComponentBase(BaseComponent):
         CHAT_PARTIAL_ENVIRONMENT,
     )
 
-    prompt_id: str
-    prompt_version: Optional[str] = None
     toolset: Toolset
     compaction: Union[CompactionConfig, bool] = True
     response_schema_id: Optional[str] = None

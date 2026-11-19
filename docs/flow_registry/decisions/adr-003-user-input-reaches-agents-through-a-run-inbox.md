@@ -187,8 +187,8 @@ resume doesn't rewrite `goal`.
 
 - A version opts in by using new-format prompts (ADR-004 §5). An old-format version keeps today's delivery path for
   its whole life, and existing flows are unchanged. Old-format chat-partial configs keep running on the legacy Agentic
-  Chat engine, as unlisted ones do today, and a chat-partial version listed for the engine that uses the old format
-  refuses to build. So the inbox has two inbound paths, the bridge and the mailbox, and no old-format one. A session
+  Chat engine, as they do today, because the format is what routes a version to the chat engine. So the inbox has two
+  inbound paths, the bridge and the mailbox, and no old-format one. A session
   never switches mid-life: Rails pins the resolved version (`chat_engine.md` "Sessions in
   flight", [issue 630374](https://gitlab.com/gitlab-org/gitlab/-/work_items/630374)). `developer/4.0.0` is the
   exception: it isn't released before the new pipeline ships, so it moves to the new format in place, and sessions
