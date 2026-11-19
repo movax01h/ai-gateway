@@ -12,7 +12,7 @@ Use this runbook to push a fix to the GitLab-managed AIGW/DWS fleet faster than 
 
 - Production deploys normally use Runway's default `legacy` strategy: a global canary that shifts traffic in steps (25%, 50%, 75%, 100%). This is the safest option and should be used whenever possible.
 - For incident response we can switch to the `expedited` strategy, which rolls out to 100% of traffic globally in a single "big bang" deployment. See the Runway [deployment strategies](https://docs.runway.gitlab.com/runtimes/cloud-run/deployment-strategies/#setting-a-deployment-strategy) and [incident response](https://docs.runway.gitlab.com/runtimes/cloud-run/incident-response/#emergency-deployment) docs.
-- The strategy is controlled by the `RUNWAY_DEPLOYMENT_STRATEGY` CI/CD variable, which takes precedence over `spec.deployment.strategy` in `.runway/runway.yml`. The variable is already wired into the Runway deploy jobs, so no `.gitlab-ci.yml` change is needed to use it.
+- The strategy is controlled by the `RUNWAY_DEPLOYMENT_STRATEGY` CI/CD variable, which takes precedence over `spec.deployment.strategy` in `.runway/ai-gateway/runway.yml`. The variable is already wired into the Runway deploy jobs, so no `.gitlab-ci.yml` change is needed to use it.
 - **Set it as a project CI/CD settings variable, not as a `.gitlab-ci.yml` `variables:` entry.** The Runway deploy jobs run with `inherit: variables: false` (staging) and a restricted inherit list (production), so they do not pick up globally-defined `.gitlab-ci.yml`/`workflow` variables. Project CI/CD settings variables are always passed to jobs regardless of `inherit:variables`, so that is the method that reaches the deploy and is forwarded to the downstream Runway pipeline.
 - Only Owners and Maintainers can manage project CI/CD variables, so enabling an emergency deployment is restricted to Owners/Maintainers by the GitLab permission model. Variable changes are recorded in the project audit events.
 
@@ -42,7 +42,7 @@ This single variable applies to **both staging and production** deploys, because
 
 ### 3. Disable (required cleanup)
 
-After the incident, an Owner/Maintainer **must remove** the `RUNWAY_DEPLOYMENT_STRATEGY` variable. It is sticky: it stays in effect for every default-branch deploy until removed. Removing it returns deploys to the safe defaults: `legacy` for production and `expedited` for staging (staging is `expedited` by default via `.runway/runway-staging.yml`).
+After the incident, an Owner/Maintainer **must remove** the `RUNWAY_DEPLOYMENT_STRATEGY` variable. It is sticky: it stays in effect for every default-branch deploy until removed. Removing it returns deploys to the safe defaults: `legacy` for production and `expedited` for staging (staging is `expedited` by default via `.runway/ai-gateway/runway-staging.yml`).
 
 Treat removal as a mandatory incident closeout step.
 
