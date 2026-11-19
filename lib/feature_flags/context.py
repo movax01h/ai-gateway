@@ -45,6 +45,12 @@ class FeatureFlag(StrEnum):
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/gitlab_com_derisk/internal_ai_usage.yml
     # Rollout: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2951
     INTERNAL_AI_USAGE = "internal_ai_usage"
+    # Gates the auto mode tool-approval classifier, which reviews the tool calls
+    # that auto mode promotion would otherwise pre-approve. Not yet defined in
+    # gitlab/config/feature_flags -- to be added by the Rails MR.
+    # Tracking: https://gitlab.com/gitlab-org/gitlab/-/work_items/639804
+    # Epic: https://gitlab.com/groups/gitlab-org/-/work_items/24653
+    DUO_AUTO_MODE_CLASSIFIER = "duo_auto_mode_classifier"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
