@@ -7,7 +7,7 @@ import json
 import os
 import time
 import zlib
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -35,6 +35,8 @@ from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import ToolException
 from langgraph.checkpoint.base import (
+    ERROR,
+    INTERRUPT,
     BaseCheckpointSaver,
     ChannelVersions,
     Checkpoint,
@@ -149,9 +151,41 @@ _RESPONSE_SIZE_LIMIT_ERROR_MARKER = "exceeded size limit"
 # Floor for the adaptive page-size shrink in `_iter_checkpoint_pages`.
 _MIN_CHECKPOINT_PAGE_SIZE = 1
 
+# The most rows GitLab takes in one `checkpoint_writes_batch` request: it answers 400 above this
+# (`MAX_WRITES_PER_BATCH` in `CreateCheckpointWriteBatchService`). `aput_writes` sends longer batches in chunks.
+_MAX_CHECKPOINT_WRITES_PER_BATCH = 10
+
 # LangGraph's checkpoint namespace for the top-level graph; every nested subgraph
 # invocation (e.g. a delegated subagent) runs under its own non-blank namespace.
 TOP_LEVEL_CHECKPOINT_NS = ""
+
+
+def _latest_interrupts(
+    pending_writes: Sequence[Tuple[int, str, str, Any]],
+) -> list[Tuple[str, str, Any]]:
+    """The stored writes as LangGraph keeps them: each task's latest interrupt write, and none once it was cleared.
+
+    LangGraph keeps one interrupt write per task and replaces it when the task pauses again. GitLab adds a row each
+    time and never removes one, so a task's rows are read in the order they were added, and the last interrupt row
+    decides. A task whose interrupt was cleared has a last row with no interrupts in it, which an older gateway
+    reads as nothing new. Writes on other channels are kept as they are.
+
+    Args:
+        pending_writes: Each stored write as its row ID, task, channel and value.
+    """
+    latest = {
+        task: write_id
+        for write_id, task, channel, _ in sorted(
+            pending_writes, key=lambda write: write[0]
+        )
+        if channel == INTERRUPT
+    }
+    return [
+        (task, channel, value)
+        for write_id, task, channel, value in pending_writes
+        if channel != INTERRUPT or (latest[task] == write_id and value)
+    ]
+
 
 # How many nested lineages keep a delta baseline in memory at once. A session can
 # dispatch an unbounded number of them, and each baseline copies its lineage's channel
@@ -492,6 +526,14 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._incremental_state: OrderedDict[str, _IncrementalCheckpointState] = (
             OrderedDict()
         )
+        # What it takes to keep a paused step's stored interrupts right, by checkpoint
+        # ID: the tasks whose stored interrupt still waits, the ones among them whose
+        # interrupt was resolved in this request, and the steps in which a task paused
+        # in this request. A step with a pause stays open, so only there is a resolved
+        # interrupt cleared. In any other step the resolved ones are left alone.
+        self._paused_tasks: dict[str, set[str]] = defaultdict(set)
+        self._resolved_tasks: dict[str, set[str]] = defaultdict(set)
+        self._steps_with_a_pause: set[str] = set()
 
     @override
     @not_implemented_sync_method
@@ -2208,6 +2250,18 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             }
         }
 
+    def _holds_resolved_interrupts(self, step: str) -> bool:
+        """Whether the resolved interrupts of a step are held back for now, not stored.
+
+        A step in which no task paused in this request may finish, and then nothing reads its interrupts again, so
+        storing the resolved ones would be a wasted write. They stay in `_resolved_tasks`, and the next pause of the
+        step stores them with its own batch. A step with a pause stays open, so they are stored at once.
+
+        Args:
+            step: The ID of the checkpoint the step's writes belong to.
+        """
+        return step not in self._steps_with_a_pause
+
     @override
     async def aput_writes(
         self,
@@ -2250,44 +2304,72 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             self._defer_status(status, _flush_point_for(status), checkpoint_id)
 
         # for now only interrupts are stored
-        if not writes or writes[0][0] != "__interrupt__":
+        if not writes:
+            return None
+        step = str(checkpoint_id)
+        if writes[0][0] == INTERRUPT:
+            self._paused_tasks[step].add(task_id)
+            self._steps_with_a_pause.add(step)
+        elif task_id in self._paused_tasks[step] and all(
+            channel != ERROR for channel, _ in writes
+        ):
+            # A task that paused and then writes anything but an error is not waiting any more.
+            # An error leaves it waiting: a retry asks again.
+            self._paused_tasks[step].discard(task_id)
+            self._resolved_tasks[step].add(task_id)
+            writes = []
+            if self._holds_resolved_interrupts(step):
+                return None
+        else:
             return None
 
+        # A task whose interrupt was resolved is stored as an interrupt write with no
+        # interrupts in it, which replaces the one it paused on.
+        cleared_tasks = [
+            (resolved_task, [(INTERRUPT, ())])
+            for resolved_task in sorted(self._resolved_tasks.pop(step, ()))
+        ]
         encoded_writes = []
-        for idx, (channel, val) in enumerate(writes):
-            t, bval = self.serde.dumps_typed(val)
-            encoded_writes.append(
-                {
-                    "task": task_id,
-                    "channel": channel,
-                    "data": base64.b64encode(bval).decode("utf-8"),
-                    "write_type": t,
-                    "idx": idx,
-                }
-            )
+        for writer, task_writes in [(task_id, writes), *cleared_tasks]:
+            for idx, (channel, val) in enumerate(task_writes):
+                t, bval = self.serde.dumps_typed(val)
+                encoded_writes.append(
+                    {
+                        "task": writer,
+                        "channel": channel,
+                        "data": base64.b64encode(bval).decode("utf-8"),
+                        "write_type": t,
+                        "idx": idx,
+                    }
+                )
 
         endpoint = (
             f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoint_writes_batch"
         )
-        with duo_workflow_metrics.time_gitlab_response(
-            endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoint_writes_batch",
-            method="POST",
-        ):
-            result = await self._client.apost(
-                path=endpoint,
-                body=json.dumps(
-                    {
-                        "thread_ts": checkpoint_id,
-                        "checkpoint_writes": encoded_writes,
-                    }
-                ),
+        # GitLab refuses a batch over its row limit, so a task's rows go out first, which keeps its pause safe if a
+        # later chunk of clears is refused, and the clears follow in chunks.
+        for start in range(0, len(encoded_writes), _MAX_CHECKPOINT_WRITES_PER_BATCH):
+            with duo_workflow_metrics.time_gitlab_response(
+                endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoint_writes_batch",
+                method="POST",
+            ):
+                result = await self._client.apost(
+                    path=endpoint,
+                    body=json.dumps(
+                        {
+                            "thread_ts": checkpoint_id,
+                            "checkpoint_writes": encoded_writes[
+                                start : start + _MAX_CHECKPOINT_WRITES_PER_BATCH
+                            ],
+                        }
+                    ),
+                )
+            self._logger.info(
+                "Checkpoint updated with pending writes",
+                thread_ts=checkpoint_id,
+                parent_ts=configurable.get("checkpoint_id"),
+                result=result,
             )
-        self._logger.info(
-            "Checkpoint updated with pending writes",
-            thread_ts=checkpoint_id,
-            parent_ts=configurable.get("checkpoint_id"),
-            result=result,
-        )
         return None
 
     def _convert_gitlab_checkpoint_to_checkpoint_tuple(
@@ -2302,16 +2384,22 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         """
         pending_writes = None
         if "checkpoint_writes" in gl_checkpoint:
-            pending_writes = [
-                (
-                    w["task"],
-                    w["channel"],
-                    self.serde.loads_typed(
-                        (w["write_type"], base64.b64decode(w["data"]))
-                    ),
-                )
-                for w in gl_checkpoint["checkpoint_writes"]
-            ]
+            pending_writes = _latest_interrupts(
+                [
+                    (
+                        w.get("id", 0),
+                        w["task"],
+                        w["channel"],
+                        self.serde.loads_typed(
+                            (w["write_type"], base64.b64decode(w["data"]))
+                        ),
+                    )
+                    for w in gl_checkpoint["checkpoint_writes"]
+                ]
+            )
+            self._paused_tasks[gl_checkpoint["thread_ts"]].update(
+                task for task, channel, _ in pending_writes if channel == INTERRUPT
+            )
 
         return CheckpointTuple(
             config={
