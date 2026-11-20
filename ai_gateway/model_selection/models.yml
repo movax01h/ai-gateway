@@ -1122,7 +1122,7 @@ models:
   - name: "Gemini 4 Carbon"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_4_carbon_vertex"
-    requires_paid_credits: false
+    requires_paid_credits: true
     description: "Google's strongest Gemini model for long-horizon agentic, coding, and cybersecurity work."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
@@ -1162,7 +1162,7 @@ models:
   - name: "Gemini 4 Neon"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_4_neon_vertex"
-    requires_paid_credits: false
+    requires_paid_credits: true
     description: "Google's low-latency Gemini 4 model for coding, multi-step reasoning, and agentic workflows."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
