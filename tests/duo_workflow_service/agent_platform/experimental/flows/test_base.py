@@ -36,6 +36,7 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 )
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.checkpointer.notifier import UserInterface
+from duo_workflow_service.components.tools_registry import ToolSelector
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
@@ -885,6 +886,89 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             else:
                 # When neither toolset nor tool_name is specified, toolset shouldn't be called
                 mock_tools_registry.toolset.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "environment", ["chat", "chat-partial", "ide", "ambient", "local"]
+    )
+    def test_tools_key_adds_no_automatic_mcp_tools(
+        self, flow_instance, mock_tools_registry, environment
+    ):
+        flow_instance._config = flow_instance._config.model_copy(
+            update={"environment": environment}
+        )
+        mock_tools_registry.mcp_tool_names.return_value = ["gitlab_get_issue"]
+        mock_tools_registry.select_tools.return_value = [
+            "read_file",
+            "gitlab_get_merge_request",
+        ]
+
+        params = flow_instance._prepare_component_params(
+            {
+                "name": "agent",
+                "type": "AgentComponent",
+                "tools": [
+                    {"server": "gitlab", "name": ["read_file"]},
+                    {"server": "orbit", "name": ["list_commands"]},
+                ],
+            },
+            mock_tools_registry,
+        )
+
+        mock_tools_registry.mcp_tool_names.assert_not_called()
+        mock_tools_registry.select_tools.assert_called_once_with(
+            [
+                ToolSelector("gitlab", ["read_file"]),
+                ToolSelector("orbit", ["list_commands"]),
+            ]
+        )
+        mock_tools_registry.toolset.assert_called_once_with(
+            ["read_file", "gitlab_get_merge_request"]
+        )
+        assert params["toolset"] is mock_tools_registry.toolset.return_value
+        assert "tools" not in params
+
+    def test_empty_tools_list_means_no_tools_in_a_chat_flow(
+        self, flow_instance, mock_tools_registry
+    ):
+        flow_instance._config = flow_instance._config.model_copy(
+            update={"environment": "chat"}
+        )
+        mock_tools_registry.mcp_tool_names.return_value = ["gitlab_get_issue"]
+        mock_tools_registry.select_tools.return_value = []
+
+        flow_instance._prepare_component_params(
+            {"name": "agent", "type": "AgentComponent", "tools": []},
+            mock_tools_registry,
+        )
+
+        mock_tools_registry.toolset.assert_called_once_with([])
+
+    @pytest.mark.parametrize(
+        "environment, expected_names",
+        [
+            ("chat", ["read_file", "mcp_search"]),
+            ("chat-partial", ["read_file", "mcp_search"]),
+            ("ide", ["read_file", "mcp_search"]),
+            ("ambient", ["read_file"]),
+        ],
+    )
+    def test_toolset_key_keeps_its_automatic_mcp_tools(
+        self, flow_instance, mock_tools_registry, environment, expected_names
+    ):
+        flow_instance._config = flow_instance._config.model_copy(
+            update={"environment": environment}
+        )
+        mock_tools_registry.mcp_tool_names.return_value = ["mcp_search"]
+
+        flow_instance._prepare_component_params(
+            {"name": "agent", "type": "AgentComponent", "toolset": ["read_file"]},
+            mock_tools_registry,
+        )
+
+        mock_tools_registry.toolset.assert_called_once_with(
+            expected_names, tool_options={}
+        )
+        mock_tools_registry.select_tools.assert_not_called()
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_checkpointer", "mock_state_graph")

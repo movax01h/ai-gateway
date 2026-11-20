@@ -1,11 +1,16 @@
 from pathlib import Path
-from typing import Any, Callable, ClassVar, List, Literal, Optional, override
+from typing import Any, Callable, ClassVar, List, Literal, Optional, Self, override
+
+from pydantic import model_validator
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
 from duo_workflow_service.agent_platform.experimental.components import (
     BaseComponent,
     ComponentRegistry,
+)
+from duo_workflow_service.agent_platform.experimental.flows.tools_config import (
+    parse_component_tools,
 )
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     MCP_AUTO_INJECT_ENVIRONMENTS,
@@ -47,6 +52,32 @@ class FlowConfig(BaseFlowConfig):
     # A registry flow that cannot work without its ``for_each`` fan-outs runs them
     # whether or not the ``dap_for_each`` feature flag is on.
     requires_for_each: bool = False
+
+    @model_validator(mode="after")
+    def _reject_mixed_tool_keys(self) -> Self:
+        """Reject a flow whose components use both ``tools:`` and ``toolset:``.
+
+        A ``toolset:`` component keeps its automatic MCP tools and a ``tools:`` component gets none, so a mix leaves
+        the tools of the flow unclear. An experimental flow has no ``include`` section, so every component counts.
+        """
+        components_by_key = {
+            key: [comp.get("name") for comp in self.components if key in comp]
+            for key in ("tools", "toolset")
+        }
+        if all(components_by_key.values()):
+            raise ValueError(
+                'A flow can use "tools" or "toolset" in its components, not both: '
+                f'"tools" in {components_by_key["tools"]}, '
+                f'"toolset" in {components_by_key["toolset"]}'
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _reject_invalid_tools_entries(self) -> Self:
+        """Reject a ``tools:`` entry that is not a valid selector, so the flow fails when the request arrives."""
+        for comp in self.components:
+            parse_component_tools(comp)
+        return self
 
     def should_auto_inject_mcp_tools(self) -> bool:
         """Return whether MCP tools should be automatically injected into this flow's toolset.

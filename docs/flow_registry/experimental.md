@@ -535,6 +535,79 @@ routers:
 
 ---
 
+## Selecting tools with `tools:`
+
+A component lists the tools it can use under `tools:`. Every entry (a selector) selects a set of tools by providing a
+server and a subset of the tool names that server provides.
+
+```yaml
+components:
+  - name: "research_agent"
+    type: AgentComponent
+    prompt_id: "research_agent_prompt"
+    tools:
+      - server: gitlab
+        name: ["read_file", "get_merge_request", "get_pipeline"]
+      - server: orbit
+        name: ["list_commands", "invoke_command"]
+```
+
+The component gets every tool that any entry names.
+
+### Selector rules
+
+- `server` is required. It is `gitlab`, `orbit` or `slack`.
+- `name` is required. It is a list of exact tool names without the server prefix: write `get_merge_request`, not
+  `gitlab_get_merge_request`. An empty list and a name with `*` are config errors.
+- A selector takes only `server`, `name`, and `origin: instance`. Any other key is a config error.
+- A plain tool name, or a tool name with options, is a config error.
+
+A component with `tools:` gets no automatic MCP tools, and `tools: []` means no selectable tools. DWS still adds the
+tools that a component needs for its own features, such as `delegate_task` for a component with subagents.
+
+### What a selector matches
+
+`server: gitlab` covers every tool that GitLab provides, native or from the GitLab MCP server. For each name DWS picks
+the first match:
+
+1. A native tool with that name, when the tool is enabled for the flow.
+1. An MCP tool whose name is `gitlab_<name>`.
+
+`server: orbit` and `server: slack` match MCP tools only.
+
+A name that matches no tool selects nothing. The flow still runs. Write the current tool name, because a selector with
+an old name (an alias) selects nothing.
+
+Only an MCP tool from a server that GitLab configured matches, so a client tool that borrows a `gitlab_` name selects
+nothing. MCP tools match only on GitLab 19.5.0 or later, 19.4.3 or later in 19.4, and 19.3.6 or later in 19.3.
+
+The GitLab MCP tools also select nothing when the root namespace has `duo_workflow_mcp_enabled` off. Native tools and
+the `orbit` and `slack` tools don't depend on it.
+
+### The legacy `toolset:` key
+
+`toolset:` is the legacy key. It still works, so an existing flow can keep it. Use `tools:` in a new flow.
+
+- A component has `tools:` or `toolset:`, not both. A flow can't use `tools:` in one component and `toolset:` in
+  another.
+- A `DeterministicStepComponent` with `tool_name:` has neither key, so it doesn't count.
+- A component with `toolset:` gets the connected MCP tools, but only in `chat`, `chat-partial`, and `ide` flows. In an
+  `ambient` flow it gets none.
+
+To move a flow to `tools:`:
+
+1. Check the tool options. A selector takes no options. A flow with a component that sets a tool option stays on
+   `toolset:` in every component.
+1. In each component, put the names from `toolset:` in a selector with `server: gitlab` under `tools:`. Add a selector
+   for each MCP tool that the component uses.
+1. Remove the `toolset:` key from every component. A component with `toolset: []` gets `tools: []` instead, because an
+   `AgentComponent` needs one of the two keys.
+
+A component that used MCP tools from a local server loses them after the move, because a selector takes only the
+`gitlab`, `orbit` and `slack` servers.
+
+---
+
 ## Component Attributes
 
 A component attribute is not a component type of its own: it is a field an existing component declares to change

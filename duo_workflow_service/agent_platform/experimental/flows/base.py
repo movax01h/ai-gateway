@@ -32,6 +32,9 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
     load_component_class,
 )
+from duo_workflow_service.agent_platform.experimental.flows.tools_config import (
+    parse_component_tools,
+)
 from duo_workflow_service.agent_platform.experimental.routers import Router
 from duo_workflow_service.agent_platform.experimental.state import FlowState
 from duo_workflow_service.agent_platform.experimental.state.base import (
@@ -356,7 +359,14 @@ class Flow(AbstractWorkflow):
                 comp_params["pre_approved_tools"], tools_registry
             )
 
-        if "toolset" in comp_params:
+        selectors = parse_component_tools(comp_params)
+        if selectors is not None:
+            del comp_params["tools"]
+            # Unlike toolset:, tools: adds no MCP tools on its own, in every environment.
+            comp_params["toolset"] = tools_registry.toolset(
+                tools_registry.select_tools(selectors)
+            )
+        elif "toolset" in comp_params:
             comp_params["toolset"] = self._parse_toolset(
                 tools_registry, comp_params["toolset"]
             )
