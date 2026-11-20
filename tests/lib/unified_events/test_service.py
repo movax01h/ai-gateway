@@ -96,6 +96,11 @@ def event_context():
         plan="ultimate",
         correlation_id="corr-id",
         feature_enablement_type="duo_pro",
+        feature_enabled_by_namespace_ids=[3, 5],
+        client_type="ide",
+        client_name="vscode",
+        client_version="6.12.0",
+        interface="duo_chat",
     )
     token = current_event_context.set(context)
     yield context
@@ -179,6 +184,11 @@ class TestUnifiedEventServiceTrack:
         assert body["plan"] == "ultimate"
         assert body["correlation_id"] == "corr-id"
         assert body["feature_enablement_type"] == "duo_pro"
+        assert body["feature_enabled_by_namespace_ids"] == [3, 5]
+        assert body["client_type"] == "ide"
+        assert body["client_name"] == "vscode"
+        assert body["client_version"] == "6.12.0"
+        assert body["interface"] == "duo_chat"
 
     def test_structured_event_fields_are_top_level(
         self, service, posted_body, event_context, tracked_events

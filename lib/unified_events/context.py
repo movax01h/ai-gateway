@@ -1,5 +1,5 @@
 from contextvars import ContextVar
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -40,7 +40,7 @@ class EventConstructContext(BaseModel):
     """The unified event construct: a single self-describing context carrying
     product-usage + billing information.
 
-    This model mirrors the ``com.gitlab/event_construct/jsonschema/1-0-0`` iglu
+    This model mirrors the ``com.gitlab/event_construct/jsonschema/1-0-1`` iglu
     schema field-for-field. Fields are grouped in the same order as the schema:
     ENVELOPE, WHO, WHERE, WHAT, BILLING, METADATA.
 
@@ -145,6 +145,26 @@ class EventConstructContext(BaseModel):
         max_length=255,
         description="Version of the GitLab instance where the request comes from.",
     )
+    client_type: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Type of client, such as browser, IDE, etc.",
+    )
+    client_name: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Client name which sends the request (e.g. 'chrome', 'jetbrains').",
+    )
+    client_version: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Version of client which sends the request.",
+    )
+    interface: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description="Interface where the request originates from, e.g. Duo Chat.",
+    )
     organization_id: Optional[int] = Field(
         default=None,
         ge=0,
@@ -181,6 +201,12 @@ class EventConstructContext(BaseModel):
         default=None,
         max_length=64,
         description="Enablement type for the namespace that allows the user to use the tracked feature.",
+    )
+    feature_enabled_by_namespace_ids: Optional[
+        List[Annotated[int, Field(ge=0, le=2147483647)]]
+    ] = Field(
+        default=None,
+        description="List of namespaces that allow the user to use the tracked feature.",
     )
     plan: Optional[str] = Field(
         default=None,

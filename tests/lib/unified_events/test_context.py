@@ -109,6 +109,8 @@ def test_assignments_must_be_unique():
     [
         ("organization_id", -1),
         ("organization_id", 2147483648),
+        ("feature_enabled_by_namespace_ids", [-1]),
+        ("feature_enabled_by_namespace_ids", [2147483648]),
         ("quantity", -1),
         ("estimated_cost", -0.01),
     ],
@@ -125,6 +127,10 @@ def test_numeric_bounds_are_enforced(field, value):
         ("source", 32),
         ("correlation_id", 64),
         ("plan", 32),
+        ("client_type", 64),
+        ("client_name", 64),
+        ("client_version", 64),
+        ("interface", 255),
     ],
 )
 def test_string_max_length_is_enforced(field, max_length):
@@ -134,6 +140,13 @@ def test_string_max_length_is_enforced(field, max_length):
         EventConstructContext(
             event_id=VALID_EVENT_ID, **{field: "x" * (max_length + 1)}
         )
+
+
+def test_feature_enabled_by_namespace_ids_accepts_bounds():
+    context = EventConstructContext(
+        event_id=VALID_EVENT_ID, feature_enabled_by_namespace_ids=[0, 2147483647]
+    )
+    assert context.feature_enabled_by_namespace_ids == [0, 2147483647]
 
 
 def test_unknown_fields_are_forbidden():
