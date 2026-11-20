@@ -9,6 +9,13 @@ path taken whenever the `run_commands` privilege is absent or a tool policy deni
 import pytest
 
 from ai_gateway.prompts.base import jinja_env
+from ai_gateway.prompts.feature_roots import discover_feature_prompts
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _feature_prompts():
+    """Register ``ai/shared`` so the ``agents_dot_md`` include resolves."""
+    discover_feature_prompts()
 
 
 @pytest.mark.parametrize("run_command", [True, False])

@@ -8,7 +8,6 @@ import hashlib
 import os
 from contextvars import ContextVar
 from dataclasses import dataclass
-from importlib import resources
 from typing import NamedTuple, Optional, Sequence, cast
 
 from jinja2 import BaseLoader, Environment
@@ -18,6 +17,7 @@ from langchain_core.prompts import MessagesPlaceholder
 from langchain_core.prompts.chat import MessageLikeRepresentation
 
 from lib.context.workflow import get_workflow_id
+from lib.feature_roots import default_project_root
 from lib.session_owner.prompt import render_session_owner_block
 
 __all__ = [
@@ -29,9 +29,11 @@ __all__ = [
 ]
 
 _SECURITY_TEMPLATE_SOURCE = (
-    resources.files("ai_gateway.prompts.definitions")
-    .joinpath("common", "tool_output_security", "1.0.0.jinja")
-    .read_text()
+    default_project_root()
+    .joinpath(
+        "ai", "shared", "common", "prompts", "tool_output_security", "1.0.0.jinja"
+    )
+    .read_text(encoding="utf-8")
 )
 
 # Template source is package-internal and not user-controlled.
