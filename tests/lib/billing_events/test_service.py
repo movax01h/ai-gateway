@@ -32,6 +32,7 @@ def test_bill_once_per_workflow_features_matches_expected_prefixes():
     assert BILL_ONCE_PER_WORKFLOW_FEATURES == frozenset(
         {
             "code_review",
+            "resolve_dependency_bump",
             "sast_fp_detection",
             "secrets_fp_detection",
             "resolve_sast_vulnerability",
