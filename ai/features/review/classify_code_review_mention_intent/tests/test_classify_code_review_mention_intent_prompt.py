@@ -78,14 +78,7 @@ def test_reply_in_a_duo_review_thread():
     assert f"Earlier messages in this thread, oldest first:\n{thread}" in rendered
 
 
-_PROMPT_DIR = (
-    Path(__file__).parent.parent.parent
-    / "ai"
-    / "features"
-    / "review"
-    / "classify_code_review_mention_intent"
-    / "prompts"
-)
+_PROMPT_DIR = Path(__file__).parent.parent / "prompts"
 _BASE_DEFINITIONS = sorted((_PROMPT_DIR / "base").glob("*.yml"))
 
 
