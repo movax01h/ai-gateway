@@ -136,6 +136,13 @@ def test_accepts_gitlab_private_test_tenants():
     assert list(parse_trusted_restricted_issuers(raw)) == [url]
 
 
+def test_accepts_dedicated_pre_prod_tenants():
+    url = "https://tenant-a.gitlab-dedicated.systems"
+    raw = json.dumps({url: {"uid": UID_A, "flows": ["bl_security"]}})
+
+    assert list(parse_trusted_restricted_issuers(raw)) == [url]
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -156,6 +163,13 @@ def test_accepts_gitlab_private_test_tenants():
         "https://gitlab-private.org",
         "https://a.b.gitlab-private.org",
         "https://tenant.gitlab-private.org.evil.example",
+        "http://tenant-a.gitlab-dedicated.systems",
+        "https://tenant-a.gitlab-dedicated.systems/gitlab",
+        "https://tenant-a.gitlab-dedicated.systems:8443",
+        "https://gitlab-dedicated.systems",
+        "https://a.b.gitlab-dedicated.systems",
+        "https://evil-gitlab-dedicated.systems",
+        "https://tenant.gitlab-dedicated.systems.evil.example",
     ],
 )
 def test_rejects_issuer_urls(url):
