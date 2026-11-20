@@ -48,6 +48,7 @@ log = structlog.stdlib.get_logger("model_scope")
 # definition in GitLab Rails (`ee/app/models/ai/catalog/foundational_flow/<flow>/definition.rb`).
 FLAT_RATE_FLOW_FEATURE_SETTINGS: dict[str, str] = {
     "code_review": "review_merge_request_dap",
+    "resolve_dependency_bump": "resolve_dependency_bump",
     "resolve_sast_vulnerability": "sast_vulnerability_resolution",
     "sast_fp_detection": "sast_vulnerability_fp_detection",
     "secrets_fp_detection": "secret_vulnerability_fp_detection",
