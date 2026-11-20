@@ -615,7 +615,7 @@ class CreateWorkItem(WorkItemBaseTool):
 
     For example:
     - Given group_id 'namespace/group' and title "Implement feature X", the tool call would be:
-        create_work_item(group_id='namespace/group', title="Implement feature X", type_name="issue")
+        create_work_item(group_id='namespace/group', title="Implement feature X", type_name="Issue")
     """
     args_schema: Type[BaseModel] = CreateWorkItemInput
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
