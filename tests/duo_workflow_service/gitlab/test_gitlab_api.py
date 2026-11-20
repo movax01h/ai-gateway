@@ -354,6 +354,110 @@ async def test_fetch_workflow_and_container_data_tool_access_policies(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "typed,expected",
+    [
+        (
+            {
+                "allow": ["read_file"],
+                "ask": ["get_issue"],
+                "deny": ["run_command"],
+                "ceiling": True,
+                "promote": ["edit_file"],
+                "firstPartyTools": [{"name": "mcp__duo__review", "permission": "ASK"}],
+            },
+            {
+                "allow": ["read_file"],
+                "ask": ["get_issue"],
+                "deny": ["run_command"],
+                "ceiling": True,
+                "promote": ["edit_file"],
+                "first_party_tools": {"mcp__duo__review": "ask"},
+            },
+        ),
+        (
+            {
+                "allow": [],
+                "ask": [],
+                "deny": [],
+                "ceiling": None,
+                "promote": None,
+                "firstPartyTools": None,
+            },
+            {"allow": [], "ask": [], "deny": []},
+        ),
+        (None, None),
+        (
+            {"allow": [], "ask": [], "deny": [], "firstPartyTools": []},
+            {"allow": [], "ask": [], "deny": [], "first_party_tools": {}},
+        ),
+        (
+            {"allow": [], "ask": [], "deny": [], "firstPartyTools": [{"name": "x"}]},
+            {"allow": [], "ask": [], "deny": [], "first_party_tools": [{"name": "x"}]},
+        ),
+        (
+            {"allow": [], "ask": [], "deny": [], "firstPartyTools": "x"},
+            {"allow": [], "ask": [], "deny": [], "first_party_tools": "x"},
+        ),
+        (
+            {"allow": [], "ask": [], "deny": [], "firstPartyTools": ["x"]},
+            {"allow": [], "ask": [], "deny": [], "first_party_tools": ["x"]},
+        ),
+        (
+            {
+                "allow": [],
+                "ask": [],
+                "deny": [],
+                "firstPartyTools": [{"name": "x", "permission": None}],
+            },
+            {
+                "allow": [],
+                "ask": [],
+                "deny": [],
+                "first_party_tools": [{"name": "x", "permission": None}],
+            },
+        ),
+    ],
+    ids=[
+        "full",
+        "nulls_left_out",
+        "null_policy",
+        "empty_first_party_tools",
+        "first_party_tool_without_permission",
+        "first_party_tools_not_a_list",
+        "first_party_tool_not_an_object",
+        "first_party_tool_with_null_permission",
+    ],
+)
+async def test_fetch_workflow_and_container_data_typed_tool_access_policy(
+    typed, expected
+):
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "webUrl": "http://example.com/test-project",
+                    },
+                    "toolAccessPolicy": typed,
+                }
+            ]
+        }
+    }
+
+    _, _, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123", with_tool_access_policies=True
+    )
+
+    assert workflow_config["tool_access_policies"] == expected
+
+
+@pytest.mark.asyncio
 async def test_fetch_workflow_and_project_data_with_missing_languages(
     workflow_and_project_data,
 ):

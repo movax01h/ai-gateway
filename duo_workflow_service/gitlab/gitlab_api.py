@@ -1,4 +1,4 @@
-from typing import NotRequired, Optional, Tuple, TypedDict
+from typing import Any, NotRequired, Optional, Tuple, TypedDict
 
 from duo_workflow_service.errors.typing import InvalidWorkflowIdException
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
@@ -83,6 +83,33 @@ class WorkflowConfig(TypedDict):
     source_type: NotRequired[Optional[str]]
     tool_access_policies: NotRequired[Optional[dict]]
     session_owner_username: NotRequired[Optional[str]]
+
+
+def _tool_access_policies(workflow: dict) -> Any:
+    """Return the policy in the shape of the 19.6 JSON field, whichever field the query selected."""
+    if "toolAccessPolicy" not in workflow:
+        return workflow.get("toolAccessPolicies")
+
+    typed = workflow["toolAccessPolicy"]
+    if not isinstance(typed, dict):
+        return typed
+
+    # The typed field returns null where the JSON one left the key out.
+    policies = {
+        key: value
+        for key, value in typed.items()
+        if value is not None and key != "firstPartyTools"
+    }
+    tools = typed.get("firstPartyTools")
+    if tools is not None:
+        try:
+            policies["first_party_tools"] = {
+                tool["name"]: tool["permission"].lower() for tool in tools
+            }
+        except (TypeError, KeyError, AttributeError):
+            # Not a map, so the policy fails closed when it is parsed.
+            policies["first_party_tools"] = tools
+    return policies
 
 
 def _human_owner_username(workflow: dict) -> Optional[str]:
@@ -247,7 +274,7 @@ async def fetch_workflow_and_container_data(
         archived=workflow.get("archived", None),
         stalled=workflow.get("stalled", None),
         source_type=source_type,
-        tool_access_policies=workflow.get("toolAccessPolicies"),
+        tool_access_policies=_tool_access_policies(workflow),
         session_owner_username=_human_owner_username(workflow),
         features={
             "foundational_flows": {

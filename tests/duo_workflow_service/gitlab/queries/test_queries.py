@@ -162,6 +162,11 @@ class TestQueryVersionSelection:
                 'webSearchAllowed @gl_introduced(version: "19.6.0")',
                 id="19.6_has_webSearchAllowed",
             ),
+            pytest.param(
+                "19.7.0",
+                'toolAccessPolicy(projectId: $projectId) @gl_introduced(version: "19.7.0")',
+                id="19.7_has_toolAccessPolicy",
+            ),
         ],
     )
     def test_version_gate_features(self, version: str, expected_feature: str):
@@ -169,6 +174,21 @@ class TestQueryVersionSelection:
         result = fetch_query_for_version(version)
 
         assert expected_feature in result
+
+    @pytest.mark.parametrize("version", ["19.7.0", "19.7.0-pre"])
+    def test_query_selection_from_19_7_reads_the_typed_policy(self, version: str):
+        """The JSON field goes once DWS reads the typed one, so 19.7 stops selecting it."""
+        result = fetch_query_for_version(version)
+
+        assert "toolAccessPolicy(" in result
+        assert "toolAccessPolicies" not in result
+
+    def test_query_selection_on_19_6_keeps_the_json_policy(self):
+        """19.6 instances have only the JSON field."""
+        result = fetch_query_for_version("19.6.0")
+
+        assert "toolAccessPolicies(" in result
+        assert "toolAccessPolicy(" not in result
 
     def test_query_selection_before_19_6_has_no_tool_access_policies(self):
         """Older instances keep a query without the policy variables."""
@@ -191,6 +211,21 @@ class TestQueryVersionSelection:
             for line in older
             if line.strip() and not line.lstrip().startswith("query")
             if line.strip() not in newer
+        ]
+
+        assert not missing
+
+    def test_19_7_query_keeps_every_19_6_field(self):
+        """19.7 only swaps the JSON policy for the typed one, so newer instances lose nothing else 19.6 asks for."""
+        older = fetch_query_for_version("19.6.0").splitlines()
+        newer = fetch_query_for_version("19.7.0")
+        replaced = 'toolAccessPolicies(projectId: $projectId) @gl_introduced(version: "19.6.0")'
+
+        missing = [
+            line.strip()
+            for line in older
+            if line.strip() and not line.lstrip().startswith("query")
+            if line.strip() not in newer and line.strip() != replaced
         ]
 
         assert not missing
