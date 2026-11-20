@@ -1,7 +1,6 @@
 # Frozen list of directories under the legacy prompt and flow-config roots.
 # See docs/adding_and_moving_features.md. New versions inside a listed directory are fine.
 # Delete lines as features move to ai/features/. Never add lines.
-ai_gateway/prompts/definitions/agents_dot_md/base
 ai_gateway/prompts/definitions/categorize_question
 ai_gateway/prompts/definitions/categorize_question/base
 ai_gateway/prompts/definitions/chat/_library_section
@@ -146,31 +145,15 @@ ai_gateway/prompts/definitions/chat/write_tests/mistral
 ai_gateway/prompts/definitions/chat/write_tests/system
 ai_gateway/prompts/definitions/chat/write_tests/user
 ai_gateway/prompts/definitions/classify_goal_tier/base
-ai_gateway/prompts/definitions/commit_changes/base
-ai_gateway/prompts/definitions/commit_changes/system
-ai_gateway/prompts/definitions/commit_changes/user
-ai_gateway/prompts/definitions/common/commit_message_guidelines
-ai_gateway/prompts/definitions/common/diff_structure
 ai_gateway/prompts/definitions/common/fix_pipeline_failure_categories
-ai_gateway/prompts/definitions/common/glab_skill
 ai_gateway/prompts/definitions/common/include_urls
 ai_gateway/prompts/definitions/common/package_recommendations
-ai_gateway/prompts/definitions/common/performance_optimization
-ai_gateway/prompts/definitions/common/push_retry
 ai_gateway/prompts/definitions/common/tier_error
-ai_gateway/prompts/definitions/common/tool_output_security
 ai_gateway/prompts/definitions/conversation_compaction/base
 ai_gateway/prompts/definitions/conversation_compaction/system
 ai_gateway/prompts/definitions/conversation_compaction/user
 ai_gateway/prompts/definitions/conversation_compaction_manual/base
 ai_gateway/prompts/definitions/conversation_compaction_manual/user
-ai_gateway/prompts/definitions/create_merge_request/base
-ai_gateway/prompts/definitions/create_merge_request/system
-ai_gateway/prompts/definitions/create_merge_request/user
-ai_gateway/prompts/definitions/create_repository_branch/base
-ai_gateway/prompts/definitions/create_repository_branch/gpt
-ai_gateway/prompts/definitions/create_repository_branch/system
-ai_gateway/prompts/definitions/create_repository_branch/user
 ai_gateway/prompts/definitions/fix_pipeline_add_comment/base
 ai_gateway/prompts/definitions/fix_pipeline_add_comment/system
 ai_gateway/prompts/definitions/fix_pipeline_add_comment/user
@@ -209,9 +192,6 @@ ai_gateway/prompts/definitions/model_configuration/check/user
 ai_gateway/prompts/definitions/programming_agent/base
 ai_gateway/prompts/definitions/programming_agent/system
 ai_gateway/prompts/definitions/programming_agent/user
-ai_gateway/prompts/definitions/push_to_remote/base
-ai_gateway/prompts/definitions/push_to_remote/system
-ai_gateway/prompts/definitions/push_to_remote/user
 ai_gateway/prompts/definitions/resolve_dep_bump_pipeline_fix/base
 ai_gateway/prompts/definitions/resolve_dep_bump_pipeline_fix/system
 ai_gateway/prompts/definitions/resolve_dep_bump_pipeline_fix/user
@@ -235,7 +215,6 @@ ai_gateway/prompts/definitions/workflow/user
 ai_gateway/prompts/definitions/workplan/partials/asking_a_question
 ai_gateway/prompts/definitions/workplan/partials/requesting_context
 ai_gateway/prompts/definitions/workplan/partials/resolving_ambiguity
-ai_gateway/prompts/definitions/workspace_agent_skills/base
 duo_workflow_service/agent_platform/v1/flows/configs
 duo_workflow_service/agent_platform/v1/flows/configs/agentic_chat
 duo_workflow_service/agent_platform/v1/flows/configs/duo_permissions_assistant

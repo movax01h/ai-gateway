@@ -1,6 +1,6 @@
 """Shared formatting of git diffs into the `<file_diff>`/`<line>` representation.
 
-The format is documented to the model by `ai_gateway/prompts/definitions/common/diff_structure/1.0.0.jinja`, so any
+The format is documented to the model by `ai/shared/common/prompts/diff_structure/1.0.0.jinja`, so any
 change here must be mirrored there. Holding it in one place is what keeps every caller rendering it identically:
 the merge-request path and the local checkout path both render through these helpers.
 """

@@ -89,14 +89,14 @@ class TestDiscovery:
         features = tmp_path / "ai" / "features"
         shared = tmp_path / "ai" / "shared"
         prompts = _write_prompts(
-            shared / "commit_changes" / "prompts", "commit_changes"
+            shared / "sample_shared_prompt" / "prompts", "sample_shared_prompt"
         )
         (shared / "no_prompts").mkdir()
         (shared / "README.md").write_text("not a definition")
 
         feature_roots.discover_feature_prompts(features)
 
-        assert feature_roots.feature_prompt_root("commit_changes") == prompts
+        assert feature_roots.feature_prompt_root("sample_shared_prompt") == prompts
         assert feature_roots.feature_prompt_root("no_prompts") is None
         assert feature_roots.feature_prompt_root("README.md") is None
 
@@ -148,12 +148,12 @@ class TestSubpromptsIndex:
     def test_unlisted_directory_with_base_is_not_registered(self, tmp_path: Path):
         features = tmp_path / "ai" / "features"
         prompts = _write_flow_with_subprompts(features)
-        (prompts / "common" / "base").mkdir(parents=True)
+        (prompts / "unlisted" / "base").mkdir(parents=True)
 
         feature_roots.discover_feature_prompts(features)
 
-        assert feature_roots.feature_prompt_root("my_flow_common") is None
-        assert feature_roots.feature_prompt_root("common") is None
+        assert feature_roots.feature_prompt_root("my_flow_unlisted") is None
+        assert feature_roots.feature_prompt_root("unlisted") is None
 
     def test_listed_directory_without_base_fails_discovery(self, tmp_path: Path):
         features = tmp_path / "ai" / "features"
@@ -256,11 +256,11 @@ class TestResolveId:
     def test_resolves_shared_prompt(self, tmp_path: Path):
         shared = tmp_path / "ai" / "shared"
         prompts = _write_prompts(
-            shared / "commit_changes" / "prompts", "commit_changes"
+            shared / "sample_shared_prompt" / "prompts", "sample_shared_prompt"
         )
         feature_roots.discover_feature_prompts(tmp_path / "ai" / "features")
 
-        assert _make_registry()._resolve_id("commit_changes", family=[]) == (
+        assert _make_registry()._resolve_id("sample_shared_prompt", family=[]) == (
             prompts / "base"
         )
 

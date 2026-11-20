@@ -49,6 +49,9 @@
 # Pipeline features under ai/features/pipeline/ (team ownership still under discussion)
 /ai/features/pipeline/ @gitlab-org/maintainers/duo-workflow-service
 
+# Cross-feature shared definitions under ai/shared/ (curated, platform-owned)
+/ai/shared/ @gitlab-org/maintainers/duo-workflow-service
+
 # Security Review response schema (Code Security)
 /ai_gateway/response_schemas/definitions/security_review/ @mbenayoun @philipcunningham @mtolpin
 
@@ -149,6 +152,9 @@
 
 # Pipeline features under ai/features/pipeline/ (team ownership still under discussion)
 /ai/features/pipeline/ @gitlab-org/maintainers/duo-workflow-service
+
+# Cross-feature shared definitions under ai/shared/ (curated, platform-owned)
+/ai/shared/ @gitlab-org/maintainers/duo-workflow-service
 
 # Security Review response schema (Code Security)
 /ai_gateway/response_schemas/definitions/security_review/ @mbenayoun @philipcunningham @mtolpin

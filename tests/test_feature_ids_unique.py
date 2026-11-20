@@ -46,24 +46,48 @@ def _duplicate_ids(features_dir: Path, shared_dir: Path) -> list[str]:
     return duplicates
 
 
+def _hides_registered_files(legacy: Path, served: Path) -> bool:
+    """Return whether a legacy dir would win over files that a registered root serves.
+
+    Two things hide registered files. ``PackageLoader`` runs before ``FeatureRootLoader``, so a legacy include fragment
+    that a registered root also serves under the same name hides the registered copy. And once an id is registered,
+    ``LocalPromptRegistry`` resolves it from the registered root only, with no fallback to the legacy dir, so any legacy
+    prompt version (``.yml``) becomes unreachable even if the registered root has no file of that name. A legacy dir
+    that holds neither, for example a ``common/`` that still holds fragments which have not moved yet, hides nothing:
+    those includes fall through to the registered root.
+    """
+    if not legacy.is_dir():
+        return False
+    return any(
+        legacy_file.suffix == ".yml"
+        or (served / legacy_file.relative_to(legacy)).is_file()
+        for legacy_file in legacy.rglob("*")
+        if legacy_file.is_file() and "__pycache__" not in legacy_file.parts
+    )
+
+
 def _legacy_shadows(
     features_dir: Path, shared_dir: Path, legacy_dir: Path
 ) -> list[str]:
-    """Return one message per registered prompt id that also exists in the legacy root."""
+    """Return one message per registered prompt id whose legacy dir hides a registered file."""
     moved = (
         [
-            (d, [d.name, f"{d.parent.name}/{d.name}"])
+            (d, d / "prompts", [d.name, f"{d.parent.name}/{d.name}"])
             for d in _dirs("*/*", features_dir)
             if (d / "prompts").is_dir()
         ]
-        + [(d, [d.name]) for d in _dirs("*", shared_dir) if (d / "prompts").is_dir()]
-        + [(d, [prompt_id]) for prompt_id, d in _listed_prompts(features_dir)]
+        + [
+            (d, d / "prompts", [d.name])
+            for d in _dirs("*", shared_dir)
+            if (d / "prompts").is_dir()
+        ]
+        + [(d, d, [prompt_id]) for prompt_id, d in _listed_prompts(features_dir)]
     )
     return [
         f"{prompt_id!r}: {directory} and {legacy_dir / prompt_id}"
-        for directory, prompt_ids in moved
+        for directory, served, prompt_ids in moved
         for prompt_id in prompt_ids
-        if (legacy_dir / prompt_id).exists()
+        if _hides_registered_files(legacy_dir / prompt_id, served)
     ]
 
 
@@ -143,10 +167,57 @@ def test_index_id_in_the_legacy_root_is_a_shadow(tmp_path: Path):
     prompts = features / "insights" / "my_flow" / "prompts"
     _write_listed_prompt(prompts, "my_flow_fetch", "fetch")
     (legacy / "my_flow_fetch" / "base").mkdir(parents=True)
+    (legacy / "my_flow_fetch" / "base" / "1.0.0.yml").write_text("name: x\n")
 
     assert _legacy_shadows(features, tmp_path / "shared", legacy) == [
         f"'my_flow_fetch': {prompts / 'fetch'} and {legacy / 'my_flow_fetch'}"
     ]
+
+
+def test_include_only_legacy_dir_with_no_overlap_is_not_a_shadow(tmp_path: Path):
+    features, legacy = tmp_path / "features", tmp_path / "definitions"
+    _write_listed_prompt(
+        features / "insights" / "my_flow" / "prompts", "my_flow_fetch", "fetch"
+    )
+    (legacy / "my_flow_fetch" / "partials").mkdir(parents=True)
+    (legacy / "my_flow_fetch" / "partials" / "1.0.0.jinja").write_text("include only")
+
+    assert not _legacy_shadows(features, tmp_path / "shared", legacy)
+
+
+def test_legacy_include_fragment_served_by_a_shared_dir_is_a_shadow(tmp_path: Path):
+    shared, legacy = tmp_path / "shared", tmp_path / "definitions"
+    served = shared / "common" / "prompts" / "push_retry"
+    served.mkdir(parents=True)
+    (served / "1.0.0.jinja").write_text("moved")
+    (legacy / "common" / "push_retry").mkdir(parents=True)
+    (legacy / "common" / "push_retry" / "1.0.0.jinja").write_text("stale")
+
+    assert _legacy_shadows(tmp_path / "features", shared, legacy) == [
+        f"'common': {shared / 'common'} and {legacy / 'common'}"
+    ]
+
+
+def test_legacy_prompt_version_without_a_registered_counterpart_is_a_shadow(
+    tmp_path: Path,
+):
+    features, legacy = tmp_path / "features", tmp_path / "definitions"
+    prompts = features / "insights" / "my_flow" / "prompts"
+    _write_listed_prompt(prompts, "my_flow_fetch", "fetch")
+    (legacy / "my_flow_fetch" / "gpt").mkdir(parents=True)
+    (legacy / "my_flow_fetch" / "gpt" / "1.0.0.yml").write_text("name: x\n")
+
+    assert len(_legacy_shadows(features, tmp_path / "shared", legacy)) == 1
+
+
+def test_legacy_jinja_only_dir_served_by_a_shared_dir_is_a_shadow(tmp_path: Path):
+    shared, legacy = tmp_path / "shared", tmp_path / "definitions"
+    (shared / "agents_dot_md" / "prompts" / "base").mkdir(parents=True)
+    (shared / "agents_dot_md" / "prompts" / "base" / "1.0.0.jinja").write_text("moved")
+    (legacy / "agents_dot_md" / "base").mkdir(parents=True)
+    (legacy / "agents_dot_md" / "base" / "1.0.0.jinja").write_text("stale")
+
+    assert len(_legacy_shadows(tmp_path / "features", shared, legacy)) == 1
 
 
 def test_unlisted_prompt_dirs_finds_base_versions_without_an_entry(tmp_path: Path):

@@ -18,6 +18,7 @@ import yaml
 from jinja2 import StrictUndefined, TemplateNotFound
 
 from ai_gateway.prompts.base import jinja_env
+from ai_gateway.prompts.feature_roots import discover_feature_prompts
 from lib.version import resolve_version
 
 _PROMPTS_DEFINITIONS_DIR = (
@@ -53,6 +54,12 @@ def _render(template: str, **overrides) -> str:
     return jinja_env.get_template(
         f"fix_pipeline_create_branch/{template}/{_latest_version()}.jinja"
     ).render(**context)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _feature_prompts():
+    """Register ``ai/shared`` so the ``common/...`` includes resolve."""
+    discover_feature_prompts()
 
 
 @pytest.fixture(name="system_prompt")
