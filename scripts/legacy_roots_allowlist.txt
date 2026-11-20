@@ -203,9 +203,6 @@ ai_gateway/prompts/definitions/fix_pipeline_new_mr_comment/user
 ai_gateway/prompts/definitions/gitlab_duo_mention_agent_prompt/base
 ai_gateway/prompts/definitions/gitlab_duo_mention_agent_prompt/system
 ai_gateway/prompts/definitions/gitlab_duo_mention_agent_prompt/user
-ai_gateway/prompts/definitions/model_configuration/check/base
-ai_gateway/prompts/definitions/model_configuration/check/system
-ai_gateway/prompts/definitions/model_configuration/check/user
 ai_gateway/prompts/definitions/programming_agent/base
 ai_gateway/prompts/definitions/programming_agent/system
 ai_gateway/prompts/definitions/programming_agent/user
