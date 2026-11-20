@@ -655,44 +655,45 @@ class TestTriageVerdictAudit:
 # Caps truncate a run (discovery dispatches only some review units, triage only
 # some candidates). The report must say so, or a partial scan is
 # indistinguishable from a complete one to whoever reads it.
+# Each stage's coverage record as `bl_collect_and_flatten` publishes it, and the
+# sentences the report words from it.
 _REVIEW_COVERAGE = {
     "emitted": 1339,
     "dispatched": 150,
     "completed": 150,
+    "errored": 0,
+    "unread": 0,
     "unit_noun": "review units",
-    "summary": (
-        "map_reviews reviewed 150 of 1339 review units (no scan_effort set, "
-        "fan-out cap 150); the 150 reviewed review units name 519 distinct "
-        "files, out of 1341 distinct files named across all 1339 emitted "
-        "review units (the repository's total file count is not visible at "
-        "this stage)."
-    ),
-    "truncation": (
-        "1189 of 1339 review units were not reviewed because the fan-out cap "
-        "(150) was reached."
-    ),
 }
+_REVIEW_SUMMARY = "Reviewed 150 of 150 review units."
+_REVIEW_TRUNCATION = (
+    "The scan limit was reached: 150 of 1339 review units were sent for review; "
+    "1189 were never reviewed."
+)
 
 _TRIAGE_COVERAGE = {
     "emitted": 432,
     "dispatched": 150,
     "completed": 150,
+    "errored": 0,
+    "unread": 0,
     "unit_noun": "findings",
-    "summary": "triage reviewed 150 of 432 findings (fan-out cap 150).",
-    "truncation": (
-        "282 of 432 findings were not reviewed because the fan-out cap (150) "
-        "was reached."
-    ),
 }
+_TRIAGE_SUMMARY = "Reviewed 150 of 150 findings."
+_TRIAGE_TRUNCATION = (
+    "The scan limit was reached: 150 of 432 findings were sent for review; "
+    "282 were never reviewed."
+)
 
 _COMPLETE_COVERAGE = {
     "emitted": 4,
     "dispatched": 4,
     "completed": 4,
+    "errored": 0,
+    "unread": 0,
     "unit_noun": "review units",
-    "summary": "sibling_scan reviewed all 4 review units it was given.",
-    "truncation": None,
 }
+_COMPLETE_SUMMARY = "Reviewed 4 of 4 review units."
 
 # The schema's own vocabulary for scan.messages[].level, quoted so a widened
 # enum here has to be a deliberate edit rather than a typo that ships.
@@ -825,26 +826,21 @@ class TestScanCoverageIsDisclosedInTheReport:
             # minLength: 1 in the schema.
             assert isinstance(message["value"], str) and message["value"]
 
-    def test_a_capped_stage_states_the_files_and_the_truncation(self):
+    def test_a_capped_stage_states_the_summary_and_the_truncation(self):
         report = _build_report([{"file": "a.py"}], [_REVIEW_COVERAGE])
         levels = [(m["level"], m["value"]) for m in _messages(report)]
 
         # What was covered is INFO; a cap that actually bound is a WARNing,
         # because it means findings were discarded, not merely counted.
         assert levels == [
-            ("info", _REVIEW_COVERAGE["summary"]),
-            ("warn", _REVIEW_COVERAGE["truncation"]),
+            ("info", _REVIEW_SUMMARY),
+            ("warn", _REVIEW_TRUNCATION),
         ]
-        # The numbers a reader needs: reviewed vs eligible, both halves.
-        assert "150 of 1339 review units" in levels[0][1]
-        assert "519 distinct files, out of 1341 distinct files" in levels[0][1]
 
     def test_a_complete_stage_gets_no_truncation_warning(self):
         report = _build_report([{"file": "a.py"}], [_COMPLETE_COVERAGE])
 
-        assert _messages(report) == [
-            {"level": "info", "value": _COMPLETE_COVERAGE["summary"]}
-        ]
+        assert _messages(report) == [{"level": "info", "value": _COMPLETE_SUMMARY}]
 
     def test_findings_truncated_by_triage_are_disclosed_too(self):
         # The SECOND cap. Discovery coverage alone would still let a report of
@@ -852,8 +848,7 @@ class TestScanCoverageIsDisclosedInTheReport:
         report = _build_report([{"file": "a.py"}], [_TRIAGE_COVERAGE])
         warnings = [m["value"] for m in _messages(report) if m["level"] == "warn"]
 
-        assert warnings == [_TRIAGE_COVERAGE["truncation"]]
-        assert "282 of 432 findings were not reviewed" in warnings[0]
+        assert warnings == [_TRIAGE_TRUNCATION]
 
     def test_a_run_that_reports_no_coverage_says_so(self):
         # THE failure mode this exists to close: silence is what made a partial
@@ -870,9 +865,7 @@ class TestScanCoverageIsDisclosedInTheReport:
         # that survived a JSON round-trip must not silently disappear.
         report = _build_report([{"file": "a.py"}], [json.dumps(_COMPLETE_COVERAGE)])
 
-        assert _messages(report) == [
-            {"level": "info", "value": _COMPLETE_COVERAGE["summary"]}
-        ]
+        assert _messages(report) == [{"level": "info", "value": _COMPLETE_SUMMARY}]
 
     def test_unreadable_stage_records_are_ignored_not_fatal(self):
         # A malformed record must never break report generation -- it just
@@ -886,10 +879,32 @@ class TestScanCoverageIsDisclosedInTheReport:
             {"level": "warn", "value": bl._COVERAGE_UNAVAILABLE}
         ]
 
-    def test_a_record_with_no_sentences_contributes_nothing(self):
+    def test_a_record_with_no_counts_contributes_nothing(self):
         report = _build_report(
             [{"file": "a.py"}], [{"unit_noun": "review units", "emitted": 3}]
         )
+
+        assert _messages(report) == [
+            {"level": "warn", "value": bl._COVERAGE_UNAVAILABLE}
+        ]
+
+    @pytest.mark.parametrize("emitted", ["", [], {}])
+    def test_a_record_with_a_falsy_non_integer_emitted_contributes_nothing(
+        self, emitted
+    ):
+        record = {"dispatched": 3, "completed": 3, "errored": 0, "emitted": emitted}
+
+        report = _build_report([{"file": "a.py"}], [record])
+
+        assert _messages(report) == [
+            {"level": "warn", "value": bl._COVERAGE_UNAVAILABLE}
+        ]
+
+    @pytest.mark.parametrize("key", ["emitted", "completed", "errored", "unread"])
+    def test_a_record_with_a_non_integer_count_contributes_nothing(self, key):
+        record = {"dispatched": 3, "completed": 3, "errored": 0, key: "9"}
+
+        report = _build_report([{"file": "a.py"}], [record])
 
         assert _messages(report) == [
             {"level": "warn", "value": bl._COVERAGE_UNAVAILABLE}
@@ -918,11 +933,11 @@ class TestScanCoverageIsDisclosedInTheReport:
         messages = _messages(json.loads(written["contents"]))
 
         assert [m["value"] for m in messages] == [
-            _REVIEW_COVERAGE["summary"],
-            _REVIEW_COVERAGE["truncation"],
-            _COMPLETE_COVERAGE["summary"],
-            _TRIAGE_COVERAGE["summary"],
-            _TRIAGE_COVERAGE["truncation"],
+            _REVIEW_SUMMARY,
+            _REVIEW_TRUNCATION,
+            _COMPLETE_SUMMARY,
+            _TRIAGE_SUMMARY,
+            _TRIAGE_TRUNCATION,
         ]
 
     def test_the_tool_declares_an_argument_for_every_stage(self):
@@ -934,20 +949,88 @@ class TestScanCoverageIsDisclosedInTheReport:
             assert fields[name].default is None
 
 
-# A stage's coverage record as `bl_collect_and_flatten` emits it: counts plus
-# the `summary` and `loss` sentences (no `truncation` key when no cap bound).
+# A stage that lost units: 10 failed, and 4 completed but could not be read.
 _LOSSY_COVERAGE = {
     "emitted": 40,
     "dispatched": 40,
     "completed": 30,
     "errored": 10,
+    "unread": 4,
     "unit_noun": "review units",
-    "summary": "Reviewed 26 of 40 review units.",
-    "loss": (
-        "14 of 40 review units were DISCARDED without their findings being "
-        "counted (4 completed but their findings could not be read; 10 errored)."
-    ),
 }
+_LOSSY_SUMMARY = "Reviewed 26 of 40 review units."
+_LOSSY_LOSS = (
+    "14 of 40 review units are missing from the results "
+    "(4 returned an answer that could not be read; 10 failed)."
+)
+
+
+class TestCoverageSentences:
+    """Each stage's counts as the report words them: `summary`, plus `truncation`/`loss` when they apply."""
+
+    @pytest.mark.parametrize(
+        ("noun", "counts", "expected"),
+        [
+            pytest.param(
+                "findings",
+                {"emitted": 12, "dispatched": 12, "completed": 12, "errored": 0},
+                {"summary": "Reviewed 12 of 12 findings."},
+                id="clean",
+            ),
+            pytest.param(
+                "review units",
+                {"emitted": 150, "dispatched": 62, "completed": 62, "errored": 0},
+                {
+                    "summary": "Reviewed 62 of 62 review units.",
+                    "truncation": "The scan limit was reached: 62 of 150 review units "
+                    "were sent for review; 88 were never reviewed.",
+                },
+                id="cap-bound",
+            ),
+            pytest.param(
+                "review units",
+                {
+                    "emitted": 40,
+                    "dispatched": 40,
+                    "completed": 40,
+                    "errored": 0,
+                    "unread": 14,
+                },
+                {
+                    "summary": "Reviewed 26 of 40 review units.",
+                    "loss": "14 of 40 review units are missing from the results "
+                    "(14 returned an answer that could not be read).",
+                },
+                id="loss-unread",
+            ),
+            pytest.param(
+                "units",
+                {
+                    "emitted": 10,
+                    "dispatched": 10,
+                    "completed": 9,
+                    "errored": 1,
+                    "unread": 2,
+                },
+                {
+                    "summary": "Reviewed 7 of 10 units.",
+                    "loss": "3 of 10 units are missing from the results "
+                    "(2 returned an answer that could not be read; 1 failed).",
+                },
+                id="loss-errored-and-unread",
+            ),
+            pytest.param(
+                "findings",
+                {"emitted": 0, "dispatched": 0, "completed": 0, "errored": 0},
+                {"summary": "No findings were dispatched for this stage."},
+                id="nothing-dispatched",
+            ),
+        ],
+    )
+    def test_coverage_sentences(self, noun, counts, expected):
+        # The whole dict is asserted, so a sentence that should not apply fails
+        # the case: a cap must never read as a loss, nor a loss as a cap.
+        assert bl._coverage_sentences(noun=noun, **counts) == expected
 
 
 class TestDiscardedUnitsAreDisclosedInTheReport:
@@ -963,25 +1046,43 @@ class TestDiscardedUnitsAreDisclosedInTheReport:
         levels = [(m["level"], m["value"]) for m in _messages(report)]
 
         assert levels == [
-            ("info", _LOSSY_COVERAGE["summary"]),
-            ("warn", _LOSSY_COVERAGE["loss"]),
+            ("info", _LOSSY_SUMMARY),
+            ("warn", _LOSSY_LOSS),
         ]
-        assert "14 of 40 review units" in levels[1][1]
 
     def test_a_stage_that_lost_nothing_adds_no_warning(self):
-        clean = {**_LOSSY_COVERAGE, "errored": 0, "loss": None}
+        clean = {**_LOSSY_COVERAGE, "completed": 40, "errored": 0, "unread": 0}
         report = _build_report([{"file": "a.py"}], [clean])
 
-        assert _messages(report) == [{"level": "info", "value": clean["summary"]}]
+        assert _messages(report) == [
+            {"level": "info", "value": "Reviewed 40 of 40 review units."}
+        ]
+
+    def test_a_record_without_a_unit_noun_says_units(self):
+        record = {k: v for k, v in _LOSSY_COVERAGE.items() if k != "unit_noun"}
+        report = _build_report([{"file": "a.py"}], [record])
+
+        assert [(m["level"], m["value"]) for m in _messages(report)] == [
+            ("info", "Reviewed 26 of 40 units."),
+            (
+                "warn",
+                "14 of 40 units are missing from the results "
+                "(4 returned an answer that could not be read; 10 failed).",
+            ),
+        ]
 
     def test_a_capped_and_lossy_stage_reports_both_losses_apart(self):
         # A cap that bound is a CHOICE; a discarded unit is a DEFECT. Collapsing
         # them into one message would let the second hide behind the first.
-        both = {**_LOSSY_COVERAGE, "truncation": _REVIEW_COVERAGE["truncation"]}
+        both = {**_LOSSY_COVERAGE, "emitted": 100}
         report = _build_report([{"file": "a.py"}], [both])
         warnings = [m["value"] for m in _messages(report) if m["level"] == "warn"]
 
-        assert warnings == [_REVIEW_COVERAGE["truncation"], _LOSSY_COVERAGE["loss"]]
+        assert warnings == [
+            "The scan limit was reached: 40 of 100 review units were sent for "
+            "review; 60 were never reviewed.",
+            _LOSSY_LOSS,
+        ]
 
     def test_every_loss_message_still_matches_the_schema(self):
         report = _build_report([{"file": "a.py"}], [_LOSSY_COVERAGE])
@@ -2192,12 +2293,10 @@ class TestPartialScanMarking:
         assert "partial_scan" not in report["scan"]
 
     def test_a_scan_that_lost_units_is_full_and_says_so(self, monkeypatch):
-        loss = (
-            "2 of 10 review units were DISCARDED without their findings being "
-            "counted (2 errored)."
-        )
+        loss = "2 of 10 review units are missing from the results (2 failed)."
+        lossy = {"completed": 8, "errored": 2, "unit_noun": "review units"}
         report = self._report(
-            monkeypatch, review_coverage={**self._coverage(10, 10), "loss": loss}
+            monkeypatch, review_coverage={**self._coverage(10, 10), **lossy}
         )
         assert "partial_scan" not in report["scan"]
         assert {"level": "warn", "value": loss} in report["scan"]["messages"]

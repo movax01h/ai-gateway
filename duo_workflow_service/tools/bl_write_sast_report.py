@@ -600,12 +600,11 @@ def _audit_record(finding: Finding) -> dict:
 # property, no field the schema does not define, and no version bump beyond the
 # 15.2.2 that `partial_scan` already requires.
 #
-# WHAT IT SAYS. The numbers are not re-derived here: each fan-out stage builds
-# its coverage sentences once and publishes them to `context:<stage>.coverage`,
-# which is passed to this tool. This layer only decides the level: what a stage
-# covered is `info`, a cap that actually bound is `warn`. When no stage
-# reported at all, the report says THAT rather than stay silent and read as
-# complete.
+# WHAT IT SAYS. The numbers are not re-derived here: each fan-out stage
+# publishes its counts to `context:<stage>.coverage`, which is passed to this
+# tool. This layer words them and decides the level: what a stage covered is
+# `info`, a cap that actually bound is `warn`. When no stage reported at all,
+# the report says THAT rather than stay silent and read as complete.
 # --------------------------------------------------------------------------- #
 
 _COVERAGE_UNAVAILABLE = (
@@ -625,31 +624,84 @@ def _coverage_record(raw: Any) -> Optional[dict]:
     return raw if isinstance(raw, dict) else None
 
 
+def _coverage_sentences(
+    *,
+    noun: str,
+    emitted: Optional[int],
+    dispatched: int,
+    completed: int,
+    errored: int,
+    unread: int = 0,
+) -> dict:
+    """Human-readable coverage sentences for the stage: `summary`, and `truncation`/`loss` when they apply.
+
+    `truncation` fires only when the pre-cap `emitted` exceeded what was
+    dispatched -- a cap that BOUND is a choice worth disclosing. `loss` fires
+    when units were discarded unread, which is a defect, and is kept separate
+    so the two never read alike.
+    """
+    out: dict = {
+        "summary": (
+            f"Reviewed {completed - unread} of {dispatched} {noun}."
+            if dispatched
+            else f"No {noun} were dispatched for this stage."
+        )
+    }
+    if emitted is not None and emitted > dispatched:
+        out["truncation"] = (
+            f"The scan limit was reached: {dispatched} of {emitted} {noun} were "
+            f"sent for review; {emitted - dispatched} were never reviewed."
+        )
+    lost = errored + unread
+    if lost:
+        parts = []
+        if unread:
+            parts.append(f"{unread} returned an answer that could not be read")
+        if errored:
+            parts.append(f"{errored} failed")
+        out["loss"] = (
+            f"{lost} of {dispatched} {noun} are missing from the results "
+            f"({'; '.join(parts)})."
+        )
+    return out
+
+
 def _coverage_messages(stages: List[Any]) -> List[dict]:
     """``scan.messages`` entries disclosing what each stage actually covered.
 
     One ``info`` entry per stage saying how much of what it was given it
     reviewed, a ``warn`` entry whenever that stage's cap actually bound, and a
-    ``warn`` entry whenever that stage DISCARDED units whose findings it could
-    not read.
+    ``warn`` entry whenever that stage's results are missing units whose
+    findings it could not read.
     """
     messages: List[dict] = []
     for raw in stages:
         record = _coverage_record(raw)
-        if record is None:
+        if record is None or not isinstance(record.get("dispatched"), int):
             continue
-        summary = str(record.get("summary") or "").strip()
-        if summary:
-            messages.append({"level": "info", "value": summary})
-        truncation = str(record.get("truncation") or "").strip()
-        if truncation:
-            messages.append({"level": "warn", "value": truncation})
+        emitted = record.get("emitted")
+        if emitted is not None and not isinstance(emitted, int):
+            continue
+        if not all(
+            isinstance(record.get(key) or 0, int)
+            for key in ("completed", "errored", "unread")
+        ):
+            continue
+        sentences = _coverage_sentences(
+            noun=record.get("unit_noun") or "units",
+            emitted=emitted,
+            dispatched=record["dispatched"],
+            completed=record.get("completed") or 0,
+            errored=record.get("errored") or 0,
+            unread=record.get("unread") or 0,
+        )
+        messages.append({"level": "info", "value": sentences["summary"]})
         # A cap that bound is a CHOICE; findings the pipeline produced and then
         # threw away because it could not read them is a DEFECT, and a report
         # must not let the two read alike by omitting the second.
-        loss = str(record.get("loss") or "").strip()
-        if loss:
-            messages.append({"level": "warn", "value": loss})
+        for key in ("truncation", "loss"):
+            if key in sentences:
+                messages.append({"level": "warn", "value": sentences[key]})
     return messages or [{"level": "warn", "value": _COVERAGE_UNAVAILABLE}]
 
 
