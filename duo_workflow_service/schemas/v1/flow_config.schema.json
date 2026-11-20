@@ -293,7 +293,6 @@
         "duo_workflow_execute_workflow",
         "explain_code",
         "explain_vulnerability",
-        "feature_discovery_search",
         "fix_code",
         "generate_code",
         "generate_commit_message",
