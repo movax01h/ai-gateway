@@ -10,6 +10,10 @@ from langchain.tools import BaseTool, ToolException
 from pydantic import BaseModel
 from structlog.testing import capture_logs
 
+from ai.features.chat.duo_permissions_assistant.components import (
+    SetFormPermissions,
+    UpdateFormPermissions,
+)
 from ai.features.review.code_review.components import (
     DetectReviewContextTruncation,
     FinalizeCodeReviewFindings,
@@ -73,9 +77,7 @@ from duo_workflow_service.tools.mr_discussions import (
 )
 from duo_workflow_service.tools.mr_review import SubmitMrReview
 from duo_workflow_service.tools.notify_me_when import NotifyMeWhen
-from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_fields import UpdateFormFields
-from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     EvaluateVulnerabilityFalsePositiveStatus,
     GetVulnerabilityDetails,

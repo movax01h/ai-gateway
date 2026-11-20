@@ -51,9 +51,7 @@ from duo_workflow_service.tools.mr_discussions import (
     SetDiscussionResolved,
 )
 from duo_workflow_service.tools.mr_review import SubmitMrReview
-from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_fields import UpdateFormFields
-from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
 from duo_workflow_service.tools.version_compatibility import strips_client_mcp_trust
 from duo_workflow_service.tools.web_search import web_search_boto_session
 from lib.feature_roots import default_features_dir
@@ -269,8 +267,6 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         ReplyToDiscussion,
         SetDiscussionResolved,
         UpdateFormFields,
-        UpdateFormPermissions,
-        SetFormPermissions,
         *_READ_ONLY_GITLAB_TOOLS,
     ],
     "read_only_gitlab": _READ_ONLY_GITLAB_TOOLS,

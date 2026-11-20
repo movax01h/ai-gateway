@@ -14,6 +14,9 @@
 
 /ai/features/chat/slack_assistant/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 
+# Duo permissions assistant, owned by group::authorization
+/ai/features/chat/duo_permissions_assistant/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/software-supply-chain-security/authorization/approvers
+
 # Duo Code Review flows, tools, and prompts
 /duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 
@@ -117,6 +120,9 @@
 /ai/features/code/local_code_review/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 
 /ai/features/chat/slack_assistant/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+
+# Duo permissions assistant, owned by group::authorization
+/ai/features/chat/duo_permissions_assistant/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/software-supply-chain-security/authorization/approvers
 
 # Duo Code Review flow configs, tools, and prompts
 /duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw

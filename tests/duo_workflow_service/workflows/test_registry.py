@@ -1,5 +1,6 @@
 import copy
 from functools import partial
+from itertools import chain
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from unittest.mock import Mock, patch
@@ -28,7 +29,7 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     load_config as experimental_load_config,
 )
 from duo_workflow_service.agent_platform.v1.chat_engine import ChatFlow
-from duo_workflow_service.agent_platform.v1.flows import FetchedFlow
+from duo_workflow_service.agent_platform.v1.flows import FetchedFlow, flow_config
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     PartialFlowConfig,
@@ -1005,10 +1006,19 @@ class TestNormalizePromptTemplateOrder:
 
 
 def shipped_chat_partial_configs():
-    for config_file in FlowConfig.DIRECTORY_PATH.glob("*/*.yml"):
+    legacy = (
+        (config_file.parent.name, config_file)
+        for config_file in FlowConfig.DIRECTORY_PATH.glob("*/*.yml")
+    )
+    features = (
+        (config_id, config_file)
+        for config_id, config_dir in FlowConfig.feature_config_roots().items()
+        for config_file in config_dir.glob("*.yml")
+    )
+    for config_id, config_file in chain(legacy, features):
         environment = yaml.safe_load(config_file.read_text()).get("environment")
         if environment == CHAT_PARTIAL_ENVIRONMENT:
-            yield config_file.parent.name, config_file.stem
+            yield config_id, config_file.stem
 
 
 def _as_registry_config(config_cls, data):
@@ -1111,13 +1121,16 @@ def test_a_known_registry_file_loads_as_its_environment_class_with_its_identity(
 
 
 def test_every_shipped_chat_partial_config_stays_on_legacy_chat():
-    configs = list(shipped_chat_partial_configs())
-    assert configs
+    with patch.dict(flow_config._FEATURE_FLOW_ROOTS):
+        flow_config.discover_feature_flow_configs()
+        configs = list(shipped_chat_partial_configs())
 
-    for config_id, version in configs:
-        factory = _load_flow_from_registry(config_id, "v1", version).factory
+        assert ("duo_permissions_assistant", "2.0.0") in configs
 
-        assert factory.func is chat.Workflow, f"{config_id}/{version}"
+        for config_id, version in configs:
+            factory = _load_flow_from_registry(config_id, "v1", version).factory
+
+            assert factory.func is chat.Workflow, f"{config_id}/{version}"
 
 
 def test_an_inline_template_flow_never_reaches_the_engine():
