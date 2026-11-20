@@ -31,6 +31,7 @@ class LLMOperationType(StrEnum):
 
 BILL_ONCE_PER_WORKFLOW_FEATURES: frozenset[str] = frozenset(
     {
+        "business_context_security_guidelines",
         "code_review",
         "sast_fp_detection",
         "secrets_fp_detection",
