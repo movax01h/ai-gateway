@@ -3,7 +3,7 @@ import re
 
 import pytest
 
-from duo_workflow_service.tools.code_review.findings import (
+from ai.features.review.code_review.components.findings import (
     anchor_fields,
     attribute_message,
     build_review_payload,

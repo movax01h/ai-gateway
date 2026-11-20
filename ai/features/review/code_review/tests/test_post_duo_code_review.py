@@ -4,11 +4,11 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.tools.code_review.post_duo_code_review import (
+from ai.features.review.code_review.components.post_duo_code_review import (
     PostDuoCodeReview,
     PostDuoCodeReviewInput,
 )
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 
 @pytest.mark.asyncio

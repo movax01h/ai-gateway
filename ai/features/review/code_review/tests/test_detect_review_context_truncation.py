@@ -1,11 +1,11 @@
 import pytest
 
-from duo_workflow_service.security.scanner_factory import apply_security_scanning
-from duo_workflow_service.security.tool_output_security import ToolTrustLevel
-from duo_workflow_service.tools.code_review.detect_review_context_truncation import (
+from ai.features.review.code_review.components.detect_review_context_truncation import (
     DetectReviewContextTruncation,
     DetectReviewContextTruncationInput,
 )
+from duo_workflow_service.security.scanner_factory import apply_security_scanning
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.tool_output_manager import (
     TruncationConfig,
     truncate_string,
