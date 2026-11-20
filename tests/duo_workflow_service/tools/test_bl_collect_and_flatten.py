@@ -11,7 +11,6 @@ from duo_workflow_service.agent_platform.experimental.components.for_each import
 from duo_workflow_service.tools.bl_collect_and_flatten import (
     BlCollectAndFlatten,
     BlCollectAndFlattenInput,
-    _coverage_sentences,
     _unit_findings,
 )
 from duo_workflow_service.tools.bl_report import BlDedupFindings, _flatten_findings
@@ -53,8 +52,7 @@ class TestBlCollectAndFlatten:
         assert parsed == [{"id": "ok"}]
         assert result["coverage"]["completed"] == 1
         assert result["coverage"]["errored"] == 2
-        assert "2 of 3" in result["coverage"]["loss"]
-        assert "2 failed" in result["coverage"]["loss"]
+        assert result["coverage"]["unread"] == 0
 
     async def test_the_counts_are_for_each_s_not_recounted_from_the_entries(self):
         # The counts disagree with the entries on purpose: one answered entry,
@@ -116,93 +114,26 @@ class TestADictFinalAnswer:
 
         assert json.loads(out["final_answer"]) == [{"id": "d1"}]
         assert out["coverage"]["completed"] == 1
-        assert out["coverage"]["summary"] == "Reviewed 1 of 1 units."
-        assert "loss" not in out["coverage"]
+        assert out["coverage"]["unread"] == 0
 
 
-class TestCoverageSentencesReachTheReport:
-    """Coverage carries the `summary`/`truncation`/`loss` sentences alongside the raw counts.
-
-    A reader that renders sentences rather than numbers must have something to render for every stage, including a fully
-    covered one.
-    """
-
-    @pytest.mark.parametrize(
-        ("noun", "counts", "expected"),
-        [
-            pytest.param(
-                "findings",
-                {"emitted": 12, "dispatched": 12, "completed": 12, "errored": 0},
-                {"summary": "Reviewed 12 of 12 findings."},
-                id="clean",
-            ),
-            pytest.param(
-                "review units",
-                {"emitted": 150, "dispatched": 62, "completed": 62, "errored": 0},
-                {
-                    "summary": "Reviewed 62 of 62 review units.",
-                    "truncation": "The scan limit was reached: 62 of 150 review units "
-                    "were sent for review; 88 were never reviewed.",
-                },
-                id="cap-bound",
-            ),
-            pytest.param(
-                "review units",
-                {
-                    "emitted": 40,
-                    "dispatched": 40,
-                    "completed": 40,
-                    "errored": 0,
-                    "unread": 14,
-                },
-                {
-                    "summary": "Reviewed 26 of 40 review units.",
-                    "loss": "14 of 40 review units are missing from the results "
-                    "(14 returned an answer that could not be read).",
-                },
-                id="loss-unread",
-            ),
-            pytest.param(
-                "units",
-                {
-                    "emitted": 10,
-                    "dispatched": 10,
-                    "completed": 9,
-                    "errored": 1,
-                    "unread": 2,
-                },
-                {
-                    "summary": "Reviewed 7 of 10 units.",
-                    "loss": "3 of 10 units are missing from the results "
-                    "(2 returned an answer that could not be read; 1 failed).",
-                },
-                id="loss-errored-and-unread",
-            ),
-            pytest.param(
-                "findings",
-                {"emitted": 0, "dispatched": 0, "completed": 0, "errored": 0},
-                {"summary": "No findings were dispatched for this stage."},
-                id="nothing-dispatched",
-            ),
-        ],
+@pytest.mark.asyncio
+async def test_coverage_is_the_stage_s_counts_and_unit_noun():
+    """The report words the coverage; the tool publishes only the numbers."""
+    out = await _collect(
+        [{"final_answer": _unit()}, {}, _failed()],
+        emitted_count=5,
+        unit_noun="findings",
     )
-    def test_coverage_sentences(self, noun, counts, expected):
-        # The whole dict is asserted, so a sentence that should not apply fails
-        # the case: a cap must never read as a loss, nor a loss as a cap.
-        assert _coverage_sentences(noun=noun, **counts) == expected
 
-    @pytest.mark.asyncio
-    async def test_the_tool_publishes_the_sentences_alongside_the_counts(self):
-        out = await _collect(
-            results=[{"final_answer": _unit()}],
-            unit_noun="findings",
-        )
-        cov = out["coverage"]
-        # Counts stay for programmatic readers...
-        assert cov["dispatched"] == 1 and cov["completed"] == 1
-        # ...and the sentence the report actually renders is present.
-        assert cov["summary"] == "Reviewed 1 of 1 findings."
-        assert cov["unit_noun"] == "findings"
+    assert out["coverage"] == {
+        "emitted": 5,
+        "dispatched": 3,
+        "completed": 2,
+        "errored": 1,
+        "unread": 1,
+        "unit_noun": "findings",
+    }
 
 
 def test_the_tool_is_hidden_from_list_tools():
@@ -423,10 +354,8 @@ class TestFlatten:
         out = await _collect(results)
 
         assert json.loads(out["final_answer"]) == [_ONE_FINDING]
-        assert out["coverage"]["summary"] == "Reviewed 2 of 5 units."
-        assert (
-            "3 returned an answer that could not be read" in (out["coverage"]["loss"])
-        )
+        assert out["coverage"]["completed"] == 5
+        assert out["coverage"]["unread"] == 3
 
 
 @pytest.mark.asyncio
@@ -471,8 +400,6 @@ async def test_a_completed_unit_with_no_readable_answer_is_counted_unread(
         "dispatched": 1,
         "completed": 1,
         "errored": 0,
+        "unread": 1,
         "unit_noun": None,
-        "summary": "Reviewed 0 of 1 units.",
-        "loss": "1 of 1 units are missing from the results "
-        "(1 returned an answer that could not be read).",
     }

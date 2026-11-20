@@ -4,10 +4,9 @@ Publishes two keys:
 
 - `final_answer`: the JSON array of the finding dicts of every readable unit
     answer, flattened in unit order.
-- `coverage`: the per-stage counts (emitted/dispatched/completed/errored)
-    plus the human-readable `summary`/`truncation`/`loss` sentences, so
-    a reader that renders sentences has something to render on a fully covered
-    run as well as on a lossy one.
+- `coverage`: the per-stage counts (emitted/dispatched/completed/errored/unread)
+    and the stage's `unit_noun`. `bl_write_sast_report` turns them into the
+    report's coverage sentences.
 """
 
 import json
@@ -86,48 +85,6 @@ def _merge_verdict(answer: Any, item: Any) -> Any:
     }
 
 
-def _coverage_sentences(
-    *,
-    noun: str,
-    emitted: Optional[int],
-    dispatched: int,
-    completed: int,
-    errored: int,
-    unread: int = 0,
-) -> dict:
-    """Human-readable coverage sentences for the stage: `summary`, and `truncation`/`loss` when they apply.
-
-    `truncation` fires only when the pre-cap `emitted` exceeded what was
-    dispatched -- a cap that BOUND is a choice worth disclosing. `loss` fires
-    when units were discarded unread, which is a defect, and is kept separate
-    so the two never read alike.
-    """
-    out: dict = {
-        "summary": (
-            f"Reviewed {completed - unread} of {dispatched} {noun}."
-            if dispatched
-            else f"No {noun} were dispatched for this stage."
-        )
-    }
-    if emitted is not None and emitted > dispatched:
-        out["truncation"] = (
-            f"The scan limit was reached: {dispatched} of {emitted} {noun} were "
-            f"sent for review; {emitted - dispatched} were never reviewed."
-        )
-    lost = errored + unread
-    if lost:
-        parts = []
-        if unread:
-            parts.append(f"{unread} returned an answer that could not be read")
-        if errored:
-            parts.append(f"{errored} failed")
-        out["loss"] = (
-            f"{lost} of {dispatched} {noun} are missing from the results "
-            f"({'; '.join(parts)})."
-        )
-    return out
-
-
 class BlCollectAndFlattenInput(BaseModel):
     results: List[Any] = Field(
         description="`for_each`'s ordered per-unit result entries. A unit that "
@@ -152,8 +109,7 @@ class BlCollectAndFlattenInput(BaseModel):
     unit_noun: Optional[str] = Field(
         default=None,
         description="What this stage's units are (e.g. 'findings' for a stage "
-        "that fans out over findings), for the coverage sentence. Defaults to "
-        "'units'.",
+        "that fans out over findings), for the report's coverage sentences.",
     )
 
 
@@ -229,14 +185,7 @@ class BlCollectAndFlatten(DuoBaseTool):
                 "dispatched": len(results),
                 "completed": succeeded,
                 "errored": failed,
+                "unread": succeeded - (len(read) - len(garbled)),
                 "unit_noun": unit_noun,
-                **_coverage_sentences(
-                    noun=unit_noun or "units",
-                    emitted=emitted_count,
-                    dispatched=len(results),
-                    completed=succeeded,
-                    errored=failed,
-                    unread=succeeded - (len(read) - len(garbled)),
-                ),
             },
         }
