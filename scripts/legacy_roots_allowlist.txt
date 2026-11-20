@@ -214,7 +214,6 @@ ai_gateway/prompts/definitions/workplan/partials/requesting_context
 ai_gateway/prompts/definitions/workplan/partials/resolving_ambiguity
 duo_workflow_service/agent_platform/v1/flows/configs
 duo_workflow_service/agent_platform/v1/flows/configs/agentic_chat
-duo_workflow_service/agent_platform/v1/flows/configs/duo_permissions_assistant
 duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline
 duo_workflow_service/agent_platform/v1/flows/configs/flow_creator
 duo_workflow_service/agent_platform/v1/flows/configs/gitlab_duo_mention_assistant

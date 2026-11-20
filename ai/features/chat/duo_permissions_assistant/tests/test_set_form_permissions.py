@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from duo_workflow_service.tools.set_form_permissions import (
+from ai.features.chat.duo_permissions_assistant.components.set_form_permissions import (
     SetFormPermissions,
     SetFormPermissionsInput,
 )

@@ -13,6 +13,7 @@ from duo_workflow_service.agent_platform.v1.components import (
     BaseComponent,
     RouterProtocol,
 )
+from duo_workflow_service.agent_platform.v1.flows import flow_config
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     CONFIG_CLASSES,
     FlowConfig,
@@ -20,12 +21,21 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     PartialFlowConfig,
     _safe_resolve,
     config_from_data,
+    discover_feature_flow_configs,
     list_configs,
     load_component_class,
     load_config,
+    resolve_registry_file,
 )
 from duo_workflow_service.agent_platform.v1.routers.base import BaseRouter
 from lib.feature_roots import default_features_dir
+
+
+@pytest.fixture(name="feature_flow_roots")
+def feature_flow_roots_fixture():
+    with patch.dict(flow_config._FEATURE_FLOW_ROOTS):
+        discover_feature_flow_configs()
+        yield
 
 
 class TestFlowConfig:
@@ -465,10 +475,10 @@ class TestFlowConfig:
         [("duo_permissions_assistant", "2.0.0"), ("flow_creator", "1.0.0")],
     )
     def test_a_shipped_chat_partial_file_keeps_its_declared_fields(
-        self, config_id, version
+        self, config_id, version, feature_flow_roots
     ):
         config = load_config(config_id, version)
-        path = FlowConfig.DIRECTORY_PATH / config_id / f"{version}.yml"
+        path, _ = resolve_registry_file(FlowConfig, config_id, version)
         declared = yaml.safe_load(path.read_text())
 
         assert type(config) is PartialFlowConfig
@@ -757,7 +767,9 @@ class TestToConfig:
         assert config.flow is None
         assert config.routers is None
 
-    def test_the_registry_id_survives_completing_a_partial_config(self):
+    def test_the_registry_id_survives_completing_a_partial_config(
+        self, feature_flow_roots
+    ):
         partial = PartialFlowConfig.from_yaml_config(
             "duo_permissions_assistant", "1.0.0"
         )

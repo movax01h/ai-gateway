@@ -1,45 +1,20 @@
-import json
-from typing import Any, Type
+"""Deprecated import location. Moved into the duo_permissions_assistant feature package.
 
-from pydantic import BaseModel, Field
+Import from ``ai.features.chat.duo_permissions_assistant.components`` instead.
+"""
 
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+import warnings
 
+from ai.features.chat.duo_permissions_assistant.components.update_form_permissions import (
+    UpdateFormPermissions,
+    UpdateFormPermissionsInput,
+)
 
-class UpdateFormPermissionsInput(BaseModel):
-    select: list[str] = Field(
-        default_factory=list,
-        description="Permission names to select from the access token form",
-    )
-    clear: list[str] = Field(
-        default_factory=list,
-        description="Permission names to clear from the access token form",
-    )
+warnings.warn(
+    "duo_workflow_service.tools.update_form_permissions has moved to "
+    "ai.features.chat.duo_permissions_assistant.components.update_form_permissions",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-
-class UpdateFormPermissions(DuoBaseTool):
-    name: str = "update_form_permissions"
-    description: str = (
-        "Update the access token form with the suggested permissions. "
-        "Use this tool to select or clear fine-grained permissions on the form."
-    )
-    args_schema: Type[BaseModel] = UpdateFormPermissionsInput
-
-    async def _execute(
-        self,
-        select: list[str] | None = None,
-        clear: list[str] | None = None,
-    ) -> str:
-        return json.dumps({"select": select or [], "clear": clear or []})
-
-    def format_display_message(
-        self, args: UpdateFormPermissionsInput, _tool_response: Any = None
-    ) -> str:
-        parts = []
-        if args.select:
-            parts.append(f"Select: {', '.join(args.select)}")
-        if args.clear:
-            parts.append(f"Clear: {', '.join(args.clear)}")
-        if not parts:
-            return "No permission changes"
-        return "Update access token permissions — " + "; ".join(parts)
+__all__ = ["UpdateFormPermissions", "UpdateFormPermissionsInput"]
