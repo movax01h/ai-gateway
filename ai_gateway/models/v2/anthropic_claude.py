@@ -3,11 +3,12 @@ from functools import lru_cache
 from typing import Any, List, Mapping, Optional, Self, override
 
 from anthropic import AsyncAnthropic
+from anthropic.types import RawMessageStreamEvent
 from langchain_anthropic import ChatAnthropic as _LChatAnthropic
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.language_models.chat_models import _ChatModelBinding
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
@@ -174,6 +175,31 @@ class ChatAnthropic(_LChatAnthropic):
         **kwargs: Any,
     ) -> ChatResult:
         raise NotImplementedError()
+
+    @override
+    def _make_message_chunk_from_anthropic_event(
+        self,
+        event: RawMessageStreamEvent,
+        *,
+        stream_usage: bool = True,
+        coerce_content_to_string: bool,
+        block_start_event: RawMessageStreamEvent | None = None,
+    ) -> tuple[AIMessageChunk | None, RawMessageStreamEvent | None]:
+        """Keep a refusal's ``stop_details``, which the parent drops from ``message_delta``."""
+        chunk, block_start_event = super()._make_message_chunk_from_anthropic_event(
+            event,
+            stream_usage=stream_usage,
+            coerce_content_to_string=coerce_content_to_string,
+            block_start_event=block_start_event,
+        )
+        stop_details = (
+            getattr(event.delta, "stop_details", None)
+            if event.type == "message_delta"
+            else None
+        )
+        if chunk is not None and stop_details is not None:
+            chunk.response_metadata["stop_details"] = stop_details.model_dump()
+        return chunk, block_start_event
 
     @override
     def bind_tools(

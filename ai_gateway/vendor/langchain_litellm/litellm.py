@@ -897,6 +897,15 @@ class ChatLiteLLM(BaseChatModel):
                 if finish_reason:
                     chunk.response_metadata["finish_reason"] = finish_reason
 
+                # Diverges from upstream: keeps an Anthropic refusal's category, see
+                # litellm_refusal_details_patch.py. `stop_reason` stays out so the
+                # refusal still counts as `content_filter` and the agent can recover.
+                provider_fields = delta.get("provider_specific_fields") or {}
+                if provider_fields.get("stop_reason") == "refusal":
+                    chunk.response_metadata["stop_details"] = provider_fields.get(
+                        "stop_details"
+                    )
+
                 chunk.usage_metadata = _create_usage_metadata(usage)
             default_chunk_class = chunk.__class__
             cg_chunk = ChatGenerationChunk(message=chunk)

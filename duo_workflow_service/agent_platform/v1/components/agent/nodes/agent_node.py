@@ -800,7 +800,16 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     continue
 
                 if finish_reason in LLMFinishReason.abnormal_values():
-                    log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
+                    # Only an Anthropic refusal carries `stop_details`.
+                    refusal_fields = (
+                        {"refusal_category": self._refusal_category(completion)}
+                        if "stop_details" in completion.response_metadata
+                        else {}
+                    )
+                    log.warning(
+                        f"LLM stopped abnormally with reason: {finish_reason}",
+                        **refusal_fields,
+                    )
 
                 if (check := self._final_answer_validate(completion)).corrections:
                     answer_rejections = self._count_answer_rejection(
@@ -899,11 +908,15 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     history, image_limit_retries = recovered, image_limit_retries + 1
                 retrying_failed_call = True
 
-    def _refusal_error(self, completion: AIMessage) -> ModelRefusalError:
+    @staticmethod
+    def _refusal_category(completion: AIMessage) -> str:
         stop_details = completion.response_metadata.get("stop_details")
-        category = (
+        return (
             stop_details.get("category") if isinstance(stop_details, dict) else None
         ) or "unknown"
+
+    def _refusal_error(self, completion: AIMessage) -> ModelRefusalError:
+        category = self._refusal_category(completion)
         log.warning(
             "Model refused to answer", agent=self.name, refusal_category=category
         )
