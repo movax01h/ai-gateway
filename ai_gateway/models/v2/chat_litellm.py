@@ -18,6 +18,7 @@ from ai_gateway.models.base import validate_custom_endpoint
 from ai_gateway.models.user_identity_header import inject_user_identity_header
 from ai_gateway.models.v2 import (
     litellm_empty_text_patch,  # noqa: F401  (applies the monkey-patch)
+    litellm_refusal_details_patch,  # noqa: F401  (applies the monkey-patch)
 )
 from ai_gateway.models.v2._model_compat import (
     drop_unsupported_reasoning_content,

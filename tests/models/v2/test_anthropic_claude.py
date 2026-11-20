@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import httpx
 import pytest
 from anthropic import AsyncAnthropic
 from anthropic.lib.credentials import AccessToken
@@ -442,3 +443,48 @@ class TestChatAnthropic:
 
         assert payload.get("system") == expected_system
         assert payload["messages"] == expected_messages
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [True, False])
+async def test_refusal_keeps_stop_details(stream, anthropic_refusal_sse):
+    stop_details = {
+        "type": "refusal",
+        "category": "reasoning_extraction",
+        "explanation": "reverse engineering or duplicating model outputs",
+    }
+    if stream:
+        response = httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            text=anthropic_refusal_sse(stop_details),
+        )
+    else:
+        response = httpx.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-5-5",
+                "content": [],
+                "stop_reason": "refusal",
+                "stop_sequence": None,
+                "stop_details": stop_details,
+                "usage": {"input_tokens": 10, "output_tokens": 0},
+            },
+        )
+    client = AsyncAnthropic(
+        api_key="test",
+        http_client=httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _request: response)
+        ),
+    )
+    chat = ChatAnthropic(
+        async_client=client, model="claude-sonnet-5-5", streaming=stream
+    )
+
+    result = await chat.ainvoke("hello")
+
+    assert result.response_metadata["stop_reason"] == "refusal"
+    assert result.response_metadata["stop_details"] == stop_details

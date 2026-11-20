@@ -1496,6 +1496,7 @@ class TestAgentNodeTruncation:
             ({"stop_reason": "refusal"}, "unknown"),
             ({"stop_reason": "refusal", "stop_details": None}, "unknown"),
         ],
+        ids=["category", "no_details", "null_details"],
     )
     async def test_run_refusal_raises_model_refusal_error_without_retry(
         self,
@@ -1521,6 +1522,46 @@ class TestAgentNodeTruncation:
         assert (
             f"refusal category: {expected_category}" in exc_info.value.internal_detail
         )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("response_metadata", "expected_categories"),
+        [
+            (
+                {
+                    "finish_reason": "content_filter",
+                    "stop_details": {"type": "refusal", "category": "cyber"},
+                },
+                ["cyber"],
+            ),
+            ({"finish_reason": "content_filter"}, []),
+        ],
+        ids=["litellm_anthropic_refusal", "other_content_filter"],
+    )
+    async def test_run_content_filter_logs_refusal_category(
+        self,
+        mock_ai_message,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        response_metadata,
+        expected_categories,
+    ):
+        filtered = copy.copy(mock_ai_message)
+        filtered.response_metadata = response_metadata
+        filtered.tool_calls = []
+        mock_prompt.ainvoke = AsyncMock(return_value=filtered)
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.log"
+        ) as mock_log:
+            await agent_node.run(base_flow_state)
+
+        assert [
+            call.kwargs["refusal_category"]
+            for call in mock_log.warning.call_args_list
+            if "refusal_category" in call.kwargs
+        ] == expected_categories
 
     @pytest.mark.asyncio
     async def test_run_raises_agent_stuck_error_after_max_truncation_retries(
