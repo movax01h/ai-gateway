@@ -11,6 +11,7 @@
     - ai/features/code/developer/**/*
     - ai/features/code/developer_agent_prompt/**/*
     - ai/features/code/local_code_review/**/*
+    - ai/features/code/tool_approval_review/**/*
     - ai_gateway/*.py
     - ai_gateway/config.py
     - ai_gateway/container.py

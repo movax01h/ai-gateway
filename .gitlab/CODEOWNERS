@@ -11,6 +11,7 @@
 /ai/features/code/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai/features/code/developer_agent_prompt/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai/features/code/local_code_review/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+/ai/features/code/tool_approval_review/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 
 /ai/features/chat/slack_assistant/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 
@@ -115,6 +116,7 @@
 /ai/features/code/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai/features/code/developer_agent_prompt/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai/features/code/local_code_review/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+/ai/features/code/tool_approval_review/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 
 /ai/features/chat/slack_assistant/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 
