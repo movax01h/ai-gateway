@@ -997,3 +997,72 @@ class TestRequiresForEach:
         )
 
         assert config.requires_for_each is False
+
+
+class TestToolKeys:
+    """A flow uses `tools:` or `toolset:` in its components, not both, and `tools:` holds valid selectors."""
+
+    @staticmethod
+    def _make_config(*components: dict) -> FlowConfig:
+        return FlowConfig(
+            flow=FlowConfigMetadata(entry_point=components[0]["name"]),
+            components=list(components),
+            routers=[],
+            environment="chat",
+            version="experimental",
+        )
+
+    def test_components_on_both_keys_are_a_config_error(self):
+        with pytest.raises(ValidationError) as exc:
+            self._make_config(
+                {"name": "a", "type": "AgentComponent", "tools": []},
+                {"name": "b", "type": "AgentComponent", "toolset": ["read_file"]},
+                {"name": "c", "type": "AgentComponent", "tools": []},
+            )
+
+        assert (
+            'A flow can use "tools" or "toolset" in its components, not both: '
+            "\"tools\" in ['a', 'c'], \"toolset\" in ['b']"
+        ) in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "key, entries",
+        [
+            ("tools", [{"server": "gitlab", "name": ["read_file"]}]),
+            ("toolset", ["read_file"]),
+        ],
+    )
+    def test_components_on_one_key_are_valid(self, key, entries):
+        self._make_config(
+            {"name": "a", "type": "AgentComponent", key: []},
+            {"name": "b", "type": "AgentComponent", key: entries},
+        )
+
+    def test_a_component_with_neither_key_does_not_count(self):
+        self._make_config(
+            {"name": "a", "type": "AgentComponent", "tools": []},
+            {"name": "b", "type": "DeterministicStepComponent", "tool_name": "x"},
+            {"name": "c", "type": "OneOffComponent"},
+        )
+
+    @pytest.mark.parametrize(
+        "entries, message",
+        [
+            (
+                [{"server": "jira", "name": ["x"]}],
+                '"server" must be "gitlab", "orbit" or "slack", got \'jira\'',
+            ),
+            (
+                [{"server": "gitlab", "name": ["get_*"]}],
+                '"name" takes exact tool names, got "get_*"',
+            ),
+        ],
+    )
+    def test_an_invalid_selector_is_a_config_error(self, entries, message):
+        with pytest.raises(ValidationError) as exc:
+            self._make_config(
+                {"name": "a", "type": "AgentComponent", "tools": []},
+                {"name": "b", "type": "AgentComponent", "tools": entries},
+            )
+
+        assert f'Component "b": {message}' in str(exc.value)

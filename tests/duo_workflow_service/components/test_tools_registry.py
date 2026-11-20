@@ -4299,6 +4299,8 @@ async def test_select_tools_matches_trusted_mcp_tools_by_server_prefix(tool_meta
         _mcp("gitlab_get_issue"),
         _mcp("orbit_list_commands"),
         _mcp("orbit_invoke_command"),
+        # Slack's own tool names start with slack_, so the server prefix doubles it.
+        _mcp("slack_slack_read_thread"),
     )
 
     with patch.object(tools_registry, "strips_client_mcp_trust", return_value=True):
@@ -4308,6 +4310,9 @@ async def test_select_tools_matches_trusted_mcp_tools_by_server_prefix(tool_meta
         assert registry.select_tools(
             [ToolSelector("orbit", ["list_commands", "invoke_command"])]
         ) == ["orbit_list_commands", "orbit_invoke_command"]
+        assert registry.select_tools(
+            [ToolSelector("slack", ["slack_read_thread"])]
+        ) == ["slack_slack_read_thread"]
 
 
 @pytest.mark.asyncio
