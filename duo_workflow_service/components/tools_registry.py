@@ -139,8 +139,6 @@ _READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
     tools.FindFiles,
     tools.Grep,
     tools.ExtractLinesFromText,
-    tools.FinalizeCodeReviewFindings,
-    tools.DetectReviewContextTruncation,
     # Read the checkout's git history. They run `git` on the user's machine, so they sit
     # here rather than under `use_git`: every subcommand they can reach is asserted
     # read-only at class creation, whereas `use_git`'s run_git_command takes arbitrary
@@ -267,8 +265,6 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.WorkplanPublishTracks,
         tools.RevertToDetectedVulnerability,
         tools.CreateVulnerabilityIssue,
-        tools.PostDuoCodeReview,
-        tools.PostDuoCodeReviewFindings,
         SubmitMrReview,
         ReplyToDiscussion,
         SetDiscussionResolved,

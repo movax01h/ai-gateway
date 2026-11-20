@@ -4,19 +4,19 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from structlog.testing import capture_logs
 
+from ai.features.review.code_review.components.finalize_code_review_findings import (
+    FinalizeCodeReviewFindings,
+    FinalizeCodeReviewFindingsInput,
+)
+from ai.features.review.code_review.components.findings import build_summary
+from ai.features.review.code_review.components.post_duo_code_review_findings import (
+    PostDuoCodeReviewFindings,
+)
 from duo_workflow_service.agent_platform.v1.components.deterministic_step.validation import (
     select_validated_tool,
 )
 from duo_workflow_service.agent_platform.v1.state import IOKey
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.tools.code_review.finalize_code_review_findings import (
-    FinalizeCodeReviewFindings,
-    FinalizeCodeReviewFindingsInput,
-)
-from duo_workflow_service.tools.code_review.findings import build_summary
-from duo_workflow_service.tools.code_review.post_duo_code_review_findings import (
-    PostDuoCodeReviewFindings,
-)
 from duo_workflow_service.tools.tool_output_manager import TruncationConfig
 from duo_workflow_service.workflows.type_definitions import MAX_MESSAGE_SIZE
 

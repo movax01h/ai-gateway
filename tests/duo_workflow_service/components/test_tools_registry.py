@@ -10,6 +10,12 @@ from langchain.tools import BaseTool, ToolException
 from pydantic import BaseModel
 from structlog.testing import capture_logs
 
+from ai.features.review.code_review.components import (
+    DetectReviewContextTruncation,
+    FinalizeCodeReviewFindings,
+    PostDuoCodeReview,
+    PostDuoCodeReviewFindings,
+)
 from ai.features.security.sast_fp_detection.components.post_sast_fp_analysis_to_gitlab import (
     PostSastFpAnalysisToGitlab,
 )
@@ -49,9 +55,6 @@ from duo_workflow_service.tools.ascp import (
 from duo_workflow_service.tools.branch import CreateBranch
 from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
     BuildReviewMergeRequestContext,
-)
-from duo_workflow_service.tools.code_review.post_duo_code_review import (
-    PostDuoCodeReview,
 )
 from duo_workflow_service.tools.command import RunCommand, ShellCommand
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -675,10 +678,10 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "extract_lines_from_text": tools.ExtractLinesFromText(
             metadata=expected_metadata
         ),
-        "finalize_code_review_findings": tools.FinalizeCodeReviewFindings(
+        "finalize_code_review_findings": FinalizeCodeReviewFindings(
             metadata=expected_metadata
         ),
-        "detect_review_context_truncation": tools.DetectReviewContextTruncation(
+        "detect_review_context_truncation": DetectReviewContextTruncation(
             metadata=expected_metadata
         ),
         "get_glql_schema": tools.GetGlqlSchema(metadata=expected_metadata),
@@ -696,7 +699,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "build_review_merge_request_context": BuildReviewMergeRequestContext(
             metadata=expected_metadata
         ),
-        "post_duo_code_review_findings": tools.PostDuoCodeReviewFindings(
+        "post_duo_code_review_findings": PostDuoCodeReviewFindings(
             metadata=expected_metadata
         ),
         "get_security_finding_details": GetSecurityFindingDetails(
