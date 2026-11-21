@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from langchain_core.tools import ToolException
+from pydantic import ValidationError
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.findings.get_security_finding_details import (
@@ -11,6 +12,11 @@ from duo_workflow_service.tools.findings.get_security_finding_details import (
 )
 from duo_workflow_service.tools.findings.queries import (
     GET_SECURITY_FINDING_DETAILS_QUERY,
+)
+from duo_workflow_service.tools.security_inputs import (
+    MAX_GIT_REF_LENGTH,
+    MAX_PROJECT_FULL_PATH_LENGTH,
+    MAX_SECURITY_FINDING_UUID_LENGTH,
 )
 from tests.duo_workflow_service.tools.query_test_helpers import (
     extract_location_fragment,
@@ -302,3 +308,57 @@ class TestQueryContent:
             GET_SECURITY_FINDING_DETAILS_QUERY, location_type
         )
         assert "dependency { version package { name } }" in fragment
+
+
+VALID_FINDING_DETAILS_ARGS = {
+    "project_full_path": "namespace/project",
+    "uuid": "1e9a2bf7-0450-5894-8db5-895c98e39deb",
+    "ref": "my-feature-branch",
+}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {},
+        {"project_full_path": "a" * MAX_PROJECT_FULL_PATH_LENGTH},
+        {"uuid": "u" * MAX_SECURITY_FINDING_UUID_LENGTH},
+        {"ref": "r" * MAX_GIT_REF_LENGTH},
+    ],
+)
+def test_get_security_finding_details_input_accepts_values_within_bounds(overrides):
+    GetSecurityFindingDetailsInput(**{**VALID_FINDING_DETAILS_ARGS, **overrides})
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"project_full_path": "a" * (MAX_PROJECT_FULL_PATH_LENGTH + 1)},
+        {"project_full_path": "ab"},
+        {"project_full_path": "../etc/passwd"},
+        {"project_full_path": "/namespace/project"},
+        {"uuid": "u" * (MAX_SECURITY_FINDING_UUID_LENGTH + 1)},
+        {"ref": "r" * (MAX_GIT_REF_LENGTH + 1)},
+    ],
+)
+def test_get_security_finding_details_input_rejects_out_of_bounds_values(overrides):
+    with pytest.raises(ValidationError):
+        GetSecurityFindingDetailsInput(**{**VALID_FINDING_DETAILS_ARGS, **overrides})
+
+
+@pytest.mark.asyncio
+async def test_get_security_finding_details_rejects_oversized_path_before_request(
+    gitlab_client_mock, metadata
+):
+    gitlab_client_mock.apost = AsyncMock()
+    tool = GetSecurityFindingDetails(metadata=metadata)
+
+    with pytest.raises(ValidationError):
+        await tool.arun(
+            {
+                **VALID_FINDING_DETAILS_ARGS,
+                "project_full_path": "a" * (MAX_PROJECT_FULL_PATH_LENGTH + 1),
+            }
+        )
+
+    gitlab_client_mock.apost.assert_not_called()

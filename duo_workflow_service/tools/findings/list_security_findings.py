@@ -10,6 +10,15 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.findings.queries import (
     LIST_SECURITY_FINDINGS_QUERY,
 )
+from duo_workflow_service.tools.security_inputs import (
+    MAX_GIT_REF_LENGTH,
+    MAX_PROJECT_FULL_PATH_LENGTH,
+    MAX_SCANNER_ID_LENGTH,
+    MAX_SCANNER_IDS,
+    GitRefStr,
+    ProjectFullPath,
+    ScannerIdList,
+)
 from duo_workflow_service.tools.tier_access_checker import (
     LICENSED_FEATURE_SECURITY_DASHBOARD,
 )
@@ -57,12 +66,14 @@ class SecurityFindingReportType(StrEnum):
 class ListSecurityFindingsInput(BaseModel):
     """Input for listing security findings from a pipeline."""
 
-    project_full_path: str = Field(
-        description="The full path of the GitLab project (e.g., 'namespace/project' or 'group/subgroup/project')",
+    project_full_path: ProjectFullPath = Field(
+        description="The full path of the GitLab project (e.g., 'namespace/project' or 'group/subgroup/project'). "
+        f"Maximum {MAX_PROJECT_FULL_PATH_LENGTH} characters.",
     )
-    ref: str = Field(
+    ref: GitRefStr = Field(
         description="The branch or tag ref the pipeline was run for. "
-        "For an MR, use the MR source branch name (e.g., 'my-feature-branch')."
+        "For an MR, use the MR source branch name (e.g., 'my-feature-branch'). "
+        f"Maximum {MAX_GIT_REF_LENGTH} characters."
     )
     severity: Optional[list[SecurityFindingSeverity | str]] = Field(
         default=None,
@@ -72,9 +83,10 @@ class ListSecurityFindingsInput(BaseModel):
         default=None,
         description="Filter by report types (e.g., [SAST, DAST]). If not specified, all types returned.",
     )
-    scanner: Optional[list[str]] = Field(
+    scanner: Optional[ScannerIdList] = Field(
         default=None,
-        description="Filter by scanner IDs. If not specified, all scanners returned.",
+        description="Filter by scanner IDs. If not specified, all scanners returned. "
+        f"Up to {MAX_SCANNER_IDS} can be provided, each at most {MAX_SCANNER_ID_LENGTH} characters.",
     )
     state: Optional[list[SecurityFindingState | str]] = Field(
         default=None,

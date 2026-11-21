@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from langchain_core.tools import ToolException
+from pydantic import ValidationError
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.findings.list_security_findings import (
@@ -13,6 +14,12 @@ from duo_workflow_service.tools.findings.list_security_findings import (
     SecurityFindingState,
 )
 from duo_workflow_service.tools.findings.queries import LIST_SECURITY_FINDINGS_QUERY
+from duo_workflow_service.tools.security_inputs import (
+    MAX_GIT_REF_LENGTH,
+    MAX_PROJECT_FULL_PATH_LENGTH,
+    MAX_SCANNER_ID_LENGTH,
+    MAX_SCANNER_IDS,
+)
 from tests.duo_workflow_service.tools.query_test_helpers import (
     extract_location_fragment,
 )
@@ -643,3 +650,59 @@ def test_query_dependency_scanning_fragment_includes_blob_path():
         LIST_SECURITY_FINDINGS_QUERY, "VulnerabilityLocationDependencyScanning"
     )
     assert "blobPath" in fragment
+
+
+VALID_LIST_FINDINGS_ARGS = {
+    "project_full_path": "namespace/project",
+    "ref": "my-feature-branch",
+}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {},
+        {"project_full_path": "a" * MAX_PROJECT_FULL_PATH_LENGTH},
+        {"ref": "r" * MAX_GIT_REF_LENGTH},
+        {"scanner": ["semgrep"] * MAX_SCANNER_IDS},
+        {"scanner": ["s" * MAX_SCANNER_ID_LENGTH]},
+        {"scanner": None},
+    ],
+)
+def test_list_security_findings_input_accepts_values_within_bounds(overrides):
+    ListSecurityFindingsInput(**{**VALID_LIST_FINDINGS_ARGS, **overrides})
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"project_full_path": "a" * (MAX_PROJECT_FULL_PATH_LENGTH + 1)},
+        {"project_full_path": "ab"},
+        {"project_full_path": "namespace/../project"},
+        {"project_full_path": "namespace/project/"},
+        {"ref": "r" * (MAX_GIT_REF_LENGTH + 1)},
+        {"scanner": ["semgrep"] * (MAX_SCANNER_IDS + 1)},
+        {"scanner": ["s" * (MAX_SCANNER_ID_LENGTH + 1)]},
+    ],
+)
+def test_list_security_findings_input_rejects_out_of_bounds_values(overrides):
+    with pytest.raises(ValidationError):
+        ListSecurityFindingsInput(**{**VALID_LIST_FINDINGS_ARGS, **overrides})
+
+
+@pytest.mark.asyncio
+async def test_list_security_findings_rejects_oversized_path_before_request(
+    gitlab_client_mock, metadata
+):
+    gitlab_client_mock.apost = AsyncMock()
+    tool = ListSecurityFindings(metadata=metadata)
+
+    with pytest.raises(ValidationError):
+        await tool.arun(
+            {
+                **VALID_LIST_FINDINGS_ARGS,
+                "project_full_path": "a" * (MAX_PROJECT_FULL_PATH_LENGTH + 1),
+            }
+        )
+
+    gitlab_client_mock.apost.assert_not_called()

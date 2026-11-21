@@ -3,9 +3,16 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from langchain_core.tools import ToolException
+from pydantic import ValidationError
 
+from duo_workflow_service.tools.security_inputs import (
+    MAX_GITLAB_GLOBAL_ID_LENGTH,
+    MAX_VULNERABILITY_COMMENT_LENGTH,
+    MAX_VULNERABILITY_IDS,
+)
 from duo_workflow_service.tools.vulnerabilities.severity import (
     UpdateVulnerabilitySeverity,
+    UpdateVulnerabilitySeverityInput,
 )
 
 # Common URL test parameters
@@ -186,67 +193,89 @@ async def test_update_vulnerability_severity_arun(gitlab_client_mock, metadata):
         (["id123"], False),
         (["id1", "id2", "id3"], False),
         (["gid://gitlab/Vulnerability/123"], False),
-        (["", "valid_id", None], False),  # At least one valid
-        ([123], False),
+        (["", "valid_id"], False),  # At least one valid
         ([], True),
         ([""], True),
-        (["", " ", None], True),
-        ([None, None], True),
-        ({}, True),
-        (None, True),
+        (["", " "], True),
     ],
 )
 def test_vulnerability_ids_validation(vulnerability_ids, should_fail, tool):
     if should_fail:
         with pytest.raises(ValueError):
-            tool.validate_inputs(vulnerability_ids, "HIGH", "comment")
+            tool.validate_inputs(vulnerability_ids)
     else:
-        tool.validate_inputs(vulnerability_ids, "HIGH", "comment")
+        tool.validate_inputs(vulnerability_ids)
+
+
+def _severity_input(**overrides):
+    args = {
+        "vulnerability_ids": ["gid://gitlab/Vulnerability/123"],
+        "severity": "HIGH",
+        "comment": "comment",
+    }
+    args.update(overrides)
+    return UpdateVulnerabilitySeverityInput(**args)
 
 
 @pytest.mark.parametrize(
-    "severity,should_fail",
+    "overrides",
     [
-        ("CRITICAL", False),
-        ("HIGH", False),
-        ("MEDIUM", False),
-        ("LOW", False),
-        ("INFO", False),
-        ("UNKNOWN", False),
-        ("INVALID", True),
-        ("", True),
-        (123, True),
-        (["HIGH"], True),
-        (None, True),
+        {"severity": severity}
+        for severity in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "UNKNOWN"]
+    ]
+    + [
+        {"comment": ""},
+        {"comment": "x" * MAX_VULNERABILITY_COMMENT_LENGTH},
+        {"vulnerability_ids": ["id"] * MAX_VULNERABILITY_IDS},
+        {"vulnerability_ids": ["x" * MAX_GITLAB_GLOBAL_ID_LENGTH]},
     ],
 )
-def test_severity_validation(severity, should_fail, tool):
-    if should_fail:
-        with pytest.raises(ValueError):
-            tool.validate_inputs(["id"], severity, "comment")
-    else:
-        tool.validate_inputs(["id"], severity, "comment")
+def test_input_schema_accepts_valid_values(overrides):
+    _severity_input(**overrides)
 
 
 @pytest.mark.parametrize(
-    "comment,should_fail",
+    "overrides",
     [
-        ("Valid comment", False),
-        ("", False),  # Empty comment is valid
-        ("x" * 50000, False),  # Exactly at limit
-        ("x" * 50001, True),  # Over limit
-        (None, True),
-        (123, True),
-        (["comment"], True),
-        ({"comment": "text"}, True),
+        {"severity": "INVALID"},
+        {"severity": ""},
+        {"severity": "high"},
+        {"severity": 123},
+        {"severity": ["HIGH"]},
+        {"severity": None},
+        {"comment": "x" * (MAX_VULNERABILITY_COMMENT_LENGTH + 1)},
+        {"comment": None},
+        {"comment": 123},
+        {"comment": ["comment"]},
+        {"comment": {"comment": "text"}},
+        {"vulnerability_ids": ["id"] * (MAX_VULNERABILITY_IDS + 1)},
+        {"vulnerability_ids": ["x" * (MAX_GITLAB_GLOBAL_ID_LENGTH + 1)]},
+        {"vulnerability_ids": [123]},
+        {"vulnerability_ids": None},
+        {"vulnerability_ids": "gid://gitlab/Vulnerability/123"},
     ],
 )
-def test_comment_validation(comment, should_fail, tool):
-    if should_fail:
-        with pytest.raises(ValueError):
-            tool.validate_inputs(["id"], "HIGH", comment)
-    else:
-        tool.validate_inputs(["id"], "HIGH", comment)
+def test_input_schema_rejects_invalid_values(overrides):
+    with pytest.raises(ValidationError):
+        _severity_input(**overrides)
+
+
+@pytest.mark.asyncio
+async def test_update_vulnerability_severity_rejects_oversized_comment_before_request(
+    gitlab_client_mock, metadata
+):
+    tool = UpdateVulnerabilitySeverity(metadata=metadata)
+
+    with pytest.raises(ValidationError):
+        await tool.arun(
+            {
+                "vulnerability_ids": ["gid://gitlab/Vulnerability/123"],
+                "severity": "HIGH",
+                "comment": "x" * (MAX_VULNERABILITY_COMMENT_LENGTH + 1),
+            }
+        )
+
+    gitlab_client_mock.apost.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from duo_workflow_service.tools.security_inputs import (
     ProjectFullPath,
     VulnerabilityComment,
     VulnerabilityIdList,
+    VulnerabilitySeverity,
 )
 from duo_workflow_service.tools.tier_access_checker import (
     LICENSED_FEATURE_SECURITY_DASHBOARD,
@@ -43,17 +44,6 @@ VULNERABILITY_IDS_LIMIT_DESCRIPTION = (
 )
 
 COMMENT_LENGTH_DESCRIPTION = f"Maximum {MAX_VULNERABILITY_COMMENT_LENGTH:,} characters."
-
-
-class VulnerabilitySeverity(StrEnum):
-    """Valid vulnerability severity levels."""
-
-    CRITICAL = "CRITICAL"
-    HIGH = "HIGH"
-    MEDIUM = "MEDIUM"
-    LOW = "LOW"
-    INFO = "INFO"
-    UNKNOWN = "UNKNOWN"
 
 
 class VulnerabilityReportType(StrEnum):
