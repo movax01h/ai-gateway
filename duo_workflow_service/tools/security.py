@@ -8,6 +8,14 @@ from packaging.version import Version
 from pydantic import BaseModel, Field, field_validator
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.security_inputs import (
+    MAX_GITLAB_GLOBAL_ID_LENGTH,
+    MAX_PROJECT_FULL_PATH_LENGTH,
+    MAX_VULNERABILITY_IDS,
+    GitLabGlobalIdStr,
+    ProjectFullPath,
+    VulnerabilityIdList,
+)
 from duo_workflow_service.tools.tier_access_checker import (
     LICENSED_FEATURE_SECURITY_DASHBOARD,
 )
@@ -19,6 +27,18 @@ from lib.context import gitlab_version
 PROJECT_IDENTIFICATION_DESCRIPTION = """
 The project must be specified using its full path (e.g., 'namespace/project' or 'group/subgroup/project').
 """
+
+PROJECT_FULL_PATH_FIELD_DESCRIPTION = (
+    "The full path of the GitLab project (e.g., 'namespace/project' or 'group/subgroup/project'). "
+    f"Maximum {MAX_PROJECT_FULL_PATH_LENGTH} characters."
+)
+
+ID_LENGTH_DESCRIPTION = f"Maximum {MAX_GITLAB_GLOBAL_ID_LENGTH} characters."
+
+VULNERABILITY_IDS_LIMIT_DESCRIPTION = (
+    f"Up to {MAX_VULNERABILITY_IDS} can be provided, "
+    f"each at most {MAX_GITLAB_GLOBAL_ID_LENGTH} characters."
+)
 
 
 class VulnerabilitySeverity(StrEnum):
@@ -80,8 +100,8 @@ __all__ = [
 class ListVulnerabilitiesInput(BaseModel):
     """Input validation for list vulnerabilities operation."""
 
-    project_full_path: str = Field(
-        description="The full path of the GitLab project (e.g., 'namespace/project' or 'group/subgroup/project')",
+    project_full_path: ProjectFullPath = Field(
+        description=PROJECT_FULL_PATH_FIELD_DESCRIPTION,
     )
     severity: Optional[list[VulnerabilitySeverity]] = Field(
         default=None,
@@ -121,16 +141,6 @@ class ListVulnerabilitiesInput(BaseModel):
         default=True,
         description="Whether to fetch all pages of results (default: True).",
     )
-
-    @field_validator("project_full_path")
-    @classmethod
-    def validate_project_path(cls, v: str) -> str:
-        """Basic validation for project path."""
-        if not v or len(v) < 3:
-            raise ValueError("Project path must be at least 3 characters")
-        if ".." in v or v.startswith("/") or v.endswith("/"):
-            raise ValueError("Invalid project path format")
-        return v
 
 
 class ListVulnerabilities(DuoBaseTool):
@@ -303,7 +313,9 @@ class ListVulnerabilities(DuoBaseTool):
 
 
 class DismissVulnerabilityInput(BaseModel):
-    vulnerability_id: str = Field(description="ID of the vulnerability to be dismissed")
+    vulnerability_id: GitLabGlobalIdStr = Field(
+        description=f"ID of the vulnerability to be dismissed. {ID_LENGTH_DESCRIPTION}"
+    )
     comment: str = Field(
         description="Comment why vulnerability was dismissed (maximum 50,000 characters)."
     )
@@ -414,11 +426,12 @@ mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason:
 
 
 class CreateVulnerabilityIssueInput(BaseModel):
-    project_full_path: str = Field(
-        description="The full path of the GitLab project (e.g., 'namespace/project' or 'group/subgroup/project')",
+    project_full_path: ProjectFullPath = Field(
+        description=PROJECT_FULL_PATH_FIELD_DESCRIPTION,
     )
-    vulnerability_ids: list[str] = Field(
-        description="Array of vulnerability IDs that will be linked to the created issue. Up to 100 can be provided."
+    vulnerability_ids: VulnerabilityIdList = Field(
+        description="Array of vulnerability IDs that will be linked to the created issue. "
+        f"{VULNERABILITY_IDS_LIMIT_DESCRIPTION}"
     )
 
     @field_validator("vulnerability_ids", mode="before")
@@ -545,9 +558,12 @@ class CreateVulnerabilityIssue(DuoBaseTool):
 
 
 class LinkVulnerabilityToIssueInput(BaseModel):
-    issue_id: str = Field(description="ID of the issue to link to.")
-    vulnerability_ids: list[str] = Field(
-        description="Array of vulnerability IDs to link to the given issue. Up to 100 can be provided."
+    issue_id: GitLabGlobalIdStr = Field(
+        description=f"ID of the issue to link to. {ID_LENGTH_DESCRIPTION}"
+    )
+    vulnerability_ids: VulnerabilityIdList = Field(
+        description="Array of vulnerability IDs to link to the given issue. "
+        f"{VULNERABILITY_IDS_LIMIT_DESCRIPTION}"
     )
 
 
@@ -638,11 +654,11 @@ class LinkVulnerabilityToIssue(DuoBaseTool):
 
 
 class LinkVulnerabilityToMergeRequestInput(BaseModel):
-    vulnerability_id: str = Field(
-        description="ID of the vulnerability to link to the merge request"
+    vulnerability_id: GitLabGlobalIdStr = Field(
+        description=f"ID of the vulnerability to link to the merge request. {ID_LENGTH_DESCRIPTION}"
     )
-    merge_request_id: str = Field(
-        description="ID of the merge request to link to the vulnerability"
+    merge_request_id: GitLabGlobalIdStr = Field(
+        description=f"ID of the merge request to link to the vulnerability. {ID_LENGTH_DESCRIPTION}"
     )
 
     @field_validator("vulnerability_id", "merge_request_id", mode="before")
@@ -750,9 +766,10 @@ class LinkVulnerabilityToMergeRequest(DuoBaseTool):
 
 
 class ConfirmVulnerabilityInput(BaseModel):
-    vulnerability_id: str = Field(
+    vulnerability_id: GitLabGlobalIdStr = Field(
         description="The ID of the vulnerability to be confirmed "
-        "(e.g., either digit ids like '123' or gid like 'gid://gitlab/Vulnerability/123')",
+        "(e.g., either digit ids like '123' or gid like 'gid://gitlab/Vulnerability/123'). "
+        f"{ID_LENGTH_DESCRIPTION}",
     )
     comment: Optional[str] = Field(
         default=None,
@@ -831,8 +848,9 @@ mutation($vulnerabilityId: VulnerabilityID!, $comment: String) {
 
 
 class RevertToDetectedVulnerabilityInput(BaseModel):
-    vulnerability_id: str = Field(
-        description="The ID of the vulnerability to revert to detected state (e.g., 'gid://gitlab/Vulnerability/123')",
+    vulnerability_id: GitLabGlobalIdStr = Field(
+        description="The ID of the vulnerability to revert to detected state "
+        f"(e.g., 'gid://gitlab/Vulnerability/123'). {ID_LENGTH_DESCRIPTION}",
     )
     comment: Optional[str] = Field(
         default=None,
