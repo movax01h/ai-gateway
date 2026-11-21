@@ -11,10 +11,12 @@ from pydantic import AfterValidator, Field, StringConstraints
 __all__ = [
     "MAX_GITLAB_GLOBAL_ID_LENGTH",
     "MAX_PROJECT_FULL_PATH_LENGTH",
+    "MAX_VULNERABILITY_COMMENT_LENGTH",
     "MAX_VULNERABILITY_IDS",
     "MIN_PROJECT_FULL_PATH_LENGTH",
     "GitLabGlobalIdStr",
     "ProjectFullPath",
+    "VulnerabilityComment",
     "VulnerabilityIdList",
 ]
 
@@ -30,6 +32,10 @@ MAX_GITLAB_GLOBAL_ID_LENGTH = 255
 
 # Matches the "Up to 100" limit documented for the vulnerability ID list fields.
 MAX_VULNERABILITY_IDS = 100
+
+# GitLab rejects vulnerability state-transition comments (dismiss, confirm, revert to
+# detected) longer than 50,000 characters, so a longer value can never succeed.
+MAX_VULNERABILITY_COMMENT_LENGTH = 50_000
 
 
 def _validate_project_full_path(value: str) -> str:
@@ -57,4 +63,9 @@ GitLabGlobalIdStr = Annotated[
 VulnerabilityIdList = Annotated[
     list[GitLabGlobalIdStr],
     Field(max_length=MAX_VULNERABILITY_IDS),
+]
+
+VulnerabilityComment = Annotated[
+    str,
+    StringConstraints(max_length=MAX_VULNERABILITY_COMMENT_LENGTH),
 ]

@@ -22,6 +22,7 @@ from duo_workflow_service.tools.security import (
     ListVulnerabilitiesInput,
     RevertToDetectedVulnerability,
     RevertToDetectedVulnerabilityInput,
+    VulnerabilityDismissalReason,
     VulnerabilityReportType,
     VulnerabilitySeverity,
     VulnerabilityState,
@@ -29,6 +30,7 @@ from duo_workflow_service.tools.security import (
 from duo_workflow_service.tools.security_inputs import (
     MAX_GITLAB_GLOBAL_ID_LENGTH,
     MAX_PROJECT_FULL_PATH_LENGTH,
+    MAX_VULNERABILITY_COMMENT_LENGTH,
     MAX_VULNERABILITY_IDS,
 )
 
@@ -732,43 +734,120 @@ async def test_dismiss_vulnerability_with_numeric_id(gitlab_client_mock, metadat
     assert body["variables"]["vulnerabilityId"] == "gid://gitlab/Vulnerability/123"
 
 
+_OVERSIZED_COMMENT = "x" * (MAX_VULNERABILITY_COMMENT_LENGTH + 1)
+
+
 @pytest.mark.asyncio
-async def test_dismiss_vulnerability_invalid_dismissal_reason(
-    gitlab_client_mock, metadata
+@pytest.mark.parametrize(
+    "tool_class,input_data,expected_error",
+    [
+        (
+            DismissVulnerability,
+            {
+                "vulnerability_id": "gid://gitlab/Vulnerability/123",
+                "comment": _OVERSIZED_COMMENT,
+                "dismissal_reason": "FALSE_POSITIVE",
+            },
+            "comment",
+        ),
+        (
+            DismissVulnerability,
+            {
+                "vulnerability_id": "gid://gitlab/Vulnerability/123",
+                "comment": "Test comment",
+                "dismissal_reason": "INVALID_REASON",
+            },
+            "dismissal_reason",
+        ),
+        (
+            ConfirmVulnerability,
+            {"vulnerability_id": "123", "comment": _OVERSIZED_COMMENT},
+            "comment",
+        ),
+        (
+            RevertToDetectedVulnerability,
+            {
+                "vulnerability_id": "gid://gitlab/Vulnerability/123",
+                "comment": _OVERSIZED_COMMENT,
+            },
+            "comment",
+        ),
+    ],
+)
+async def test_state_transition_invalid_inputs_rejected_before_api_call(
+    gitlab_client_mock, metadata, tool_class, input_data, expected_error
 ):
-    tool = DismissVulnerability(metadata=metadata)
+    gitlab_client_mock.apost = AsyncMock()
+    tool = tool_class(metadata=metadata)
 
-    input_data = {
-        "vulnerability_id": "gid://gitlab/Vulnerability/123",
-        "comment": "Test comment",
-        "dismissal_reason": "INVALID_REASON",
-    }
-
-    with pytest.raises(ToolException) as exc_info:
+    with pytest.raises(ValidationError, match=expected_error):
         await tool.arun(input_data)
-
-    assert "Invalid dismissal reason" in str(exc_info.value)
-    assert "INVALID_REASON" in str(exc_info.value)
 
     gitlab_client_mock.apost.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_dismiss_vulnerability_comment_too_long(gitlab_client_mock, metadata):
-    tool = DismissVulnerability(metadata=metadata)
+@pytest.mark.parametrize(
+    "input_class,input_data",
+    [
+        (
+            DismissVulnerabilityInput,
+            {
+                "vulnerability_id": "123",
+                "comment": "x" * MAX_VULNERABILITY_COMMENT_LENGTH,
+                "dismissal_reason": "FALSE_POSITIVE",
+            },
+        ),
+        (
+            ConfirmVulnerabilityInput,
+            {
+                "vulnerability_id": "123",
+                "comment": "x" * MAX_VULNERABILITY_COMMENT_LENGTH,
+            },
+        ),
+        (
+            RevertToDetectedVulnerabilityInput,
+            {
+                "vulnerability_id": "123",
+                "comment": "x" * MAX_VULNERABILITY_COMMENT_LENGTH,
+            },
+        ),
+    ],
+)
+def test_comment_at_limit_accepted(input_class, input_data):
+    assert len(input_class(**input_data).comment) == MAX_VULNERABILITY_COMMENT_LENGTH
 
-    input_data = {
-        "vulnerability_id": "gid://gitlab/Vulnerability/123",
-        "comment": "x" * 50001,  # 50,001 characters (should fail)
-        "dismissal_reason": "FALSE_POSITIVE",
-    }
 
-    with pytest.raises(ToolException) as exc_info:
-        await tool.arun(input_data)
+@pytest.mark.parametrize(
+    "input_class",
+    [
+        DismissVulnerabilityInput,
+        ConfirmVulnerabilityInput,
+        RevertToDetectedVulnerabilityInput,
+    ],
+)
+def test_comment_limit_exposed_in_tool_schema(input_class):
+    field_schema = input_class.model_json_schema()["properties"]["comment"]
+    if "anyOf" in field_schema:
+        string_schema = next(
+            s for s in field_schema["anyOf"] if s.get("type") == "string"
+        )
+    else:
+        string_schema = field_schema
 
-    assert "Comment must be 50,000 characters or less" in str(exc_info.value)
+    assert string_schema["maxLength"] == MAX_VULNERABILITY_COMMENT_LENGTH
+    assert (
+        f"Maximum {MAX_VULNERABILITY_COMMENT_LENGTH:,} characters"
+        in field_schema["description"]
+    )
 
-    gitlab_client_mock.apost.assert_not_called()
+
+def test_dismissal_reason_enum_exposed_in_tool_schema():
+    schema = DismissVulnerabilityInput.model_json_schema()
+    reason_schema = schema["$defs"]["VulnerabilityDismissalReason"]
+
+    assert reason_schema["enum"] == [
+        reason.value for reason in VulnerabilityDismissalReason
+    ]
 
 
 @pytest.mark.asyncio
@@ -856,7 +935,7 @@ async def test_dismiss_vulnerability_valid_dismissal_reasons(
             DismissVulnerabilityInput(
                 vulnerability_id="gid://gitlab/Vulnerability/123",
                 comment="Test comment",
-                dismissal_reason="FALSE_POSITIVE",
+                dismissal_reason=VulnerabilityDismissalReason.FALSE_POSITIVE,
             ),
             "Dismiss vulnerability gid://gitlab/Vulnerability/123",
         ),
@@ -864,7 +943,7 @@ async def test_dismiss_vulnerability_valid_dismissal_reasons(
             DismissVulnerabilityInput(
                 vulnerability_id="456",
                 comment="Another test comment",
-                dismissal_reason="ACCEPTABLE_RISK",
+                dismissal_reason=VulnerabilityDismissalReason.ACCEPTABLE_RISK,
             ),
             "Dismiss vulnerability 456",
         ),
@@ -1335,30 +1414,6 @@ async def test_confirm_vulnerability_exception(gitlab_client_mock, metadata):
 
     with pytest.raises(Exception, match="API Error"):
         await tool.arun({"vulnerability_id": "gid://gitlab/Vulnerability/123"})
-
-
-@pytest.mark.asyncio
-async def test_confirm_vulnerability_with_long_comment_error(
-    gitlab_client_mock, metadata
-):
-    """Test case 4: with comment with more than 50000 characters, the agent should throw error about too long comment"""
-    tool = ConfirmVulnerability(metadata=metadata)
-
-    # Create a comment with more than 50,000 characters
-    long_comment = "a" * 50001
-
-    input_data = {
-        "vulnerability_id": "123",
-        "comment": long_comment,
-    }
-
-    with pytest.raises(ToolException) as exc_info:
-        await tool.arun(input_data)
-
-    assert "Comment must be 50,000 characters or less" in str(exc_info.value)
-
-    # Verify that no API call was made due to validation error
-    gitlab_client_mock.apost.assert_not_called()
 
 
 @pytest.mark.parametrize(
