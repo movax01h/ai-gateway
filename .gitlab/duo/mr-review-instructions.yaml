@@ -69,7 +69,7 @@ instructions:
       - "duo_workflow_service/agent_platform/**/*"
       - "tests/duo_workflow_service/agent_platform/**/*"
     instructions: |
-      This module implments an internal framework called Flow Registry, before making any suggestions familiarize
+      This module implements an internal framework called Flow Registry, before making any suggestions familiarize
       yourself with the latest version of following documents:
       1. Flow Registry documentation at
       https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/raw/main/docs/flow_registry/index.md
@@ -78,12 +78,12 @@ instructions:
 
       CRITICAL: All changes that affect Flow Registry codebase MUST adheres to the contribution guidelines rules.
 
-  - name: No breaking changes withing Flow Registry v1 release
+  - name: No breaking changes within Flow Registry v1 release
     fileFilters:
       - "duo_workflow_service/agent_platform/v1/**/*.py"
       - "!tests/**/*"
     instructions: |
-      This module implments a stable release of Flow Registry framework, before making any suggestions
+      This module implements a stable release of Flow Registry framework, before making any suggestions
       familiarize yourself with documentation for the stable release at docs/flow_registry/v1.md
 
       CRITICAL: Any breaking change to components API MUST NOT be introduced under any circumstances.
@@ -96,8 +96,8 @@ instructions:
       This module implements an experimental release of Flow Registry framework, before making any suggestions
       familiarize yourself with documentation for the stable release at docs/flow_registry/experimental.md
 
-      1. Code in this module is intedent to be a short lived, changes after being evaluated and vaildated should be
-      either matured to a current stable relase, or removed.
+      1. Code in this module is intended to be a short lived, changes after being evaluated and validated should be
+      either matured to a current stable release, or removed.
       1. This module should import common code from a current stable release module.
 
   - name: Flow config shape
@@ -150,7 +150,7 @@ instructions:
       The checkpointer sits on LangGraph's saver interface, and LangGraph upgrades can change anything
       outside its documented surface. Verify:
       1. Special channel names such as `__interrupt__` and `__error__` are imported from
-        `langgraph.checkpoint.base` (e.g. `INTERRUPT`, `ERROR`), not re-declared as string literals or
+        `langgraph.checkpoint.base` (e.g. `INTERRUPT`, `ERROR`), not redeclared as string literals or
         local constants. Why: a local copy keeps compiling after LangGraph renames the channel, and the
         saver silently stops matching.
       1. Flag hand-maintained lists of LangGraph's internal control channels, and helpers that infer a task's
@@ -303,6 +303,11 @@ instructions:
       1. New RPC methods have corresponding server-side implementations.
       1. Streaming RPCs handle client disconnection and cancellation gracefully.
       1. Proto field names use `snake_case` as per protobuf conventions.
+      1. Comments on messages, fields and enum values ship in the generated Go and Node clients (and in
+        `contract.proto` itself), so each behavioural claim (e.g. "the service records it", "never promotes") must
+        be true of the server code. Check the claim against the code path and its log level, and flag wording that
+        over-promises. Why: client authors read these comments as the contract, and a false claim is hard to
+        correct once clients are released.
 
   - name: Internal Events Tracking
     fileFilters:
@@ -346,6 +351,11 @@ instructions:
       1. Flag a single test that checks several behaviours by branching on a parameter (e.g. `if expected_status == 422:`
         inside the test body). Suggest splitting it into separate tests, each with its own unconditional assertions.
         Why: branching hides which behaviour failed and lets one branch go unasserted.
+      1. Flag a new test that repeats an existing one: its only distinguishing input does not affect the branch it
+        claims to cover, and an existing test already pins that branch (e.g. the test changes how one condition is
+        set, but a separate guard decides the outcome whatever that condition is). Suggest dropping it or adding it
+        as a row to an existing parametrized test. Why: duplicate tests add maintenance cost without catching new
+        regressions.
 
   - name: Documentation
     fileFilters:
@@ -373,7 +383,7 @@ instructions:
       For CI/CD configuration changes, verify:
       1. New jobs are placed in the appropriate stage and file under `.gitlab/ci/`.
       1. Jobs that run on MRs use `rules: - if: $CI_PIPELINE_SOURCE == "merge_request_event"` or equivalent.
-      1. Secrets and credentials must never be hardcoded. Reference them through the Runway Vault as the prefered path
+      1. Secrets and credentials must never be hardcoded. Reference them through the Runway Vault as the preferred path
       or CI/CD variables depending on the deployment context.
       1. New Docker images used in jobs are pinned to a specific digest or version tag.
       1. Jobs that modify deployment configuration are reviewed by a maintainer.
