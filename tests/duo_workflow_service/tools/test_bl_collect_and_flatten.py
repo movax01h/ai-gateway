@@ -54,6 +54,16 @@ class TestBlCollectAndFlatten:
         assert result["coverage"]["errored"] == 2
         assert result["coverage"]["unread"] == 0
 
+    async def test_reviewed_indexes_exclude_failed_and_unreadable_units(self):
+        results = [
+            {"final_answer": _unit({"id": "ok"})},
+            _failed("boom"),
+            {"final_answer": "not json"},
+            {"final_answer": _unit()},
+        ]
+        result = await _collect(results, emitted_count=4)
+        assert result["coverage"]["reviewed_indexes"] == [0, 3]
+
     async def test_the_counts_are_for_each_s_not_recounted_from_the_entries(self):
         # The counts disagree with the entries on purpose: one answered entry,
         # but `for_each` reports two failures.
@@ -133,6 +143,7 @@ async def test_coverage_is_the_stage_s_counts_and_unit_noun():
         "errored": 1,
         "unread": 1,
         "unit_noun": "findings",
+        "reviewed_indexes": [0],
     }
 
 
@@ -402,4 +413,5 @@ async def test_a_completed_unit_with_no_readable_answer_is_counted_unread(
         "errored": 0,
         "unread": 1,
         "unit_noun": None,
+        "reviewed_indexes": [],
     }

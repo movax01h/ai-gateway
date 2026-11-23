@@ -166,6 +166,17 @@ class TestBuildReport:
         assert v["identifiers"][0]["type"] == "bl_finding"
         assert not v["name"].startswith("CWE-")
 
+    def test_reviewed_files_listed_without_partial_scan(self):
+        report = _writer()._build_report(
+            _parsed([{"file": "a.py"}]), reviewed_files=["a.py", "b.py"]
+        )
+        assert report["scan"]["reviewed_files"] == ["a.py", "b.py"]
+        assert "partial_scan" not in report["scan"]
+
+    def test_reviewed_files_omitted_when_unknown(self):
+        scan = _writer()._build_report(_parsed([{"file": "a.py"}]))["scan"]
+        assert "reviewed_files" not in scan
+
     def test_empty_body_defaults_to_finding_name(self):
         report = _build_report([{"file": "a.py"}])
         assert report["vulnerabilities"][0]["name"] == "Business-logic finding in a.py"
@@ -425,6 +436,97 @@ class TestWriteExecute:
         )
         assert "Wrote 1 vulnerabilities" in out
         assert "contents" in writes  # report still written despite reanchor failure
+
+    @pytest.fixture
+    def written_scan(self):
+        """Run `_execute` against a mocked executor; return the written `scan`."""
+        with patch.object(
+            bl, "_execute_action", new_callable=AsyncMock, return_value="ok"
+        ) as execute:
+
+            async def run(**kwargs):
+                await _writer()._execute([{"file": "a.py"}], **kwargs)
+                writes = [
+                    call.args[1].runWriteFile.contents
+                    for call in execute.call_args_list
+                    if call.args[1].HasField("runWriteFile")
+                ]
+                return json.loads(writes[-1])["scan"]
+
+            yield run
+
+    @pytest.mark.asyncio
+    async def test_reviewed_files_derived_from_units(self, written_scan):
+        scan = await written_scan(
+            reviewed_units=[{"files": ["b.py", "a.py"]}, {"files": ["a.py", "c.py"]}],
+            review_coverage={"reviewed_indexes": [0, 1]},
+        )
+        assert scan["reviewed_files"] == ["a.py", "b.py", "c.py"]
+        assert "partial_scan" not in scan
+
+    @pytest.mark.asyncio
+    async def test_reviewed_files_omitted_without_units(self, written_scan):
+        scan = await written_scan()
+        assert "reviewed_files" not in scan
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "read,expected",
+        [
+            ([0, 1, 2], ["a.py", "b.py", "c.py", "d.py"]),  # all succeeded
+            ([0, 2], ["a.py", "b.py", "c.py"]),  # unit 1 failed or garbled
+            ([2], ["a.py", "c.py"]),  # shared a.py stays via unit 2
+            ([], []),  # every unit failed: known-empty, listed as []
+        ],
+    )
+    async def test_reviewed_files_skip_failed_and_unreadable_units(
+        self, written_scan, read, expected
+    ):
+        scan = await written_scan(
+            reviewed_units=[
+                {"files": ["a.py", "b.py"]},
+                {"files": ["d.py"]},
+                {"files": ["a.py", "c.py"]},
+            ],
+            review_coverage={"reviewed_indexes": read},
+        )
+        assert scan["reviewed_files"] == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "coverage",
+        [None, {}, {"reviewed": 3}],  # no reviewed_indexes: unknown, not all-reviewed
+    )
+    async def test_reviewed_files_omitted_without_indexes(self, written_scan, coverage):
+        scan = await written_scan(
+            reviewed_units=[{"files": ["a.py"]}], review_coverage=coverage
+        )
+        assert "reviewed_files" not in scan
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "coverage", [None, {"reviewed_indexes": []}]
+    )  # zero units dispatched: known-empty whatever the coverage says
+    async def test_reviewed_files_empty_units_listed_as_empty(
+        self, written_scan, coverage
+    ):
+        scan = await written_scan(reviewed_units=[], review_coverage=coverage)
+        assert scan["reviewed_files"] == []
+
+    @pytest.mark.asyncio
+    async def test_reviewed_files_omitted_when_units_none(self, written_scan):
+        scan = await written_scan(
+            reviewed_units=None, review_coverage={"reviewed_indexes": [0]}
+        )
+        assert "reviewed_files" not in scan
+
+    @pytest.mark.asyncio
+    async def test_reviewed_files_paths_normalized(self, written_scan):
+        scan = await written_scan(
+            reviewed_units=[{"files": ["./a.py", "/b.py", "a.py", "d/./c.py"]}],
+            review_coverage={"reviewed_indexes": [0]},
+        )
+        assert scan["reviewed_files"] == ["a.py", "b.py", "d/./c.py"]
 
 
 class TestAFailedUpstreamStepFailsTheStep:
