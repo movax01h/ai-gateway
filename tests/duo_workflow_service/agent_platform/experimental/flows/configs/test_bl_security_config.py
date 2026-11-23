@@ -90,6 +90,10 @@ STAGE_SCHEMA = {
 }
 FINDING_KEYS = ("file", "new_line", "code_excerpt", "tier", "severity", "cwe", "body")
 VERDICT_KEYS = ("verdict", "clause", "evidence", "triage_evidence")
+HANDLER_KEYS = ("name", "location", "guard", "active_if", "confirmed", "unresolved")
+REVIEW_PROMPTS = (DETECT_PROMPT_ID, "security_scan_sibling", "finding_adjudicator")
+REVIEW_CONTEXT = re.compile(r"^Context: .*?file:line evidence\.\n", re.DOTALL)
+KEPT_TERMS = {"proof-of-exploit", "KEEP-ownership-bypass"}
 
 
 @functools.cache
@@ -672,7 +676,7 @@ class TestResponseSchemas:
 
     def test_unit_findings_come_first_then_a_bounded_summary(self):
         schema = _schema(UNIT_SCHEMA_ID)
-        assert tuple(schema["properties"]) == ("findings", "summary")
+        assert tuple(schema["properties"]) == ("findings", "summary", "handlers")
         assert set(schema["required"]) == {"findings", "summary"}
         summary = schema["properties"]["summary"]
         assert 20 <= summary["minLength"] < summary["maxLength"]
@@ -685,7 +689,11 @@ class TestResponseSchemas:
         findings = _schema(UNIT_SCHEMA_ID)["properties"]["findings"]
         assert findings["type"] == "array"
         item = findings["items"]
-        assert tuple(item["properties"]) == FINDING_KEYS + ("title", "impact")
+        assert tuple(item["properties"]) == FINDING_KEYS + (
+            "title",
+            "impact",
+            "emission_record",
+        )
         assert set(item["required"]) == set(FINDING_KEYS)
         assert item["properties"]["new_line"]["type"] == "integer"
         assert item["properties"]["tier"]["type"] == "integer"
@@ -713,6 +721,70 @@ class TestResponseSchemas:
 
         with pytest.raises(PydanticValidationError):
             model(summary=summary, findings=[finding | {key: ""}])
+
+    def test_the_review_record_is_optional_structured_data(self):
+        """The walk-through is recorded as data on the answer, never required as reply prose."""
+        model = json_schema_to_pydantic(
+            _schema(UNIT_SCHEMA_ID), title_fallback=UNIT_SCHEMA_ID
+        )
+        finding = dict.fromkeys(FINDING_KEYS, "x") | {"new_line": 3, "tier": 1}
+        summary = "One handler, one finding."
+        handler = {"name": "show", "location": "a.rb:3", "guard": "NONE"}
+        record = {"guard_callers": "SEARCHED_NONE_FOUND"}
+        model(summary=summary, findings=[finding])
+        model(
+            summary=summary,
+            findings=[finding | {"emission_record": record}],
+            handlers=[handler | {"confirmed": "NO", "unresolved": "x: y"}],
+        )
+
+        with pytest.raises(PydanticValidationError):
+            model(summary=summary, findings=[], handlers="HANDLER: show")
+
+    def test_no_review_prompt_requires_its_reasoning_as_reply_prose(self):
+        sources = _prompt_sources()
+        for banned in (
+            "as ordinary text in your replies",
+            "HANDLER: <name>",
+            "stays in your replies",
+            "Your STEP 1 explanation",
+            "Put no JSON in it",
+            "ends in prose",
+        ):
+            assert banned not in sources
+
+    @pytest.mark.parametrize("prompt_id", REVIEW_PROMPTS)
+    def test_the_review_prompt_opens_with_its_context_and_defensive_wording(
+        self, prompt_id
+    ):
+        system = _prompt_system(prompt_id)
+        assert "authorized, defensive security code review" in system
+        body = REVIEW_CONTEXT.sub("", system, count=1)
+        hits = set(re.findall(r"\S*(?:\battacker|\bexploit|\bbypass)\S*", body))
+        assert {h.strip(".,;:()") for h in hits} <= KEPT_TERMS, hits
+
+    def test_every_review_prompt_carries_the_same_context(self):
+        found = {p: REVIEW_CONTEXT.search(_prompt_system(p)) for p in REVIEW_PROMPTS}
+        assert all(found.values()), found
+        contexts = {p: m.group(0) for p, m in found.items()}
+        assert len(set(contexts.values())) == 1, contexts
+
+    @pytest.mark.parametrize("prompt_id", REVIEW_PROMPTS[:2])
+    def test_the_scan_prompt_names_every_structured_answer_key(self, prompt_id):
+        system = _prompt_system(prompt_id)
+        finding = _schema(UNIT_SCHEMA_ID)["properties"]["findings"]["items"]
+        record = finding["properties"]["emission_record"]["properties"]
+        handler = _schema(UNIT_SCHEMA_ID)["properties"]["handlers"]["items"]
+        assert set(handler["properties"]) == set(HANDLER_KEYS)
+        assert [k for k in HANDLER_KEYS if f'"{k}":' not in system] == []
+        assert [k for k in record if f"`{k}:" not in system] == []
+
+    def test_handler_field_descriptions_are_not_cut_at_a_comma(self):
+        handler = _schema(UNIT_SCHEMA_ID)["properties"]["handlers"]["items"]
+        fields = handler["properties"]
+        assert [k for k, v in fields.items() if set(v) - {"type", "description"}] == []
+        assert "NONE" in fields["guard"]["description"]
+        assert "ALWAYS" in fields["active_if"]["description"]
 
     @pytest.mark.parametrize(
         ("key", "value"),
@@ -782,9 +854,13 @@ class TestResponseSchemas:
         )
         # Every declared key, optional ones included, so the round trip shows
         # nothing is dropped between the answer tool and the collect step.
+        record = _schema(UNIT_SCHEMA_ID)["properties"]["findings"]["items"][
+            "properties"
+        ]["emission_record"]["properties"]
         finding = dict.fromkeys(FINDING_KEYS + ("title", "impact"), "x") | {
             "new_line": 3,
             "tier": 1,
+            "emission_record": dict.fromkeys(record, "x"),
         }
         answer = model(
             summary="One handler, one finding.", findings=[finding]
