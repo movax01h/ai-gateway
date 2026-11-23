@@ -1218,14 +1218,14 @@ word-list = ["pyahocorasick"]
 
 [[package]]
 name = "diff-cover"
-version = "11.0.1"
+version = "11.0.2"
 description = "Run coverage and linting reports on diffs"
 optional = false
 python-versions = ">=3.11"
 groups = ["test"]
 files = [
-    {file = "diff_cover-11.0.1-py3-none-any.whl", hash = "sha256:40d559e47ee9bcec35194fd9726d408a242608c54fbd0cdab244ae4324c1c7da"},
-    {file = "diff_cover-11.0.1.tar.gz", hash = "sha256:18fff3b9df6f28c62953859fb16302d1dec0189d79f3ea437c0bcad5cc60dcf3"},
+    {file = "diff_cover-11.0.2-py3-none-any.whl", hash = "sha256:27dc1101dea8bd8b69095dd09a79dea370c2d65a9145fcf48d1ae71f3aab25e6"},
+    {file = "diff_cover-11.0.2.tar.gz", hash = "sha256:8e7b9cc0c5fd4cfa28c46e028a64afd0091af150bb4a460d890817271dc69902"},
 ]
 
 [package.dependencies]
