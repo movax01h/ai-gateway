@@ -7,7 +7,6 @@ from uuid import uuid4
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.errors import GraphRecursionError
-from langgraph.graph import StateGraph
 from langgraph.types import Command
 from structlog.testing import capture_logs
 
@@ -16,7 +15,9 @@ from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
-from duo_workflow_service.agent_platform.core.inbox import RunInbox
+from duo_workflow_service.agent_platform.core.inbox import (
+    RunInbox,
+)
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -53,7 +54,6 @@ from duo_workflow_service.checkpointer.content_retention import (
     reduce_ui_chat_log_entry,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow import (
-    GitLabWorkflow,
     WorkflowStatusEventEnum,
 )
 from duo_workflow_service.checkpointer.notifier import UserInterface
@@ -113,70 +113,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     @pytest.fixture(name="flow_type")
     def flow_type_fixture(self) -> GLReportingEventContext:
         return GLReportingEventContext.from_workflow_definition("chat")
-
-    @pytest.fixture(name="mock_state_graph")
-    def mock_state_graph_fixture(
-        self,
-        mock_fetch_workflow_and_container_data,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
-    ):
-        # Create mock StateGraph and compiled graph
-        mock_state_graph = Mock(spec=StateGraph)
-        mock_state_graph.nodes = {}
-        mock_compiled_graph = Mock()
-
-        # Mock the compiled graph's astream method
-        async def mock_astream(*_args, **_kwargs):
-            yield ("values", {"status": "running"})
-            yield ("updates", [{"step": "agent_processing"}])
-
-        # mock_compiled_graph.astream = AsyncMock(side_effect=mock_astream)
-        mock_compiled_graph.astream = Mock(return_value=mock_astream())
-        mock_state_graph.compile.return_value = mock_compiled_graph
-        ui_notifier = MagicMock(spec=UserInterface)
-        ui_notifier.ui_chat_log = []
-
-        with (
-            patch(
-                "duo_workflow_service.workflows.abstract_workflow.empty_workflow_config",
-                return_value={
-                    "agent_privileges_names": [],
-                    "pre_approved_agent_privileges_names": [],
-                    "allow_agent_to_request_user": False,
-                    "mcp_enabled": False,
-                    "first_checkpoint": None,
-                    "workflow_status": "",
-                    "gitlab_host": "",
-                },
-            ),
-            patch(
-                "duo_workflow_service.workflows.abstract_workflow.UserInterface",
-                return_value=ui_notifier,
-            ),
-            patch(
-                "duo_workflow_service.gitlab.gitlab_api.GitLabUrlParser"
-            ) as mock_parser,
-            patch(
-                "duo_workflow_service.agent_platform.v1.flows.graph_builder.StateGraph",
-                return_value=mock_state_graph,
-            ),
-        ):
-            mock_parser.extract_host_from_url.return_value = "gitlab.com"
-
-            yield mock_state_graph
-
-    @pytest.fixture(name="mock_checkpointer")
-    def mock_checkpointer_fixture(self):
-        mock_checkpointer = Mock(spec=GitLabWorkflow)
-        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.START
-        mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
-        mock_gitlab_workflow = AsyncMock()
-        mock_gitlab_workflow.__aenter__ = AsyncMock(return_value=mock_checkpointer)
-        mock_gitlab_workflow.__aexit__ = AsyncMock(return_value=None)
-        with patch(
-            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow",
-            return_value=mock_gitlab_workflow,
-        ):
-            yield mock_checkpointer
 
     @pytest.fixture(name="mock_tools_registry")
     def mock_tools_registry_fixture(self):

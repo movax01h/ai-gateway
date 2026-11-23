@@ -23,6 +23,7 @@ from duo_workflow_service.agent_platform.core.inbox import (
     Address,
     Answer,
     Claimant,
+    Component,
     Message,
     RunInbox,
     TaskId,
@@ -2541,6 +2542,47 @@ def state_at_limit_fixture(base_flow_state, component_name):
 
 class TestAgentNodeMaxCycles:
     """Test suite for AgentNode max_cycles soft limit."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "sender,expected_count",
+        [(User(), 1), (Component(name="supervisor"), 4)],
+        ids=["a_message_from_the_user_starts_it_again", "a_component_cannot"],
+    )
+    async def test_the_cycle_budget_starts_again_only_for_a_message_from_the_user(
+        self,
+        make_agent_node,
+        mock_prompt,
+        state_at_limit,
+        component_name,
+        sender,
+        expected_count,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """A person who writes to an agent can break its loop, and an agent writing to another can't."""
+        mock_prompt.message_tpl = Mock()
+        mock_prompt.render_message = AsyncMock(
+            return_value=HumanMessage(content="rendered")
+        )
+        agent_node = make_agent_node()
+        agent_node.claimant = lambda _state: Claimant(accepts_unaddressed=True)
+        inbox = RunInbox()
+        inbox.put(
+            Message(
+                id="next",
+                content=(TextPart(type="text", text="next"),),
+                sender=sender,
+            )
+        )
+        graph = StateGraph(FlowState, context_schema=RunInbox)
+        graph.add_node("agent", agent_node.run)
+        graph.add_edge(START, "agent")
+        graph.add_edge("agent", END)
+
+        state = await graph.compile().ainvoke(state_at_limit, context=inbox)
+
+        assert state["context"][component_name]["cycle_count"] == expected_count
 
     @pytest.mark.asyncio
     async def test_cycle_count_accumulates_across_calls(

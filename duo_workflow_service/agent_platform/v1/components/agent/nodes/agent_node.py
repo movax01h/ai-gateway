@@ -31,6 +31,7 @@ from duo_workflow_service.agent_platform.core.inbox import (
     Claimant,
     InboundMessage,
     RunInbox,
+    User,
     current_task_id,
 )
 from duo_workflow_service.agent_platform.core.inbox.view import inbound_messages_view
@@ -446,8 +447,14 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             "web_search_enabled": False,
         }
 
-    def _check_and_increment_cycle_count(self, state: FlowState) -> tuple[int, dict]:
+    def _check_and_increment_cycle_count(
+        self, state: FlowState, *, start_again: bool = False
+    ) -> tuple[int, dict]:
         """Read current cycle count from state, increment it, and return updated state fragment.
+
+        Args:
+            state: The flow state the count is read from.
+            start_again: Count from zero, whatever the state holds.
 
         Returns:
             A tuple of (new_cycle_count, state_update_dict).
@@ -458,7 +465,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             return 0, {}
 
         cycle_count_iokey = budget.cycle_count_key.to_iokey(state)
-        current_count: int = cycle_count_iokey.value_from_state(state) or 0
+        current_count: int = (
+            0 if start_again else cycle_count_iokey.value_from_state(state) or 0
+        )
         new_count = current_count + 1
         state_update = cycle_count_iokey.to_nested_dict(new_count)
         return new_count, state_update
@@ -744,8 +753,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             restore_message_consistency(history), text_only_turns
         )
 
+        # A message from the user starts the budget again: whoever writes to the agent can break its loop. A message
+        # a component wrote can't, so agents writing to each other don't restart their own budgets.
         cycle_count, cycle_count_state_update = self._check_and_increment_cycle_count(
-            state
+            state,
+            start_again=any(isinstance(message.sender, User) for message in claimed),
         )
         budget = self._cycle_budget
         history, wrap_up_active = await self._with_cycle_budget_message(
