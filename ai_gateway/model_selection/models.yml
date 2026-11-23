@@ -401,6 +401,25 @@ models:
     prompt_params:
       vertex_location: global
 
+  - name: "Claude Fable 5.2"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "claude_fable_5_2_vertex"
+    description: "For complex agentic coding and enterprise work."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000  # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-fable-5-2
+    model_class_provider: litellm
+    uses_cache_breakpoints: true
+    family:
+      - claude
+    effort_levels: *claude_adaptive_effort
+    params:
+      model: "claude-fable-5-2"
+      custom_llm_provider: "vertex_ai"
+      max_tokens: 128_000
+      max_retries: 1
+    prompt_params:
+      vertex_location: global
+
   - name: "Claude Fable 5.1"
     provider: "Bedrock"
     gitlab_identifier: "claude_fable_5_1_bedrock"
@@ -414,6 +433,23 @@ models:
     effort_levels: *claude_adaptive_bedrock_effort
     params:
       model: bedrock/global.anthropic.claude-fable-5-1
+      custom_llm_provider: bedrock
+      max_tokens: 128_000
+      max_retries: 1
+
+  - name: "Claude Fable 5.2"
+    provider: "Bedrock"
+    gitlab_identifier: "claude_fable_5_2_bedrock"
+    description: "For complex agentic coding and enterprise work."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-fable-5-2
+    model_class_provider: litellm
+    uses_cache_breakpoints: true
+    family:
+      - claude
+    effort_levels: *claude_adaptive_bedrock_effort
+    params:
+      model: bedrock/global.anthropic.claude-fable-5-2
       custom_llm_provider: bedrock
       max_tokens: 128_000
       max_retries: 1
@@ -1373,6 +1409,97 @@ models:
     effort_levels: *gpt_5_2_effort
     params:
       model: bedrock_mantle/openai.gpt-6.1-terra
+      custom_llm_provider: bedrock_mantle
+      max_tokens: 128_000
+
+  - name: "GPT-6 Astra"
+    provider: "Bedrock"
+    gitlab_identifier: "gpt_6_astra_bedrock"
+    description: "OpenAI's most capable model, built for the hardest end-to-end work."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1050000  # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-astra.html
+    model_class_provider: litellm
+    family:
+      - gpt_5
+    effort_levels: *gpt_5_2_effort
+    params:
+      model: bedrock_mantle/openai.gpt-6-astra
+      custom_llm_provider: bedrock_mantle
+      max_tokens: 128_000
+
+  - name: "GPT-6.2 Astra"
+    provider: "Bedrock"
+    gitlab_identifier: "gpt_6_2_astra_bedrock"
+    description: "OpenAI's most capable model for the hardest projects, from start to finish."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1050000  # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-2-astra.html
+    model_class_provider: litellm
+    family:
+      - gpt_5
+    effort_levels: *gpt_5_2_effort
+    params:
+      model: bedrock_mantle/openai.gpt-6.2-astra
+      custom_llm_provider: bedrock_mantle
+      max_tokens: 128_000
+
+  - name: "GPT-6.1 Sol"
+    provider: "Bedrock"
+    gitlab_identifier: "gpt_6_1_sol_bedrock"
+    description: "OpenAI's model with near-Astra performance for complex work at a lower cost."
+    cost_indicator: "$$$"
+    max_context_tokens: 1000000  # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-sol.html
+    model_class_provider: litellm
+    family:
+      - gpt_5
+    effort_levels: *gpt_5_2_effort
+    params:
+      model: bedrock_mantle/openai.gpt-6.1-sol
+      custom_llm_provider: bedrock_mantle
+      max_tokens: 128_000
+
+  - name: "GPT-6.2 Sol"
+    provider: "Bedrock"
+    gitlab_identifier: "gpt_6_2_sol_bedrock"
+    description: "OpenAI's go-to model for everyday work, from coding to powering agents at scale."
+    cost_indicator: "$$$"
+    max_context_tokens: 1050000  # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-2-sol.html
+    model_class_provider: litellm
+    family:
+      - gpt_5
+    effort_levels: *gpt_5_2_effort
+    params:
+      model: bedrock_mantle/openai.gpt-6.2-sol
+      custom_llm_provider: bedrock_mantle
+      max_tokens: 128_000
+
+  - name: "GPT-6 Sol"
+    provider: "Bedrock"
+    gitlab_identifier: "gpt_6_sol_bedrock"
+    description: "OpenAI's cost-efficient model for professional work and coding."
+    cost_indicator: "$$$"
+    max_context_tokens: 1050000  # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-sol.html
+    model_class_provider: litellm
+    family:
+      - gpt_5
+    effort_levels: *gpt_5_2_effort
+    params:
+      model: bedrock_mantle/openai.gpt-6-sol
+      custom_llm_provider: bedrock_mantle
+      max_tokens: 128_000
+
+  - name: "GPT-6 Luna"
+    provider: "Bedrock"
+    gitlab_identifier: "gpt_6_luna_bedrock"
+    requires_paid_credits: false
+    description: "OpenAI's fastest and most affordable model."
+    cost_indicator: "$$"
+    max_context_tokens: 1050000  # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-luna.html
+    model_class_provider: litellm
+    family:
+      - gpt_5
+    effort_levels: *gpt_5_2_effort
+    params:
+      model: bedrock_mantle/openai.gpt-6-luna
       custom_llm_provider: bedrock_mantle
       max_tokens: 128_000
 
