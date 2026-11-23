@@ -1156,7 +1156,9 @@ def test_get_proxy_models_for_provider(selection_config, fs: FakeFilesystem):
               - name: Claude Opus
                 gitlab_identifier: claude_opus
                 max_context_tokens: 200000
-                proxy_provider: anthropic
+                proxy_provider:
+                  - anthropic
+                  - openai
                 model_class_provider: anthropic
                 params:
                   model: claude-opus-4-5-20251101
@@ -1193,11 +1195,97 @@ def test_get_proxy_models_for_provider(selection_config, fs: FakeFilesystem):
 
     # Test openai provider
     openai_models = selection_config.get_proxy_models_for_provider("openai")
-    assert set(openai_models) == {"gpt-5"}
+    assert set(openai_models) == {"claude-opus-4-5-20251101", "gpt-5"}
 
     # Test unknown provider returns empty list
     unknown_models = selection_config.get_proxy_models_for_provider("unknown")
     assert not unknown_models
+
+
+@pytest.mark.parametrize(
+    ("proxy_provider", "expected"),
+    [
+        ("anthropic", "anthropic"),
+        (["anthropic", "openai"], ["anthropic", "openai"]),
+        (None, None),
+        ([], []),
+    ],
+)
+def test_proxy_provider_accepts_and_preserves_scalar_list_and_empty_values(
+    proxy_provider, expected
+):
+    """A scalar remains serialized as a scalar while multi-protocol values stay lists."""
+    definition = ChatAnthropicDefinition(
+        name="Claude",
+        gitlab_identifier="claude",
+        max_context_tokens=200000,
+        proxy_provider=proxy_provider,
+        params={"model": "claude-test"},
+    )
+
+    assert definition.model_dump()["proxy_provider"] == expected
+
+
+@pytest.mark.parametrize(
+    "proxy_provider",
+    [1, {"anthropic": True}, ["anthropic", 1]],
+)
+def test_proxy_provider_rejects_non_string_or_non_list_values(proxy_provider):
+    """Invalid protocol shapes must not silently broaden the proxy allowlist."""
+    with pytest.raises(ValidationError):
+        ChatAnthropicDefinition(
+            name="Claude",
+            gitlab_identifier="claude",
+            max_context_tokens=200000,
+            proxy_provider=proxy_provider,
+            params={"model": "claude-test"},
+        )
+
+
+@pytest.mark.parametrize(
+    "proxy_provider_yaml",
+    [
+        "proxy_provider: !!set {anthropic: null, openai: null}",
+        "proxy_provider: [!!binary YW50aHJvcGlj]",
+    ],
+)
+def test_proxy_provider_rejects_non_list_yaml_collections_and_non_string_elements(
+    proxy_provider_yaml,
+):
+    """YAML sets and bytes cannot be coerced into proxy protocol allowlist entries."""
+    proxy_provider = yaml.safe_load(proxy_provider_yaml)["proxy_provider"]
+
+    with pytest.raises(ValidationError):
+        ChatAnthropicDefinition(
+            name="Claude",
+            gitlab_identifier="claude",
+            max_context_tokens=200000,
+            proxy_provider=proxy_provider,
+            params={"model": "claude-test"},
+        )
+
+
+def test_proxy_provider_matching_is_exact_and_empty_values_deny_access():
+    """Protocol names are exact allowlist entries, never prefixes or implicit defaults."""
+    definition = ChatAnthropicDefinition(
+        name="Claude",
+        gitlab_identifier="claude",
+        max_context_tokens=200000,
+        proxy_provider=["anthropic", "openai"],
+        params={"model": "claude-test"},
+    )
+    no_proxy_definition = ChatAnthropicDefinition(
+        name="No proxy",
+        gitlab_identifier="no_proxy",
+        max_context_tokens=200000,
+        proxy_provider=[],
+        params={"model": "claude-no-proxy"},
+    )
+
+    assert definition.supports_proxy_provider("anthropic")
+    assert definition.supports_proxy_provider("openai")
+    assert not definition.supports_proxy_provider("anthropic-compatible")
+    assert not no_proxy_definition.supports_proxy_provider("anthropic")
 
 
 def test_selectable_models_have_required_fields(selection_config):

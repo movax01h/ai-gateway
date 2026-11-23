@@ -305,6 +305,27 @@ def test_upstream_locations_only_cover_vertex_proxy_models():
     assert "text-embedding-005" not in locations
 
 
+def test_upstream_locations_include_multi_protocol_vertex_proxy_model(monkeypatch):
+    """A model exposed by Vertex alongside another protocol retains its location."""
+    from ai_gateway.proxy.clients.vertex_ai import _load_upstream_locations
+
+    config = ModelSelectionConfig(default_models_override={})
+    vertex_definition = config.get_llm_definitions()["claude_sonnet_5_vertex"]
+    multi_protocol_definition = vertex_definition.model_copy(
+        update={"proxy_provider": ["vertex-ai", "anthropic"]}
+    )
+    monkeypatch.setattr(
+        config,
+        "get_llm_definitions",
+        lambda: {
+            multi_protocol_definition.gitlab_identifier: multi_protocol_definition
+        },
+    )
+    monkeypatch.setattr(ModelSelectionConfig, "instance", lambda: config)
+
+    assert _load_upstream_locations() == {"claude-sonnet-5": "global"}
+
+
 class TestPathParams:
     """Test PathParams validation and extraction."""
 

@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import fastapi
 import pytest
@@ -9,6 +9,7 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from pydantic import SecretStr
 
 from ai_gateway.model_selection import ModelSelectionConfig
+from ai_gateway.model_selection.model_selection_config import ChatAnthropicDefinition
 from ai_gateway.models.base import ANTHROPIC_FACILITATOR_KEY_HEADER
 from ai_gateway.proxy.clients import AnthropicProxyModelFactory, ProxyClient
 from ai_gateway.proxy.clients.anthropic import (
@@ -372,6 +373,34 @@ class TestAnthropicApiKeyResolution:
         with patch.object(ModelSelectionConfig, "instance", return_value=config):
             assert _resolve_api_key("claude-haiku-4-5-20251001") == "env-key"
 
+    def test_resolves_api_key_from_first_matching_multi_protocol_definition(
+        self, monkeypatch
+    ):
+        """An earlier same-name OpenAI-only definition cannot supply Anthropic credentials."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+        config = ModelSelectionConfig(default_models_override={})
+        config.get_llm_definitions = MagicMock(
+            return_value={
+                "openai_only": ChatAnthropicDefinition(
+                    name="OpenAI-only",
+                    gitlab_identifier="openai_only",
+                    max_context_tokens=200000,
+                    proxy_provider="openai",
+                    params={"model": "shared-model", "api_key": "wrong-key"},
+                ),
+                "anthropic_and_openai": ChatAnthropicDefinition(
+                    name="Anthropic and OpenAI",
+                    gitlab_identifier="anthropic_and_openai",
+                    max_context_tokens=200000,
+                    proxy_provider=["anthropic", "openai"],
+                    params={"model": "shared-model", "api_key": "right-key"},
+                ),
+            }
+        )
+
+        with patch.object(ModelSelectionConfig, "instance", return_value=config):
+            assert _resolve_api_key("shared-model") == "right-key"
+
     def test_raises_when_no_key_available(self, monkeypatch):
         """Missing both per-model key and env var raises HTTP 400."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -515,6 +544,49 @@ class TestAnthropicWorkloadIdentityResolution:
         headers = await _resolve_upstream_auth_headers("not-a-configured-model", {})
 
         assert headers["x-api-key"] == "env-key"
+
+    @pytest.mark.asyncio
+    async def test_multi_protocol_definition_uses_wif_after_skipping_openai_only_match(
+        self, monkeypatch
+    ):
+        """WIF wins for the first Anthropic-capable same-name definition."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+        config = ModelSelectionConfig(default_models_override={})
+        config.get_llm_definitions = MagicMock(
+            return_value={
+                "openai_only": ChatAnthropicDefinition(
+                    name="OpenAI-only",
+                    gitlab_identifier="openai_only",
+                    max_context_tokens=200000,
+                    proxy_provider="openai",
+                    params={"model": "shared-model", "api_key": "wrong-key"},
+                ),
+                "anthropic_and_openai": ChatAnthropicDefinition(
+                    name="Anthropic and OpenAI",
+                    gitlab_identifier="anthropic_and_openai",
+                    max_context_tokens=200000,
+                    proxy_provider=["anthropic", "openai"],
+                    params={
+                        "model": "shared-model",
+                        "workload_identity": {
+                            "federation_rule_id": "fdrl_test",
+                            "organization_id": "00000000-0000-0000-0000-000000000000",
+                            "service_account_id": "svac_test",
+                        },
+                    },
+                ),
+            }
+        )
+
+        with patch.object(ModelSelectionConfig, "instance", return_value=config):
+            with patch(
+                "ai_gateway.auth.anthropic_wif.access_token",
+                return_value="sk-ant-oat01-x",
+            ):
+                headers = await _resolve_upstream_auth_headers("shared-model", {})
+
+        assert headers["Authorization"] == "Bearer sk-ant-oat01-x"
+        assert "x-api-key" not in headers
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("wif_config")
