@@ -252,6 +252,27 @@ instructions:
         fields) without both checks — even if the read content is not echoed verbatim in the output,
         the read itself crosses the security boundary.
 
+  - name: Duo Workflow Tools — untrusted git and prose output
+    fileFilters:
+      - "duo_workflow_service/tools/**/*.py"
+      - "duo_workflow_service/security/prompt_security.py"
+      - "!tests/**/*"
+    instructions: |
+      Tools that return git data or contributor-authored text hand attacker-controlled content to the model.
+      Verify:
+      1. When a tool gets an entry in `TOOL_SECURITY_OVERRIDES` that drops a sanitiser (for example
+        `strip_hidden_html_comments` so a patch keeps its code comments), check that prose fields in the same
+        output (commit subject and body, descriptions, titles) are still sanitised in the tool itself before
+        rendering. Why: the override applies to the whole response, so hidden text in prose would otherwise
+        reach the model unfiltered.
+      1. When a tool accepts a full or abbreviated commit SHA and resolves it with git (`rev-parse`, `show`),
+        verify the resolved SHA starts with the value the caller passed, or refuse. Why: git tries ref names
+        before abbreviated hashes, so a tag or branch named after a SHA prefix can make the tool answer with a
+        different commit.
+      1. Flag a tool description, error or omission hint that tells the model to retry with a narrowing
+        parameter (such as `path`) in a case where that parameter cannot change the outcome. Why: the model
+        keeps repeating the same failing call. Say what to do instead.
+
   - name: gRPC and Protocol Buffers
     fileFilters:
       - "contract/**/*.proto"
