@@ -1,6 +1,6 @@
-"""Pure helpers that read BL findings, shared by the dedup and report-writer tools.
+"""The BL ``Finding`` type and pure helpers, shared by the dedup and report-writer tools.
 
-No I/O and no tool classes: they read fields off finding dicts and parse step outputs. Tools import from here, and
+No I/O and no tool classes: they parse finding dicts and step outputs. Tools import from here, and
 nothing here imports from ``duo_workflow_service.tools``.
 """
 
@@ -17,14 +17,14 @@ from duo_workflow_service.security.secret_redaction import redact_secrets
 FindingDict = dict[str, Any]
 
 
-def cwe_digits(finding: FindingDict) -> str:
+def _cwe_digits(finding: FindingDict) -> str:
     """The digits of the finding's CWE (``"CWE-639"`` -> ``"639"``); ``""`` when it has none."""
     raw = str(finding.get("cwe") or finding.get("CWE") or "")
     m = re.search(r"(\d+)", raw)
     return m.group(1) if m else ""
 
 
-def line_of(finding: FindingDict) -> int:
+def _line_of(finding: FindingDict) -> int:
     """The finding's line, from the first line key holding an integer; ``0`` when none does."""
     for k in ("new_line", "line", "start_line", "lineNumber"):
         v = finding.get(k)
@@ -40,40 +40,22 @@ def line_of(finding: FindingDict) -> int:
 WHITESPACE_RUN = re.compile(r"\s+")
 
 
-def excerpt_of(finding: FindingDict) -> str:
+def _excerpt_of(finding: FindingDict) -> str:
     """The finding's quoted code; ``""`` when it carries none."""
     return str(finding.get("code_excerpt") or finding.get("excerpt") or "")
 
 
-def norm_excerpt(finding: FindingDict) -> str:
-    """Whitespace/case-normalized code excerpt — the strongest same-defect key:
+def _verdict_of(finding: FindingDict) -> str:
+    """The adjudicator's verdict, normalized.
 
-    two findings that cite the SAME source statement are the same defect no matter what CWE/line the LLM tagged (this is
-    what facet-explosion looks like).
+    ``""`` when the finding carries none.
     """
-    return _normalize(excerpt_of(finding))
+    return str(finding.get("verdict") or "").strip().upper()
 
 
-def _normalize(excerpt: str) -> str:
-    return WHITESPACE_RUN.sub(" ", excerpt.strip().lower())
-
-
-def dedup_key(f: FindingDict, cwe: str | None = None) -> tuple[str, str, int, str]:
-    """The exact-dedup identity of a finding: ``(cwe, file, line bucket, normalized excerpt)``.
-
-    The line bucket absorbs the LLM's +/-few-line anchor jitter on ONE site; the excerpt keeps two DIFFERENT statements
-    that land in the same bucket apart. Adjacent sites on a short stride (N near-identical resolvers 2-3 lines apart)
-    share a bucket but quote different code, so without the excerpt in the key all but one would be silently merged.
-
-    ``cwe`` exists only so a caller that has already computed ``cwe_digits(f)`` need not recompute it; omitting it is
-    always correct.
-    """
-    return (
-        cwe if cwe is not None else cwe_digits(f),
-        f.get("file") or f.get("path") or "",
-        line_of(f) // 4,
-        norm_excerpt(f),
-    )
+def _audit_clause_of(finding: FindingDict) -> str:
+    """The criterion the adjudicator says it applied (a ``DROP-N`` or ``KEEP-*`` arm)."""
+    return str(finding.get("clause") or "").strip()
 
 
 @dataclass(frozen=True)
@@ -114,15 +96,15 @@ class Finding:
         """
         return cls(
             raw=dict(raw),
-            cwe=cwe_digits(raw),
+            cwe=_cwe_digits(raw),
             file=str(raw.get("file") or raw.get("path") or ""),
-            line=line_of(raw),
-            excerpt=excerpt_of(raw),
+            line=_line_of(raw),
+            excerpt=_excerpt_of(raw),
             body=str(raw.get("body") or ""),
             description=str(raw.get("description") or ""),
             severity=str(raw.get("severity", "")),
-            verdict=verdict_of(raw),
-            clause=audit_clause_of(raw),
+            verdict=_verdict_of(raw),
+            clause=_audit_clause_of(raw),
             evidence=str(
                 raw.get("evidence") or raw.get("triage_evidence") or ""
             ).strip(),
@@ -169,11 +151,21 @@ class Finding:
 
     @property
     def norm_excerpt(self) -> str:
-        """The excerpt normalized as :func:`norm_excerpt` does."""
-        return _normalize(self.excerpt)
+        """Whitespace/case-normalized code excerpt — the strongest same-defect key:
+
+        two findings that cite the SAME source statement are the same defect no matter what CWE/line the LLM tagged
+        (this is what facet-explosion looks like).
+        """
+        return WHITESPACE_RUN.sub(" ", self.excerpt.strip().lower())
 
     def dedup_key(self) -> tuple[str, str, int, str]:
-        """The exact-dedup identity :func:`dedup_key` documents."""
+        """The exact-dedup identity of a finding: ``(cwe, file, line bucket, normalized excerpt)``.
+
+        The line bucket absorbs the LLM's +/-few-line anchor jitter on ONE site; the excerpt keeps two DIFFERENT
+        statements that land in the same bucket apart. Adjacent sites on a short stride (N near-identical resolvers 2-3
+        lines apart) share a bucket but quote different code, so without the excerpt in the key all but one would be
+        silently merged.
+        """
         return (self.cwe, self.file, self.line // 4, self.norm_excerpt)
 
 
@@ -220,19 +212,6 @@ def findings_input(raw: Any, arg: str) -> list[Any]:
             "step most likely failed. Refusing to read it as zero findings."
         )
     return parsed
-
-
-def verdict_of(finding: FindingDict) -> str:
-    """The adjudicator's verdict, normalized.
-
-    ``""`` when the finding carries none.
-    """
-    return str(finding.get("verdict") or "").strip().upper()
-
-
-def audit_clause_of(finding: FindingDict) -> str:
-    """The criterion the adjudicator says it applied (a ``DROP-N`` or ``KEEP-*`` arm)."""
-    return str(finding.get("clause") or "").strip()
 
 
 #: Length bound on the model-authored clause string, in the report and in the
