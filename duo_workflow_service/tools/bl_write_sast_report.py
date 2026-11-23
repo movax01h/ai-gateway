@@ -105,7 +105,7 @@ def _has_substantive_line(lines) -> bool:
 def _collapse_contained_excerpts(findings: List[Finding]) -> List[Finding]:
     """Collapse re-reports that quote a LONGER OR SHORTER SPAN of one site, keeping the fuller quote.
 
-    The exact key in :func:`dedup_key` demands a byte-identical normalized excerpt, so three
+    The exact key in :meth:`Finding.dedup_key` demands a byte-identical normalized excerpt, so three
     re-reports of one defect that quote the statement, the statement plus its trailing ``end``, and
     just the inner line respectively keep three distinct keys and all survive.
 
