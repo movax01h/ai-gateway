@@ -211,13 +211,11 @@ resume doesn't rewrite `goal`.
   mid-resume asks again. Rails consumes such a decision's row before the resume reaches the gateway, so nothing claims
   it a second time.
 - **Bridge.** Where GitLab doesn't declare the mailbox, which is every GitLab version until the server-side queue
-  ships, the engine seeds the inbox from the graph input, with an engine ID (ADR-002 §2), and the entry claims and
-  renders it as it would a row. It's the first production path for a version that opts in. The bridged
-  message lives in a state key until the entry renders it, and the render clears it in the same update. A retry from
-  the input checkpoint seeds it again, and a retry from a later checkpoint doesn't. That's a state key like the one the
-  first alternative rejects, and it's fine here: it holds one message, written only at turn start and never mid-run.
-  Without it, a crash before the render would lose a turn-start message, which is durable in the input checkpoint
-  today.
+  ships, the engine makes the turn's message from the request's `goal`, with an engine ID (ADR-002 §2), and puts it
+  in the run's inbox. The entry claims and renders it as it would a row. It's the first production path for a version
+  that opts in. The message isn't a row and isn't kept in state, so it lasts only as long as its run: a run that ends
+  before the render loses it, and a retry replays the turn without it. The turn-start row closes that gap (§2),
+  because a row stays due until a checkpoint that carries it is saved (§4).
   Decisions ride the resume as today, there are no steers, and there's no row to ack. Nothing is refused, so
   ADR-001's support for older GitLab holds.
 

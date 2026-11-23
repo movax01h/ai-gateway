@@ -103,8 +103,7 @@ The type follows from the fields, whoever builds the message:
 
 `id` comes from the writer. For a mailbox row it's the row's `correlation_id`, a UUID the client creates, so a message
 sent twice maps to the row that already exists. For a delegation it's the `delegate_task` call ID. An input that arrives
-without a row, through the bridge or on a resume (ADR-003 §8), gets its ID from the engine. The bridge stores it with
-the graph input.
+without a row, through the bridge or on a resume (ADR-003 §8), gets its ID from the engine.
 
 ### 3. Input is validated where it enters DWS
 
