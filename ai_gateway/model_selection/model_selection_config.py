@@ -12,6 +12,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictStr,
     TypeAdapter,
     ValidationError,
     field_validator,
@@ -143,7 +144,7 @@ class BaseLLMDefinition(BaseModel):
         description="Semantic tags for this model (e.g. 'small', 'large', 'reasoning'). Used as metadata; resolution is driven by models_for_tags in unit_primitives.yml.",
     )
     deprecation: Optional[DeprecationInfo] = None
-    proxy_provider: Optional[str] = None
+    proxy_provider: str | Annotated[list[StrictStr], Field(strict=True)] | None = None
     # Claude 4.6+ rejects requests ending with an assistant turn (prefill).
     # Opt in by setting to true for models that still accept prefill.
     supports_assistant_prefill: bool = False
@@ -177,6 +178,13 @@ class BaseLLMDefinition(BaseModel):
                 f"effort_levels must be unique and ascending, in the order {list(EFFORT_LEVELS)}"
             )
         return levels
+
+    def supports_proxy_provider(self, provider: str) -> bool:
+        """Return whether this definition is available through a proxy protocol."""
+        if isinstance(self.proxy_provider, list):
+            return provider in self.proxy_provider
+
+        return self.proxy_provider == provider
 
 
 class ChatLiteLLMDefinition(BaseLLMDefinition):
@@ -989,7 +997,7 @@ class ModelSelectionConfig:
         return [
             llm_def.params.model or ""
             for llm_def in llm_definitions.values()
-            if llm_def.proxy_provider == provider
+            if llm_def.supports_proxy_provider(provider)
             and llm_def.params.model
             and self.restricted_flows_for(models=[llm_def.params.model]) is None
         ]

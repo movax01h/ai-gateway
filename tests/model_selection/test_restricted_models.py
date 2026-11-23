@@ -130,6 +130,28 @@ def test_proxy_models_exclude_restricted_models(
     assert "claude-fake-restricted-1" in config.get_proxy_models_for_provider(provider)
 
 
+def test_proxy_models_exclude_restricted_models_with_multiple_protocols(
+    config: ModelSelectionConfig,
+    fake_restricted_model,
+    model_restrictions: list[ModelRestriction],
+):
+    """Restrictions apply independently of how many proxy protocols a model supports."""
+    fake_restricted_model.proxy_provider = ["anthropic", "openai"]
+
+    assert "claude-fake-restricted-1" not in config.get_proxy_models_for_provider(
+        "anthropic"
+    )
+    assert "claude-fake-restricted-1" not in config.get_proxy_models_for_provider(
+        "openai"
+    )
+
+    model_restrictions.clear()
+    assert "claude-fake-restricted-1" in config.get_proxy_models_for_provider(
+        "anthropic"
+    )
+    assert "claude-fake-restricted-1" in config.get_proxy_models_for_provider("openai")
+
+
 def test_vertex_proxy_hard_coded_models_exclude_restricted_models(
     fake_restricted_model,
 ):

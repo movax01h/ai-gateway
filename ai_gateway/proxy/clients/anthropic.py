@@ -83,7 +83,7 @@ def _resolve_api_key(model_name: str) -> str:
     config = ModelSelectionConfig.instance()
     for llm_def in config.get_llm_definitions().values():
         if (
-            llm_def.proxy_provider == _UPSTREAM_SERVICE
+            llm_def.supports_proxy_provider(_UPSTREAM_SERVICE)
             and llm_def.params.model == model_name
         ):
             api_key = getattr(llm_def.params, "api_key", None)
@@ -135,7 +135,7 @@ def _find_workload_identity(model_name: str) -> AnthropicWorkloadIdentityParams 
     config = ModelSelectionConfig.instance()
     for llm_def in config.get_llm_definitions().values():
         if (
-            llm_def.proxy_provider == _UPSTREAM_SERVICE
+            llm_def.supports_proxy_provider(_UPSTREAM_SERVICE)
             and llm_def.params.model == model_name
         ):
             return getattr(llm_def.params, "workload_identity", None)

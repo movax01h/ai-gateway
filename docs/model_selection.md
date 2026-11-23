@@ -291,6 +291,31 @@ handled externally through environment credentials, while FireworksAI requires d
 regional deployment. Custom authentication logic can be implemented by extending the `parameters_for_gitlab_provider`
 method in the `ai_gateway/model_metadata.py` module.
 
+#### Proxy protocol allowlist
+
+`proxy_provider` controls which proxy protocol endpoints may serve a model. It accepts either one protocol string, for
+backward-compatible existing entries, or a list when the same model is intentionally exposed through multiple proxy
+protocols. Protocol values match exactly; an omitted, null, or empty value adds the model to no protocol allowlist
+through this definition.
+The upstream inference service must support every configured protocol; the gateway forwards requests without translating
+between protocols.
+
+Set `proxy_provider` in the shipped `models.yml`, or in a deployment-specific patched copy of that file. Runtime
+`AIGW_MODEL_SELECTION__MODEL_RELEASES` definitions do not enter proxy allowlists, because they are request-scoped;
+`AIGW_MODEL_SELECTION__MODEL_PARAMS` only overrides a definition's `params` and cannot change this setting.
+
+```yaml
+# Existing single-protocol entry remains valid.
+proxy_provider: anthropic
+```
+
+```yaml
+# Expose the same model through both protocol endpoints.
+proxy_provider:
+  - anthropic
+  - openai
+```
+
 #### Per-model Anthropic credentials
 
 Models served directly by Anthropic use the shared `ANTHROPIC_API_KEY` unless their `params` carry a credential of
