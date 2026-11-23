@@ -68,21 +68,22 @@ class TestNonBlankTextBlock:
 
 
 class TestSplitTextBlocks:
-    def test_joins_text_pieces_and_preserves_passthrough_order(self):
+    def test_joins_leading_text_and_keeps_later_text_beside_its_image(self):
         image_a = {"type": "image", "base64": "aaa", "mime_type": "image/png"}
         image_b = {"type": "image", "base64": "bbb", "mime_type": "image/jpeg"}
 
         text, passthrough = split_text_blocks(
             [
                 {"type": "text", "text": "first"},
-                image_a,
                 "second",
+                image_a,
+                "third",
                 image_b,
             ]
         )
 
         assert text == "first\nsecond"
-        assert passthrough == [image_a, image_b]
+        assert passthrough == [image_a, "third", image_b]
 
     def test_all_text_content_yields_no_passthrough(self):
         text, passthrough = split_text_blocks([{"type": "text", "text": "only"}])

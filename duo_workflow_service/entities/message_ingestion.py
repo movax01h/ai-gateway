@@ -13,11 +13,16 @@ from langchain_core.messages import HumanMessage
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 __all__ = [
+    "ATTACHMENTS_KWARG",
     "ContentBlock",
     "assemble_user_message",
     "non_blank_text_block",
     "split_text_blocks",
 ]
+
+# Where a user message keeps the records of its session files. The checkpoint keeps
+# ``additional_kwargs``, and the prompt layer renders only ``additional_context``.
+ATTACHMENTS_KWARG = "attachments"
 
 # Element type of a langchain message content list. The ``str`` arm exists for
 # compatibility with ``HumanMessage(content=...)`` (``list`` is invariant);
@@ -38,15 +43,19 @@ def assemble_user_message(
     text: str,
     additional_context: Optional[list[AdditionalContext]] = None,
     content_blocks: Optional[list[dict[str, Any]]] = None,
+    attachments: Optional[list[dict[str, Any]]] = None,
 ) -> HumanMessage:
     """Build the user-turn ``HumanMessage`` a chat engine appends to history.
 
     Without ``content_blocks`` this reproduces the legacy shape exactly: string
     content plus the additional-context metadata the prompt layer renders. With
     blocks, content becomes a list carrying the text block first, so multimodal
-    payloads ride the message without any per-engine format.
+    payloads ride the message without any per-engine format. ``attachments`` are
+    the turn's session file records, kept under :data:`ATTACHMENTS_KWARG`.
     """
     additional_kwargs: dict[str, Any] = {"additional_context": additional_context}
+    if attachments:
+        additional_kwargs[ATTACHMENTS_KWARG] = list(attachments)
     if not content_blocks:
         return HumanMessage(content=text, additional_kwargs=additional_kwargs)
 
@@ -56,19 +65,20 @@ def assemble_user_message(
 
 
 def split_text_blocks(content: list[Any]) -> tuple[str, list[Any]]:
-    """Split list content into its text and its passthrough (non-text) blocks.
+    """Split list content into its leading text and the blocks that follow it.
 
-    Returns the text pieces joined with newlines, and the remaining blocks in their original order. Callers that re-
-    render text through a jinja template use this to keep non-text blocks (e.g. images) out of the template path, which
-    would otherwise flatten them to their repr.
+    Returns the text pieces before the first non-text block joined with newlines, and every block from there on in its
+    original order. Callers that re-render text through a jinja template use this to keep non-text blocks (e.g. images)
+    out of the template path, which would otherwise flatten them to their repr. Text after the first image stays where
+    it is, so a label written just before its image (see ``attachment_content_blocks``) still sits next to it, and the
+    model can tell several images apart.
     """
     texts: list[str] = []
-    passthrough: list[Any] = []
-    for block in content:
+    for index, block in enumerate(content):
         if isinstance(block, str):
             texts.append(block)
         elif isinstance(block, dict) and block.get("type") == "text":
             texts.append(str(block.get("text", "")))
         else:
-            passthrough.append(block)
-    return "\n".join(texts), passthrough
+            return "\n".join(texts), list(content[index:])
+    return "\n".join(texts), []
