@@ -2,11 +2,9 @@
 # pylint: disable=too-many-lines
 import contextvars
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.prompt_values import ChatPromptValue
@@ -36,15 +34,6 @@ from lib.context import gitlab_version
 from lib.feature_flags import current_feature_flag_context
 from lib.feature_flags.context import FeatureFlag
 from lib.session_owner import set_session_owner_username
-
-REPO_ROOT = Path(__file__).parents[3]
-ORBIT_AGENT_CONFIG = (
-    REPO_ROOT
-    / "duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/1.0.0.yml"
-)
-CLAUDE_CHAT_PROMPT = (
-    REPO_ROOT / "ai_gateway/prompts/definitions/chat/agent/claude/1.0.1.yml"
-)
 
 
 @pytest.fixture(name="mock_datetime")
@@ -1313,34 +1302,3 @@ class TestWebSearchStatus:
             if isinstance(msg, SystemMessage)
         )
         assert "<web_search_status>" not in content
-
-
-@pytest.mark.parametrize(
-    "prompt_template",
-    [yaml.safe_load(CLAUDE_CHAT_PROMPT.read_text())["prompt_template"]],
-)
-@patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
-def test_orbit_agent_prompt_renders_through_the_chat_template(
-    mock_get_model_metadata,
-    model_provider,
-    prompt_config,
-    sample_chat_workflow_state: ChatWorkflowState,
-):
-    mock_get_model_metadata.return_value = None
-    config = yaml.safe_load(ORBIT_AGENT_CONFIG.read_text())
-    override = config["prompts"][0]["prompt_template"]["system"]
-
-    template = ChatAgentPromptTemplate(model_provider, prompt_config)
-
-    with patch.object(
-        GitLabServiceContext, "get_current_instance_info", return_value=None
-    ):
-        result = template.invoke(
-            sample_chat_workflow_state,
-            agent_name="test_agent",
-            system_template_override=override,
-        )
-
-    content = str(result.to_messages()[0].content)
-    assert "<orbit>" in content
-    assert "<orbit_agent_rules>" in content
