@@ -1,0 +1,4 @@
+# Tracked paths that yamllint skips. .yamllint also skips everything in .gitignore.
+
+# Vale rules synced from the GitLab docs project. They are not ours to format.
+docs/.vale/
