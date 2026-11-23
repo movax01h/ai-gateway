@@ -44,6 +44,9 @@ from duo_workflow_service.agent_platform.experimental.flows import (
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs as experimental_list_configs,
 )
+from duo_workflow_service.agent_platform.experimental.flows.tools_config import (
+    parse_component_tools,
+)
 from duo_workflow_service.agent_platform.v1 import list_configs as v1_list_configs
 from duo_workflow_service.agent_platform.v1.chat_engine import ChatFlow
 from duo_workflow_service.agent_platform.v1.components.prompt_reference import (
@@ -419,11 +422,21 @@ def flow_factory(
     # are tracked with their actual names instead of generic "chat"
     agent_name = agent_component.get("name")
 
-    args = {
-        "tools_override": agent_component.get("toolset", []),
+    args: dict[str, Any] = {
         "agent_name_override": agent_name,
         "component_inputs_config": agent_component.get("inputs"),
     }
+
+    # The v1 registry has no tools: key yet.
+    selectors = (
+        parse_component_tools(agent_component)
+        if isinstance(config, ExperimentalFlowConfig)
+        else None
+    )
+    if selectors is None:
+        args["tools_override"] = agent_component.get("toolset", [])
+    else:
+        args["tool_selectors_override"] = selectors
 
     if prompt_template_override := (config.prompts[0] if config.prompts else None):
         if isinstance(prompt_template_override, InMemoryPromptConfig):
