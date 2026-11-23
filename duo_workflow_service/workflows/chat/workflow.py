@@ -31,7 +31,10 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
     decode_gitlab_checkpoint_payload,
 )
-from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.components.tools_registry import (
+    ToolSelector,
+    ToolsRegistry,
+)
 from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
 )
@@ -244,6 +247,7 @@ class Workflow(AbstractWorkflow):
     _agent: ChatAgent
     _tools_executor: ToolsExecutor
     _tools_override: list[str]
+    _tool_selectors_override: Optional[list[ToolSelector]] = None
     _workflow_id: str
     _workflow_type: GLReportingEventContext
     _agent_name_override: Optional[str] = None
@@ -270,6 +274,7 @@ class Workflow(AbstractWorkflow):
         **kwargs,
     ):
         self._tools_override = kwargs.pop("tools_override", None)
+        self._tool_selectors_override = kwargs.pop("tool_selectors_override", None)
         self._agent_name_override = kwargs.pop("agent_name_override", None)
         component_inputs_config = kwargs.pop("component_inputs_config", None)
         kwargs.pop("catalog_items", None)
@@ -925,12 +930,26 @@ class Workflow(AbstractWorkflow):
         self._goal = goal
         graph = StateGraph(ChatWorkflowState)
 
-        if self._tools_override is not None:
-            tools = self._tools_override
+        if self._tool_selectors_override is not None:
+            # A tools: component gets only the tools its selectors name. `tools` is what the author listed, as
+            # for toolset:, so the web search check below still holds when the user's toggle is off.
+            tools = [
+                name
+                for selector in self._tool_selectors_override
+                if selector.server == "gitlab"
+                for name in selector.names
+            ]
+            agents_toolset = tools_registry.toolset(
+                tools_registry.select_tools(self._tool_selectors_override)
+            )
         else:
-            tools = self._get_tools()
-
-        agents_toolset = tools_registry.toolset(tools + tools_registry.mcp_tool_names())
+            if self._tools_override is not None:
+                tools = self._tools_override
+            else:
+                tools = self._get_tools()
+            agents_toolset = tools_registry.toolset(
+                tools + tools_registry.mcp_tool_names()
+            )
 
         # An agent that doesn't list the tool has no web search at all, so the prompt mustn't
         # suggest the user's toggle would turn it on.

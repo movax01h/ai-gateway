@@ -1376,3 +1376,87 @@ def test_prompts_pass_the_security_check():
             flow_config_from_fetched_definition(_fetched_definition())
 
     validate.assert_called_once()
+
+
+def _chat_partial_config(config_cls, version, **component):
+    return config_cls(
+        version=version,
+        environment=CHAT_PARTIAL_ENVIRONMENT,
+        components=[
+            {"name": "agent", "type": "AgentComponent", "prompt_id": "p", **component}
+        ],
+    )
+
+
+class TestChatPartialToolsKey:
+    def test_selectors_travel_to_the_chat_workflow(self):
+        config = _chat_partial_config(
+            ExperimentalPartialFlowConfig,
+            "experimental",
+            tools=[
+                {"server": "orbit", "name": ["list_commands"]},
+                {"server": "gitlab", "name": ["read_file", "get_merge_request"]},
+            ],
+        )
+
+        factory = flow_factory(chat.Workflow, config)
+
+        assert [
+            (selector.server, selector.names)
+            for selector in factory.keywords["tool_selectors_override"]
+        ] == [
+            ("orbit", ["list_commands"]),
+            ("gitlab", ["read_file", "get_merge_request"]),
+        ]
+        assert "tools_override" not in factory.keywords
+
+    def test_an_empty_list_still_turns_the_automatic_tools_off(self):
+        config = _chat_partial_config(
+            ExperimentalPartialFlowConfig, "experimental", tools=[]
+        )
+
+        factory = flow_factory(chat.Workflow, config)
+
+        assert factory.keywords["tool_selectors_override"] == []
+
+    def test_toolset_keeps_the_automatic_tools(self):
+        config = _chat_partial_config(
+            ExperimentalPartialFlowConfig, "experimental", toolset=["read_file"]
+        )
+
+        factory = flow_factory(chat.Workflow, config)
+
+        assert factory.keywords["tools_override"] == ["read_file"]
+        assert "tool_selectors_override" not in factory.keywords
+
+    @pytest.mark.parametrize(
+        "entry",
+        ["read_file", {"get_pipeline_failing_jobs": {"exclude_allow_failure": True}}],
+    )
+    def test_an_entry_that_is_not_a_selector_is_a_config_error(self, entry):
+        with pytest.raises(ValueError, match="must be a selector"):
+            flow_factory(
+                chat.Workflow,
+                _chat_partial_config(
+                    ExperimentalPartialFlowConfig, "experimental", tools=[entry]
+                ),
+            )
+
+    def test_both_keys_are_a_config_error(self):
+        with pytest.raises(ValueError, match='"tools" or "toolset"'):
+            flow_factory(
+                chat.Workflow,
+                _chat_partial_config(
+                    ExperimentalPartialFlowConfig, "experimental", tools=[], toolset=[]
+                ),
+            )
+
+    def test_a_v1_config_ignores_the_tools_key(self):
+        config = _chat_partial_config(
+            PartialFlowConfig, "v1", tools=["read_file"], toolset=["grep"]
+        )
+
+        factory = flow_factory(chat.Workflow, config)
+
+        assert factory.keywords["tools_override"] == ["grep"]
+        assert "tool_selectors_override" not in factory.keywords
