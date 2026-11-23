@@ -605,6 +605,11 @@ def _audit_record(finding: Finding) -> dict:
 # tool. This layer words them and decides the level: what a stage covered is
 # `info`, a cap that actually bound is `warn`. When no stage reported at all,
 # the report says THAT rather than stay silent and read as complete.
+#
+# WHAT WAS LOOKED AT. Every scan whose reviewed set is known lists it in
+# `scan.reviewed_files`, an extra array the 15.2.x schema permits (`[]` when
+# nothing was reviewed; omitted when unknown). Only `target_files` scans also set
+# `partial_scan`. GitLab honors the list for the BLSA scanner only.
 # --------------------------------------------------------------------------- #
 
 _COVERAGE_UNAVAILABLE = (
@@ -715,8 +720,16 @@ class BlWriteSastReportInput(BaseModel):
         description="The scoped-scan file list the flow gave discovery (on MR pipelines, "
         "the MR's changed files). When it names any file, only those files were "
         "reviewed and the report sets `scan.partial_scan` (mode `differential`), "
-        "like diff-based GitLab Advanced SAST, so GitLab does not resolve "
-        "vulnerabilities in files the scan never looked at.",
+        "like diff-based GitLab Advanced SAST; GitLab uses that only when "
+        "comparing MR results. Only this sets `partial_scan`; every scan with a "
+        "known reviewed set also lists it in `scan.reviewed_files`.",
+    )
+    reviewed_units: Optional[Any] = Field(
+        default=None,
+        description="The review units the fan-out was given "
+        "(context:<prep>.tool_responses.units). Their `files` become "
+        "`scan.reviewed_files`: repo-relative paths with '/' separators; an empty "
+        "list means nothing was reviewed. Omitted when unknown.",
     )
     review_coverage: Optional[Any] = Field(
         default=None,
@@ -898,11 +911,13 @@ class BlWriteSastReport(DuoBaseTool):
         coverage: Optional[List[Any]] = None,
         partial: bool = False,
         sources: Optional[dict] = None,
+        reviewed_files: Optional[List[str]] = None,
     ) -> dict:
         """Build the report; `partial` sets `scan.partial_scan` to `{"mode": "differential"}`.
 
-        Only a `target_files` scan is partial, as with diff-based GitLab Advanced SAST. A capped run, or one that lost
-        some units or findings, still ran over the whole repository and stays a full scan.
+        Only a `target_files` scan is partial, as with diff-based GitLab Advanced SAST. Any scan with a known
+        reviewed set lists it in `scan.reviewed_files` (GitLab honors it for BLSA only); `[]` means nothing was
+        reviewed and the field is omitted when the set is unknown.
         """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         identity = {
@@ -1016,6 +1031,8 @@ class BlWriteSastReport(DuoBaseTool):
         }
         if partial:
             scan["partial_scan"] = {"mode": "differential"}
+        if reviewed_files is not None:
+            scan["reviewed_files"] = reviewed_files
         return {
             "version": _REPORT_SCHEMA_VERSION,
             "scan": scan,
@@ -1029,6 +1046,7 @@ class BlWriteSastReport(DuoBaseTool):
         sibling_coverage: Optional[Any] = None,
         triage_coverage: Optional[Any] = None,
         target_files: Optional[Any] = None,
+        reviewed_units: Optional[Any] = None,
     ) -> str:
         parsed = [
             Finding.from_dict(f)
@@ -1066,10 +1084,31 @@ class BlWriteSastReport(DuoBaseTool):
         )
         # Pipeline order: primary review, sibling pass, then triage. Each
         # stage's coverage record is disclosed in scan.messages. Only a
-        # target_files scan is partial; caps and losses leave it a full scan.
+        # target_files scan is partial; any known reviewed set is listed. Units that
+        # failed or were unreadable are left out; an unknown set stays None.
         coverage = [review_coverage, sibling_coverage, triage_coverage]
         partial = bool(resolve_target_files(target_files))
-        report = self._build_report(parsed, coverage, partial=partial, sources=sources)
+        units = None if reviewed_units is None else coerce_to_list(reviewed_units)
+        read = (_coverage_record(review_coverage) or {}).get("reviewed_indexes")
+        read_idx = set(read) if isinstance(read, list) else set()
+        reviewed = None
+        # An empty list is a known scan of nothing, listed as []; None is unknown.
+        if units is not None and (not units or isinstance(read, list)):
+            reviewed = sorted(
+                {
+                    str(f).removeprefix("./").lstrip("/")
+                    for i, u in enumerate(units)
+                    if i in read_idx and isinstance(u, dict)
+                    for f in u.get("files") or []
+                }
+            )
+        report = self._build_report(
+            parsed,
+            coverage,
+            partial=partial,
+            sources=sources,
+            reviewed_files=reviewed,
+        )
         contents = json.dumps(report, ensure_ascii=False, indent=2)
 
         # One file action, the same runWriteFile `create_file_with_contents`

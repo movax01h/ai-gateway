@@ -184,5 +184,8 @@ class BlCollectAndFlatten(DuoBaseTool):
                 "errored": failed,
                 "unread": succeeded - (len(read) - len(garbled)),
                 "unit_noun": unit_noun,
+                # Result positions that were read, so a consumer can tell which
+                # units actually got reviewed.
+                "reviewed_indexes": [i for i, found in read if found is not None],
             },
         }

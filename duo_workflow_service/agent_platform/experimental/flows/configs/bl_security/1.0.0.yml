@@ -374,6 +374,11 @@ components:
       - from: "context:inputs.agent_platform_bl_security_context.target_files"
         as: "target_files"
         optional: true
+      # The units dispatched for review; their files become
+      # scan.reviewed_files.
+      - from: "context:map_reviews_prep.tool_responses.units"
+        as: "reviewed_units"
+        optional: true
       # Each stage's coverage record becomes a sentence in scan.messages.
       # Optional, so a skipped stage still gets a report that calls its
       # coverage unknown.
