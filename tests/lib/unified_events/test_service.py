@@ -375,6 +375,36 @@ class TestUnifiedEventServiceTrack:
 
         assert posted_body().get("instance_id") == expected
 
+    @pytest.mark.parametrize(
+        ("realm", "deployment_type", "expected"),
+        [
+            ("self-managed", None, "self-managed"),
+            ("saas", None, ".com"),
+            ("saas", "", ".com"),
+            ("dedicated", None, "dedicated"),
+            ("self-managed", "dedicated", "dedicated"),
+            ("saas", ".com", ".com"),
+            (None, None, None),
+        ],
+    )
+    def test_deployment_type_falls_back_to_realm(
+        self,
+        service,
+        posted_body,
+        tracked_events,
+        realm,
+        deployment_type,
+        expected,
+    ):
+        context = EventContext(realm=realm, deployment_type=deployment_type)
+        token = current_event_context.set(context)
+        try:
+            service.track("request_duo_chat")
+        finally:
+            current_event_context.reset(token)
+
+        assert posted_body().get("deployment_type") == expected
+
     def test_records_tracked_event_name(self, service, event_context, tracked_events):
         service.track("request_duo_chat")
 
