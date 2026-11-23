@@ -1,7 +1,8 @@
 """The executor boundary: every git command and file read this package makes goes through here.
 
 `runCommand` reports a non-zero exit as a *successful* action and prefixes the body with
-`Exit code: <n>`, so `_unwrap_command_output` strips the envelope and raises `GitCommandError`
+`Exit code: <n>`, so `read_only_git.unwrap_git_output`, the failure policy both git boundaries
+share, strips the envelope and raises `GitCommandError`
 carrying the code and git's diagnostic lines only: git flushes stdout before it dies, so a failed
 `diff` can carry hunks that no exclusion has seen, and those must reach neither a log nor the
 model. A response over the executor's size limit puts its notice *before* that header; the notice
@@ -63,20 +64,15 @@ import structlog
 from langchain_core.tools import ToolException
 
 from contract import contract_pb2
-from duo_workflow_service.bl_security.executor_output import (
-    EXIT_CODE_HEADER,
-    executor_truncated,
-    strip_size_limit_notice,
-)
+from duo_workflow_service.bl_security.executor_output import executor_truncated
 from duo_workflow_service.executor.action import _execute_action, _read_file_fully
 from duo_workflow_service.tools.filesystem import validate_duo_context_exclusions
 from duo_workflow_service.tools.read_only_git import (
     GIT_GLOBAL_FLAGS as HARDENED_GIT_GLOBAL_FLAGS,
 )
 from duo_workflow_service.tools.read_only_git import (
-    PARTIAL_CLONE_MESSAGE,
-    REFUSED_LAZY_FETCH,
-    diagnostics,
+    GitCommandError,
+    unwrap_git_output,
 )
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -142,16 +138,6 @@ _REQUIRED_FLAGS = {
 _SUBMODULE_OPTIONS = ("--ignore-submodules", "--no-ignore-submodules")
 
 
-class GitCommandError(ToolException):
-    """A git command that ran and exited non-zero, carrying the code it exited with."""
-
-    def __init__(self, subcommand: str, code: str, body: str) -> None:
-        super().__init__(
-            f"Error: git {subcommand} exited with {code}: {diagnostics(body)}"
-        )
-        self.code = code
-
-
 class GitRunner:
     """Runs read-only git commands and file reads on the executor."""
 
@@ -209,7 +195,7 @@ class GitRunner:
             ),
         )
 
-        return _unwrap_command_output(raw, argv[0])
+        return unwrap_git_output(raw, argv[0])
 
     async def read_file(self, file_path: str) -> Optional[str]:
         """Read a file from the executor's workspace in full.
@@ -320,34 +306,6 @@ def is_denylisted(path: str) -> bool:
         return True
 
     return False
-
-
-def _unwrap_command_output(raw: str, subcommand: str) -> str:
-    """Strip the executor's exit-code envelope, raising when the command actually failed.
-
-    Without this every parser here reads `Exit code: 0` as its first line of data, and a failed command is
-    indistinguishable from a successful one because the action still reports success. A response over the executor's
-    size limit puts its notice *before* the header; it is stripped to find the header and kept on the returned body so
-    `executor_truncated` still sees it. An executor that returns the output bare is tolerated, so the tool works either
-    way.
-    """
-    text = strip_size_limit_notice(raw)
-    notice = raw[: len(raw) - len(text)]
-
-    match = EXIT_CODE_HEADER.match(text)
-    if not match:
-        return raw
-
-    body = text[match.end() :]
-    # Compared as text: the header admits any non-space token, so a non-numeric code is a
-    # failure to report rather than a parse error to raise from here.
-    code = match.group(1)
-    if code != "0":
-        if REFUSED_LAZY_FETCH.search(body):
-            raise ToolException(PARTIAL_CLONE_MESSAGE.format(subcommand=subcommand))
-        raise GitCommandError(subcommand, code, body)
-
-    return notice + body
 
 
 def _filter_driver_names(raw: str) -> Set[str]:
