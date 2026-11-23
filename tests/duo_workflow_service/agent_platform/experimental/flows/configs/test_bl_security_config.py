@@ -797,7 +797,7 @@ class TestResponseSchemas:
             )
         )
 
-        assert json.loads(out["final_answer"]) == [finding]
+        assert out["final_answer"] == [finding]
 
 
 def _inline_copy() -> FlowConfig:

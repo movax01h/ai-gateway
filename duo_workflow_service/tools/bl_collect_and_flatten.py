@@ -2,7 +2,7 @@
 
 Publishes two keys:
 
-- `final_answer`: the JSON array of the finding dicts of every readable unit
+- `final_answer`: the list of the finding dicts of every readable unit
     answer, flattened in unit order.
 - `coverage`: the per-stage counts (emitted/dispatched/completed/errored/unread)
     and the stage's `unit_noun`. `bl_write_sast_report` turns them into the
@@ -175,11 +175,8 @@ class BlCollectAndFlatten(DuoBaseTool):
                 "bl_collect_and_flatten read unit answers that hold no readable findings",
                 unit_indexes=garbled,
             )
-        flat = [f for _, found in read for f in found or []]
-        final_answer = json.dumps(flat, ensure_ascii=False)
-
         return {
-            "final_answer": final_answer,
+            "final_answer": [f for _, found in read for f in found or []],
             "coverage": {
                 "emitted": emitted_count,
                 "dispatched": len(results),
