@@ -42,6 +42,7 @@ from duo_workflow_service.entities.attachments import (
     attachment_rejection_block,
     partition_attachment_envelopes,
     resolve_attachment_envelopes,
+    session_file_records,
     split_attachment_envelopes,
     with_attachment_references,
 )
@@ -567,6 +568,7 @@ class Workflow(AbstractWorkflow):
                 goal,
                 additional_context,
                 self._attachment_blocks(attachments, rejection),
+                session_file_records(attachments),
             ),
         )
 
@@ -686,6 +688,7 @@ class Workflow(AbstractWorkflow):
                                     goal,
                                     additional_context,
                                     self._attachment_blocks(attachments, rejection),
+                                    session_file_records(attachments),
                                 )
                             ]
 

@@ -204,7 +204,7 @@ def test_an_interrupt_mid_turn_loses_the_image_but_keeps_its_label():
     """
     message = HumanMessage(
         content=[
-            {"type": "text", "text": "[attached file: screenshot.png]"},
+            {"type": "text", "text": "[attachment 1: screenshot.png]"},
             {"type": "image", "base64": PNG_B64, "mime_type": "image/png"},
             {"type": "text", "text": "fix the bug it shows"},
         ]
@@ -222,7 +222,7 @@ def test_an_interrupt_mid_turn_loses_the_image_but_keeps_its_label():
 
     assert PNG_B64 not in persisted
     assert not [block for block in content if block.get("base64")]
-    assert {"type": "text", "text": "[attached file: screenshot.png]"} in content
+    assert {"type": "text", "text": "[attachment 1: screenshot.png]"} in content
     assert {"type": "text", "text": "fix the bug it shows"} in content
     assert any("omitted from history" in block.get("text", "") for block in content)
 

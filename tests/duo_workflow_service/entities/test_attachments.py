@@ -21,11 +21,21 @@ from duo_workflow_service.entities.attachments import (
     parse_attachments,
     partition_attachment_envelopes,
     resolve_attachment_envelopes,
+    session_file_records,
+    session_files_in,
     split_attachment_envelopes,
     with_attachment_references,
 )
 from duo_workflow_service.entities.image_blocks import strip_image_payloads
-from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
+from duo_workflow_service.entities.message_ingestion import (
+    ATTACHMENTS_KWARG,
+    assemble_user_message,
+)
+from duo_workflow_service.gitlab.http_client import (
+    GitLabHttpResponse,
+    checkpoint_decoder,
+)
+from duo_workflow_service.json_encoder.encoder import dumps_checkpoint
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 # Real container headers, because `_verify_declared_type` checks the payload against
@@ -36,6 +46,8 @@ JPEG_BYTES = b"\xff\xd8\xff" + b"pixels"
 WEBP_BYTES = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"pixels"
 
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()
+
+SESSION_FILE_URL = "/api/v4/ai/duo_workflows/workflows/1234/session_files/5"
 
 BYTES_FOR_MIME = {
     "image/png": PNG_BYTES,
@@ -159,6 +171,27 @@ class TestParseAttachments:
 
         assert attachment.filename is None
 
+    def test_keeps_a_session_file_url(self):
+        (attachment,) = parse_attachments([valid_envelope(url=SESSION_FILE_URL)])
+
+        assert attachment.url == SESSION_FILE_URL
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            None,
+            42,
+            "",
+            "https://example.com/a.png",
+            "/api/v4/projects/1/uploads/5",
+            f"{SESSION_FILE_URL}?x=1",
+        ],
+    )
+    def test_drops_anything_but_a_session_file_url(self, url):
+        (attachment,) = parse_attachments([valid_envelope(url=url)])
+
+        assert attachment.url is None
+
     @pytest.mark.parametrize(
         "item,expected",
         [
@@ -267,7 +300,7 @@ class TestFilename:
         )
 
         assert "\n" not in blocks[0]["text"]
-        assert blocks[0]["text"].count("[attached file:") == 1
+        assert blocks[0]["text"].count("[attachment ") == 1
 
     @pytest.mark.parametrize(
         "name",
@@ -407,7 +440,7 @@ class TestContentBlocks:
             [Attachment(mime_type="image/png", data=PNG_B64, filename="diagram.png")]
         )
 
-        assert blocks[0] == {"type": "text", "text": "[attached file: diagram.png]"}
+        assert blocks[0] == {"type": "text", "text": "[attachment 1: diagram.png]"}
         assert blocks[1]["type"] == "image"
 
     def test_the_label_survives_payload_stripping(self):
@@ -419,7 +452,7 @@ class TestContentBlocks:
 
         stripped = strip_image_payloads(blocks)
 
-        assert {"type": "text", "text": "[attached file: diagram.png]"} in stripped
+        assert {"type": "text", "text": "[attachment 1: diagram.png]"} in stripped
         assert not [
             block
             for block in stripped
@@ -435,8 +468,20 @@ class TestContentBlocks:
         )
 
         assert [block.get("text") for block in blocks if block["type"] == "text"] == [
-            "[attached file: a.png]",
-            "[attached file: b.webp]",
+            "[attachment 1: a.png]",
+            "[attachment 2: b.webp]",
+        ]
+
+    def test_the_label_numbers_files_with_the_same_name_and_leaves_out_the_url(self):
+        session_file = Attachment(
+            mime_type="image/png", data=PNG_B64, filename="a.png", url=SESSION_FILE_URL
+        )
+
+        blocks = attachment_content_blocks([session_file, session_file])
+
+        assert [block.get("text") for block in blocks if block["type"] == "text"] == [
+            "[attachment 1: a.png]",
+            "[attachment 2: a.png]",
         ]
 
     def test_an_unnamed_attachment_gets_no_label(self):
@@ -460,6 +505,26 @@ class TestAttachmentReferenceEnvelopes:
         # Empty rather than None: GitLab declares AiAdditionalContext.content
         # non-nullable and fails the whole transcript query when it reads null.
         assert envelope_.content == ""
+        assert PNG_B64 not in envelope_.model_dump_json()
+
+    def test_a_session_file_carries_its_url_so_the_client_can_fetch_it_again(self):
+        (envelope_,) = attachment_reference_envelopes(
+            [
+                Attachment(
+                    mime_type="image/png",
+                    data=PNG_B64,
+                    filename="screenshot.png",
+                    url=SESSION_FILE_URL,
+                )
+            ]
+        )
+
+        assert json.loads(envelope_.content) == {
+            "url": SESSION_FILE_URL,
+            "filename": "screenshot.png",
+        }
+        assert envelope_.id == "attachment-1"
+        assert envelope_.metadata["title"] == "screenshot.png"
         assert PNG_B64 not in envelope_.model_dump_json()
 
     def test_satisfies_the_clients_context_item_contract(self):
@@ -555,9 +620,6 @@ class TestWithAttachmentReferences:
         assert with_attachment_references(context, []) == context
 
 
-SESSION_FILE_URL = "/api/v4/ai/duo_workflows/workflows/1234/session_files/5"
-
-
 @pytest.fixture(name="gitlab_client")
 def gitlab_client_fixture():
     client = MagicMock()
@@ -576,6 +638,66 @@ async def resolve(items, gitlab_client):
 
 def payload_of(item: AdditionalContext) -> dict:
     return json.loads(item.content or "")
+
+
+class TestSessionFileRecords:
+    def test_records_only_session_files_numbered_over_the_whole_turn(self):
+        inline = Attachment(mime_type="image/png", data=PNG_B64, filename="a.png")
+        session_file = Attachment(
+            mime_type="image/png", data=PNG_B64, filename="b.png", url=SESSION_FILE_URL
+        )
+
+        assert session_file_records([inline, session_file]) == [
+            {
+                "id": "attachment-2",
+                "url": SESSION_FILE_URL,
+                "filename": "b.png",
+                "mime_type": "image/png",
+            }
+        ]
+
+    def test_a_session_file_without_a_name_keeps_its_url(self):
+        session_file = Attachment(
+            mime_type="image/png", data=PNG_B64, url=SESSION_FILE_URL
+        )
+
+        (record,) = session_file_records([session_file])
+
+        assert record["url"] == SESSION_FILE_URL
+        assert record["filename"] is None
+
+    def test_the_record_survives_a_checkpoint_that_strips_the_image(self):
+        session_file = Attachment(
+            mime_type="image/png", data=PNG_B64, filename="a.png", url=SESSION_FILE_URL
+        )
+        message = assemble_user_message(
+            "describe this",
+            content_blocks=attachment_content_blocks([session_file]),
+            attachments=session_file_records([session_file]),
+        )
+
+        restored = json.loads(dumps_checkpoint(message), object_hook=checkpoint_decoder)
+
+        assert PNG_B64 not in json.dumps(restored.content)
+        assert session_files_in(restored) == session_file_records([session_file])
+
+    def test_a_message_without_records_has_none(self):
+        assert session_files_in(assemble_user_message("hi")) == []
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            "attachment-1",
+            {"url": SESSION_FILE_URL},
+            {"id": "attachment-1", "url": "/api/v4/projects/1"},
+            {"id": "attachment-1", "url": None},
+        ],
+    )
+    def test_a_record_that_is_not_a_session_file_is_dropped(self, record):
+        message = assemble_user_message("hi")
+        message.additional_kwargs[ATTACHMENTS_KWARG] = [record]
+
+        assert session_files_in(message) == []
 
 
 class TestResolveAttachmentEnvelopes:
@@ -599,6 +721,20 @@ class TestResolveAttachmentEnvelopes:
         gitlab_client.aget.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_an_inline_file_cannot_bring_its_own_url(self, gitlab_client):
+        other_session = "/api/v4/ai/duo_workflows/workflows/999/session_files/5"
+        item = envelope(
+            mime_type="image/png", data=PNG_B64, filename="a.png", url=other_session
+        )
+
+        (resolved,) = await resolve([item], gitlab_client)
+
+        gitlab_client.aget.assert_not_awaited()
+        (attachment,) = parse_attachments([resolved])
+        assert attachment.url is None
+        assert attachment.data == PNG_B64
+
+    @pytest.mark.asyncio
     async def test_replaces_a_reference_with_the_fetched_payload(self, gitlab_client):
         (resolved,) = await resolve(
             [envelope(url=SESSION_FILE_URL, filename="shot.png")], gitlab_client
@@ -611,6 +747,7 @@ class TestResolveAttachmentEnvelopes:
             "mime_type": "image/png",
             "filename": "shot.png",
             "data": PNG_B64,
+            "url": SESSION_FILE_URL,
         }
 
     @pytest.mark.asyncio

@@ -51,8 +51,9 @@ real image parts rather than base64 text.
 
 The one thing that does travel back out is a payload-free *reference* envelope
 (:func:`attachment_reference_envelopes`), which exists purely so the client can
-name what the user attached. It is transport in the same sense as the inbound
-envelope, which is why it lives here rather than with the block shape.
+name what the user attached, and fetch it again when it is a session file. It is
+transport in the same sense as the inbound envelope, which is why it lives here
+rather than with the block shape.
 """
 
 import asyncio
@@ -63,9 +64,11 @@ import re
 from typing import Any, Callable, Iterable, Optional, Sequence
 
 import structlog
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
 
 from duo_workflow_service.entities.image_blocks import image_content_block
+from duo_workflow_service.entities.message_ingestion import ATTACHMENTS_KWARG
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
@@ -85,6 +88,8 @@ __all__ = [
     "partition_attachment_envelopes",
     "payload_matches_mime_type",
     "resolve_attachment_envelopes",
+    "session_file_records",
+    "session_files_in",
     "split_attachment_envelopes",
     "with_attachment_references",
 ]
@@ -131,7 +136,7 @@ MAX_TOTAL_ATTACHMENT_BYTES = 2_500_000
 
 # The caps above measure the decoded image, so the filename is not covered by any
 # of them: a tiny image with a megabyte-long name passes all three. That name is
-# also the part with the longest life, because the `[attached file: ...]` label
+# also the part with the longest life, because the `[attachment N: ...]` label
 # survives payload stripping and stays in the conversation for the rest of the
 # thread. 255 is the limit essentially every filesystem imposes, so a longer name
 # did not come from a file picker.
@@ -153,6 +158,8 @@ class Attachment(BaseModel):
     data: str
     filename: Optional[str] = None
     byte_size: int = 0
+    # The session file path the attachment was fetched from, if it was sent as a reference.
+    url: Optional[str] = None
 
 
 def _decode(data: str, filename: str) -> bytes:
@@ -203,7 +210,7 @@ def _clean_filename(raw: Any, index: int) -> Optional[str]:
 
     The filename is client-supplied and, unlike the payload, is subject to no cap and
     no validation. It reaches three places that all outlive the request: the
-    ``[attached file: ...]`` label, which survives payload stripping and so stays in
+    ``[attachment N: ...]`` label, which survives payload stripping and so stays in
     the conversation for the rest of the thread; the rejection messages, which are read
     by both the user and the model; and the reference envelopes the client renders.
 
@@ -308,6 +315,10 @@ def _parse_one(item: AdditionalContext, index: int) -> Attachment:
     label = filename or f"#{index}"
     mime_type = payload.get("mime_type")
     data = payload.get("data")
+    # Only a session file path is kept: it feeds the message record and the chat log reference, not the label.
+    url = payload.get("url")
+    if not isinstance(url, str) or not _SESSION_FILE_PATH.fullmatch(url):
+        url = None
 
     # Set by resolve_attachment_envelopes when a reference could not be fetched. It
     # travels on the envelope so resolution needs no error channel of its own: the
@@ -345,6 +356,7 @@ def _parse_one(item: AdditionalContext, index: int) -> Attachment:
         data=data,
         filename=filename,
         byte_size=byte_size,
+        url=url,
     )
 
 
@@ -498,8 +510,11 @@ async def _resolve_one_envelope(
         # Malformed content is parse_attachments' to report, with its own message.
         return item
 
-    if not isinstance(payload, dict) or payload.get("data"):
+    if not isinstance(payload, dict):
         return item
+
+    if payload.get("data"):
+        return _without_client_url(item, payload)
 
     url = payload.get("url")
     if not isinstance(url, str) or not url:
@@ -516,6 +531,7 @@ async def _resolve_one_envelope(
             "mime_type": fetched.get("content_type"),
             "filename": payload.get("filename") or fetched.get("filename"),
             "data": fetched.get("data"),
+            "url": url,
         },
     )
 
@@ -593,27 +609,43 @@ def _with_payload(
     return item.model_copy(update={"content": json.dumps(payload)})
 
 
+def _without_client_url(
+    item: AdditionalContext, payload: dict[str, Any]
+) -> AdditionalContext:
+    """Drop the url an inline file arrived with: it was not fetched from this session, so it has no address.
+
+    Only a fetch sets ``url``, so the reference and the record never point at a file the user did not send.
+    """
+    if "url" not in payload:
+        return item
+    return _with_payload(
+        item, {key: value for key, value in payload.items() if key != "url"}
+    )
+
+
 def attachment_content_blocks(
     attachments: Iterable[Attachment],
 ) -> list[dict[str, Any]]:
     """Build the content blocks carrying *attachments*.
 
-    Each named attachment contributes two blocks: a short text block naming the file, then the image itself. The image
-    block uses the shared constructor, so an attached image is indistinguishable from an image any other producer emits.
+    Each named attachment contributes two blocks: a short text label, ``[attachment N: filename]``, then the image
+    itself. N matches the ``attachment-N`` id of its reference and record, so files with the same name stay apart
+    within a turn. N restarts every turn, so it does not name a file across the thread. The image block uses the shared
+    constructor, so an attached image is indistinguishable from an image any other producer emits.
 
     The label exists for what happens *after* this turn.
     :func:`~duo_workflow_service.entities.image_blocks.strip_image_payloads` drops the payload before the message is
     checkpointed and leaves a deliberately provenance-neutral placeholder, so a resumed session would otherwise read as
     a bare ``[image/png omitted from history]`` and the model could not answer even "which file did I send you?". A text
     block is not an image block, so it survives stripping untouched and keeps the filename in the conversation. It costs
-    a handful of tokens and is not a recovery hint -- a user attachment cannot be re-fetched the way a tool-read one
-    can.
+    a handful of tokens and is not a recovery hint: code finds a session file again through the message's record (see
+    :func:`session_file_records`), never through the label.
     """
     blocks: list[dict[str, Any]] = []
-    for attachment in attachments:
+    for index, attachment in enumerate(attachments, start=1):
         if attachment.filename:
             blocks.append(
-                {"type": "text", "text": f"[attached file: {attachment.filename}]"}
+                {"type": "text", "text": f"[attachment {index}: {attachment.filename}]"}
             )
         blocks.append(
             image_content_block(
@@ -653,11 +685,13 @@ def attachment_reference_envelopes(
     :func:`split_attachment_envelopes` claims it out -- so without these the user sees
     no trace of what they attached, on this turn or on any reload of the thread.
 
-    ``content`` is empty rather than unset: the payload must not re-enter the checkpoint
-    by the back door, and these envelopes never reach a prompt template, so there is
-    nothing for the model to read here anyway. It cannot be ``None``, because GitLab
-    declares ``AiAdditionalContext.content`` non-nullable and fails the whole transcript
-    query when it reads null there.
+    ``content`` never holds the payload, which must not re-enter the checkpoint by the
+    back door. For a session file it holds the stored url and filename, so the client
+    can fetch the file again on reload; otherwise it is empty rather than unset, because
+    GitLab declares ``AiAdditionalContext.content`` non-nullable and fails the whole
+    transcript query when it reads null there. These envelopes never reach a prompt
+    template, and the model is not given the url: code finds it in the message's
+    record (see :func:`session_file_records`).
 
     ``id`` is positional rather than the filename because the client interpolates it
     into a DOM id, and a filename carries spaces and dots.
@@ -666,7 +700,11 @@ def attachment_reference_envelopes(
         AdditionalContext(
             category=ATTACHMENTS_CATEGORY,
             id=f"attachment-{index}",
-            content="",
+            content=(
+                json.dumps({"url": attachment.url, "filename": attachment.filename})
+                if attachment.url
+                else ""
+            ),
             metadata={
                 # Keys read by the client's token and popover renderers. `enabled` must
                 # be a bool: its context-item validator rejects the item otherwise.
@@ -694,3 +732,34 @@ def with_attachment_references(
         return None if context is None else list(context)
 
     return list(context or []) + attachment_reference_envelopes(attachments)
+
+
+def session_file_records(attachments: Sequence[Attachment]) -> list[dict[str, Any]]:
+    """Return a record of each session file in *attachments*, for the user message to keep.
+
+    The record, not the label, is where code finds the file again: the label is prose for the model. Each ``id`` is the
+    ``attachment-N`` of the file's label and reference, counted over all of the turn's attachments.
+    """
+    return [
+        {
+            "id": f"attachment-{index}",
+            "url": attachment.url,
+            "filename": attachment.filename,
+            "mime_type": attachment.mime_type,
+        }
+        for index, attachment in enumerate(attachments, start=1)
+        if attachment.url
+    ]
+
+
+def session_files_in(message: BaseMessage) -> list[dict[str, Any]]:
+    """Return the session file records *message* keeps, dropping any that do not point at a session file."""
+    records = message.additional_kwargs.get(ATTACHMENTS_KWARG) or []
+    return [
+        record
+        for record in records
+        if isinstance(record, dict)
+        and isinstance(record.get("id"), str)
+        and isinstance(record.get("url"), str)
+        and _SESSION_FILE_PATH.fullmatch(record["url"])
+    ]

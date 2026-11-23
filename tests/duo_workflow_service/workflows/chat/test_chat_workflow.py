@@ -2703,6 +2703,93 @@ class TestChatAttachments:
         assert image["base64"] == PNG_B64
         assert image["mime_type"] == "image/png"
 
+    async def _user_entry(self, workflow, turn):
+        """The user message and its chat log entry, for the first turn of a chat or a later one."""
+        if turn == "first":
+            state = await workflow.get_graph_input(
+                "what is in this screenshot?", WorkflowStatusEventEnum.START, None
+            )
+        else:
+            state = (await self._later_turn(workflow)).update
+        return state["conversation_history"]["test_prompt"][0], state["ui_chat_log"][0]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("turn", ["first", "later"])
+    async def test_a_session_file_gets_a_chat_log_reference_built_by_the_server(
+        self, workflow_with_project, workflow_id, turn
+    ):
+        url = f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/session_files/5"
+        # The web client's shape: no id and empty metadata.
+        workflow_with_project._additional_context = [
+            AdditionalContext(
+                category="attachments",
+                content=json.dumps({"url": url, "filename": "screenshot.png"}),
+                metadata={},
+            )
+        ]
+        workflow_with_project._http_client.aget = AsyncMock(
+            return_value=GitLabHttpResponse(
+                status_code=200, body={"content_type": "image/png", "data": PNG_B64}
+            )
+        )
+
+        message, user_log = await self._user_entry(workflow_with_project, turn)
+
+        assert message.additional_kwargs["additional_context"] is None
+        assert message.additional_kwargs["attachments"] == [
+            {
+                "id": "attachment-1",
+                "url": url,
+                "filename": "screenshot.png",
+                "mime_type": "image/png",
+            }
+        ]
+        assert {"type": "text", "text": "[attachment 1: screenshot.png]"} in (
+            message.content
+        )
+        (reference,) = user_log["additional_context"]
+        assert reference.id == "attachment-1"
+        assert reference.metadata["title"] == "screenshot.png"
+        assert reference.metadata["secondaryText"] == "image/png"
+        assert json.loads(reference.content) == {
+            "url": url,
+            "filename": "screenshot.png",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_mixed_turn_gives_each_attachment_its_own_chat_log_reference(
+        self, workflow_with_project, workflow_id
+    ):
+        # The client sends either all references or all inline files, so a mixed turn
+        # is not expected. This pins what happens if one arrives anyway.
+        url = f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/session_files/5"
+        workflow_with_project._additional_context = [
+            AdditionalContext(
+                category="attachments",
+                content=json.dumps({"url": url, "filename": "screenshot.png"}),
+            ),
+            attachment_envelope(filename="inline.png"),
+        ]
+        workflow_with_project._http_client.aget = AsyncMock(
+            return_value=GitLabHttpResponse(
+                status_code=200, body={"content_type": "image/png", "data": PNG_B64}
+            )
+        )
+
+        result = await self._later_turn(workflow_with_project)
+
+        message = result.update["conversation_history"]["test_prompt"][0]
+        assert len(image_blocks(message)) == 2
+        references = result.update["ui_chat_log"][0]["additional_context"]
+        assert [reference.metadata["title"] for reference in references] == [
+            "screenshot.png",
+            "inline.png",
+        ]
+        assert [reference.content for reference in references] == [
+            json.dumps({"url": url, "filename": "screenshot.png"}),
+            "",
+        ]
+
     @pytest.fixture(name="workflow_with_session_file")
     def workflow_with_session_file_fixture(self, workflow_with_project, workflow_id):
         url = f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/session_files/5"

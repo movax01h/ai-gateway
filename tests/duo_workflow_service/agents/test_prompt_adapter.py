@@ -17,6 +17,7 @@ from duo_workflow_service.agents.prompt_adapter import (
     ChatAgentPromptTemplate,
     DefaultPromptAdapter,
 )
+from duo_workflow_service.entities.message_ingestion import assemble_user_message
 from duo_workflow_service.entities.state import (
     MAX_TOOL_CALLS_PER_MODEL_CALL,
     ChatWorkflowState,
@@ -259,6 +260,52 @@ def test_chat_agent_prompt_template_multimodal_content_bypasses_jinja(
     assert "What is in this image?" in text_block["text"]
     assert "abc123" not in text_block["text"]
     assert rest == [image_block]
+
+
+@patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+def test_chat_agent_prompt_template_keeps_session_file_records_from_the_provider(
+    mock_get_model_metadata,
+    project,
+    namespace,
+):
+    """The records a user message keeps for code reach neither the rendered text nor the request."""
+    mock_get_model_metadata.return_value = None
+    prompt_config = PromptConfig(
+        name="Chat Agent",
+        unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
+        prompt_template={
+            "system_static": "Base chat.",
+            "user": "{{ message.content }}",
+        },
+    )
+    template = ChatAgentPromptTemplate(ModelClassProvider.ANTHROPIC, prompt_config)
+    url = "/api/v4/ai/duo_workflows/workflows/1/session_files/5"
+    message = assemble_user_message(
+        "What is in this image?",
+        content_blocks=[
+            {"type": "image", "base64": "abc123", "mime_type": "image/png"}
+        ],
+        attachments=[{"id": "attachment-1", "url": url, "filename": "a.png"}],
+    )
+    state = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={"test_agent": [message]},
+        ui_chat_log=[],
+        last_human_input=None,
+        goal="Test goal",
+        project=project,
+        namespace=namespace,
+        approval=None,
+        preapproved_tools=None,
+        denied_tools=None,
+    )
+
+    result = template.invoke(state, agent_name="test_agent")
+
+    user_message = result.to_messages()[-1]
+    assert user_message.additional_kwargs == {}
+    assert url not in str(user_message.content)
 
 
 @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
