@@ -251,15 +251,12 @@ gemnasium-python-dependency_scanning:
       - $PIP_CACHE_DIR
       - $POETRY_CACHE_DIR
       - .venv/
-      - requirements.txt
       - scripts/lib/
       - scripts/vendor/
   before_script:
     - pip install poetry==${POETRY_VERSION}
     - poetry config virtualenvs.in-project true
     - poetry config cache-dir ${POETRY_CACHE_DIR}
-    - poetry self add poetry-plugin-export
-    - poetry export -f requirements.txt --output requirements.txt --without-hashes
     - poetry config --list
 
 .docker:
