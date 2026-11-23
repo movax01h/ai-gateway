@@ -211,6 +211,57 @@ class TestInterruptModeBlocking:
             assert exc_info.value.scan_result == threat_result
 
 
+class TestRunBlockingScan:
+    """Test _run_blocking_scan against HiddenLayer's policy verdict."""
+
+    @pytest.fixture(name="scanner")
+    def scanner_fixture(self):
+        with patch(
+            "duo_workflow_service.security.scanner_factory._get_hiddenlayer_scanner"
+        ) as mock_get_scanner:
+            scanner = mock_get_scanner.return_value
+            scanner.enabled = True
+            yield scanner
+
+    def test_raises_when_policy_blocks(self, scanner):
+        from duo_workflow_service.security.scanner_factory import _run_blocking_scan
+
+        scanner.scan_sync.return_value = ScanResult(
+            detected=True,
+            blocked=True,
+            detection_type=DetectionType.PROMPT_INJECTION,
+        )
+
+        with pytest.raises(PromptInjectionDetectedError) as exc_info:
+            _run_blocking_scan("content", "test_tool")
+
+        assert exc_info.value.tool_name == "test_tool"
+
+    def test_does_not_raise_when_policy_allows_a_detection(self, scanner):
+        from duo_workflow_service.security.scanner_factory import _run_blocking_scan
+
+        scanner.scan_sync.return_value = ScanResult(
+            detected=True,
+            blocked=False,
+            detection_type=DetectionType.PROMPT_INJECTION,
+        )
+
+        _run_blocking_scan("content", "test_tool")
+
+        scanner.scan_sync.assert_called_once_with("content")
+
+    def test_does_not_raise_when_nothing_detected(self, scanner):
+        from duo_workflow_service.security.scanner_factory import _run_blocking_scan
+
+        scanner.scan_sync.return_value = ScanResult(
+            detected=False,
+            blocked=False,
+            detection_type=DetectionType.SAFE,
+        )
+
+        _run_blocking_scan("content", "test_tool")
+
+
 class TestHiddenLayerConfig:
     """Test HiddenLayerConfig configuration handling."""
 
