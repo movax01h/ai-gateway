@@ -984,7 +984,7 @@ class TestFixPipelineConfigVersions:
             ("fix_pipeline_context/system/2.0.1.jinja", "1.0.1"),
             ("fix_pipeline_context/system/2.0.0.jinja", "1.0.0"),
             ("fix_pipeline_context/system/1.0.0.jinja", "1.0.0"),
-            ("fix_pipeline_experiment/system/1.0.0.jinja", "1.0.0"),
+            ("fix_pipeline_experiment/system/1.0.0.jinja", "1.0.1"),
         ],
     )
     def test_failure_categories_partial_is_versioned_per_prompt(
