@@ -138,6 +138,28 @@ _GPT_6_1_TERRA_BEDROCK_MANTLE_METADATA: Dict[str, Any] = {
     "supports_reasoning": True,
 }
 
+_GPT_6_1_SOL_BEDROCK_MANTLE_METADATA: Dict[str, Any] = {
+    **_GPT_6_1_TERRA_BEDROCK_MANTLE_METADATA,
+    "max_input_tokens": 1_000_000,
+    "max_output_tokens": 131_072,
+}
+
+_FABLE_5_2_BEDROCK_METADATA: Dict[str, Any] = {
+    "litellm_provider": "bedrock_converse",
+    "mode": "chat",
+    "max_input_tokens": 1_000_000,
+    "max_output_tokens": 128_000,
+    "max_tokens": 128_000,
+    "supports_function_calling": True,
+    "supports_tool_choice": True,
+    "supports_response_schema": True,
+    "supports_prompt_caching": True,
+    "supports_pdf_input": True,
+    "supports_vision": True,
+    "supports_reasoning": True,
+    "supports_computer_use": True,
+}
+
 BUILTIN_MODEL_METADATA: Dict[str, Dict[str, Any]] = {
     # Bedrock cross-region inference profiles for Claude Opus 4.8.
     "global.anthropic.claude-opus-4-8-v1:0": _OPUS_4_8_BEDROCK_METADATA,
@@ -156,6 +178,16 @@ BUILTIN_MODEL_METADATA: Dict[str, Dict[str, Any]] = {
     "bedrock/global.anthropic.claude-haiku-5-5": _HAIKU_5_5_BEDROCK_METADATA,
     # Bedrock Mantle in-region endpoint for GPT-6.1 Terra.
     "bedrock_mantle/openai.gpt-6.1-terra": _GPT_6_1_TERRA_BEDROCK_MANTLE_METADATA,
+    # Same capabilities as GPT-6.1 Terra on Bedrock Mantle.
+    "bedrock_mantle/openai.gpt-6-astra": _GPT_6_1_TERRA_BEDROCK_MANTLE_METADATA,
+    "bedrock_mantle/openai.gpt-6.2-astra": _GPT_6_1_TERRA_BEDROCK_MANTLE_METADATA,
+    "bedrock_mantle/openai.gpt-6.1-sol": _GPT_6_1_SOL_BEDROCK_MANTLE_METADATA,
+    "bedrock_mantle/openai.gpt-6.2-sol": _GPT_6_1_TERRA_BEDROCK_MANTLE_METADATA,
+    "bedrock_mantle/openai.gpt-6-sol": _GPT_6_1_TERRA_BEDROCK_MANTLE_METADATA,
+    "bedrock_mantle/openai.gpt-6-luna": _GPT_6_1_TERRA_BEDROCK_MANTLE_METADATA,
+    # Bedrock cross-region inference profiles for Claude Fable 5.2.
+    "global.anthropic.claude-fable-5-2": _FABLE_5_2_BEDROCK_METADATA,
+    "bedrock/global.anthropic.claude-fable-5-2": _FABLE_5_2_BEDROCK_METADATA,
 }
 
 
