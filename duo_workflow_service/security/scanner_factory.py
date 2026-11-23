@@ -313,7 +313,8 @@ def _run_blocking_scan(text: str, tool_name: str) -> None:
         )
         return
 
-    if scan_result and (scan_result.blocked or scan_result.detected):
+    # Block only on HiddenLayer's policy verdict. A detection the policy allows is logged above.
+    if scan_result and scan_result.blocked:
         raise PromptInjectionDetectedError(scan_result, tool_name)
 
 
