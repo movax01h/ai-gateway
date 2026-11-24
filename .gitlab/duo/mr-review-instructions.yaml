@@ -388,6 +388,26 @@ instructions:
       1. New Docker images used in jobs are pinned to a specific digest or version tag.
       1. Jobs that modify deployment configuration are reviewed by a maintainer.
       1. Ensure `needs:` dependencies are correct to avoid unnecessary pipeline delays.
+      1. When a MR removes a `needs:` edge or otherwise lets a downstream job (especially a prod or
+        production-like job) run without waiting for an upstream one, ask what the upstream job protected
+        implicitly (for example, dev acting as a canary that stopped prod when it failed). If the downstream job
+        can now fail in a way that leaves harmful partial state, the MR must handle that failure itself or say
+        why it is safe. Why: the ordering was a safety gate nobody wrote down, and removing it moves the risk
+        into the downstream job.
+
+  - name: Multi-step provisioning and ingest scripts
+    fileFilters:
+      - "scripts/**/*.py"
+    instructions: |
+      For scripts that create an external resource and then populate or configure it in a later step
+      (for example create a data store, then import documents), verify:
+      1. If the later step fails, what is left behind? Flag a half-provisioned resource (such as an empty data
+        store) that consumers could treat as valid. Why: an empty resource can change consumer behaviour worse
+        than a missing one, for example by suppressing a fallback that only triggers on `NOT_FOUND`.
+      1. Any cleanup after failure must delete only what the same run created, never a resource that existed
+        before, and must re-raise the original error so the job still fails.
+      1. Cleanup logic that deletes in a production environment must have unit tests for the three cases:
+        newly created and succeeded (kept), newly created and failed (deleted), already existing and failed (kept).
 
   - name: Dependency Management
     fileFilters:
