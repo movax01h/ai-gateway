@@ -8,6 +8,8 @@
 -   The planner prompt has a ``## Tracks`` section (which also tells the
     planner not to create the child work items itself) and one more
     announcement bullet, and a longer call timeout.
+-   The planner prompt's Parallel work bullet describes the split returned in
+    ``tracks``, instead of a split between sub-agents that no step creates.
 -   A ``publish_tracks`` deterministic step runs ``workplan_publish_tracks``
     between the planner and the scoring tail.
 -   The planner has the read-only ``gitlab_graphql`` and never has
@@ -88,6 +90,29 @@ ANNOUNCEMENT_BULLET = (
     "  that each one becomes a child work item when the tracks pass the\n"
     "  checks. When this work item already has child items from an earlier\n"
     "  plan, say that they keep their Workplan.\n"
+)
+
+
+# 1.2.0 asks for a split between sub-agents. 1.3.0 replaces the bullet in
+# place, so the prose describes the same split as ``tracks``.
+PARALLEL_WORK_BULLET_V120 = (
+    "- **Parallel work** — which steps could be handed to a separate\n"
+    "  sub-agent and run at the same time, and which have to stay in\n"
+    "  sequence and why, by step number. For each independent track, say\n"
+    "  what it must not touch, so two agents working at once don't collide.\n"
+    "  Omit this section when the work genuinely is one sequential track -\n"
+    "  don't invent parallelism to fill it.\n"
+)
+
+PARALLEL_WORK_BULLET = (
+    "- **Parallel work** — the split you return in `tracks` (see\n"
+    '  "Tracks" below), for a human. With fewer than two tracks, write\n'
+    "  one line: the plan stays one work item, and why it is not split.\n"
+    "  With two or more tracks, write one line per track: its key, its\n"
+    "  steps in **What**, and the keys of the tracks it waits for,\n"
+    "  exactly as in its `depends_on`. Do not describe a split that you\n"
+    "  do not return, such as steps that sub-agents could run at the\n"
+    "  same time.\n"
 )
 
 
@@ -182,6 +207,12 @@ class TestWorkplanV130PublishTracks:
             section.split()
         )
 
+    def test_planner_prompt_describes_only_the_returned_split(self):
+        system = _system(_config(), PLANNER_PROMPT_ID)
+
+        assert PARALLEL_WORK_BULLET in system
+        assert PARALLEL_WORK_BULLET_V120 not in system
+
     def test_planner_prompt_leaves_child_creation_to_publish_tracks(self):
         section = _tracks_section(_system(_config(), PLANNER_PROMPT_ID))
 
@@ -239,8 +270,10 @@ class TestWorkplanV130MatchesV120OutsideChanges:
 
     def test_planner_prompt_differs_only_by_the_additions(self):
         system = _system(_config(), PLANNER_PROMPT_ID)
-        without = system.replace(_tracks_section(system), "").replace(
-            ANNOUNCEMENT_BULLET, ""
+        without = (
+            system.replace(_tracks_section(system), "")
+            .replace(ANNOUNCEMENT_BULLET, "")
+            .replace(PARALLEL_WORK_BULLET, PARALLEL_WORK_BULLET_V120)
         )
 
         assert without == _system(self._v120(), PLANNER_PROMPT_ID)
