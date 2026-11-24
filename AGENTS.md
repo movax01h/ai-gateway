@@ -612,7 +612,7 @@ Pipelines defined in `.gitlab-ci.yml` and `.gitlab/ci/*.gitlab-ci.yml`:
 Waiting for a pipeline: `glab ci get` is a point-in-time read — prefer
 `glab ci status --wait --branch <branch>` (or poll the API with backoff) over
 tight `sleep && glab ci get` loops. A parent pipeline stays `running` while a
-`strategy: depend` downstream bridge (e.g. `tests:performance`) runs even when
+`strategy: depend` downstream bridge (e.g. `feature-tests`) runs even when
 all its own jobs have finished; check the bridge status before concluding the
 pipeline is stuck.
 
