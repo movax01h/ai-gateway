@@ -167,6 +167,11 @@ class TestQueryVersionSelection:
                 'toolAccessPolicy(projectId: $projectId) @gl_introduced(version: "19.7.0")',
                 id="19.7_has_toolAccessPolicy",
             ),
+            pytest.param(
+                "19.7.0",
+                'webSearchDeniedDomains @gl_introduced(version: "19.7.0")',
+                id="19.7_has_webSearchDeniedDomains",
+            ),
         ],
     )
     def test_version_gate_features(self, version: str, expected_feature: str):

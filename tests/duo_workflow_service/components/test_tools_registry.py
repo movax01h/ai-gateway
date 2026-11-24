@@ -4522,3 +4522,24 @@ async def test_select_tools_returns_each_tool_once(tool_metadata):
                 ToolSelector("gitlab", ["get_pipeline", "get_merge_request"]),
             ]
         ) == ["get_merge_request", "gitlab_get_pipeline"]
+
+
+@pytest.mark.asyncio
+async def test_configure_passes_web_search_denylist_to_tool_metadata(
+    gl_http_client, mcp_tools, project_mock
+):
+    registry = await ToolsRegistry.configure(
+        workflow_config={
+            "workflow_id": "test_workflow",
+            "agent_privileges_names": ["use_git"],
+            "gitlab_host": "gitlab.example.com",
+            "web_search_denied_domains": ["evil.com"],
+        },
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        mcp_tools=mcp_tools,
+    )
+
+    metadata = registry._enabled_tools["run_git_command"].metadata
+    assert metadata["web_search_blocked_domains"] == ["evil.com"]

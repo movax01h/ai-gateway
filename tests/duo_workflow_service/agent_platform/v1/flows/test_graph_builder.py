@@ -177,6 +177,27 @@ class TestFlowGraphBuilder:
             allow_agent_to_request_user=True,
         )
 
+    @pytest.mark.parametrize(
+        ("enable_web_search", "expected"),
+        [(True, ["evil.com"]), (False, None)],
+        ids=["web_search_on", "web_search_off"],
+    )
+    def test_prepare_component_params_passes_the_web_search_denylist(
+        self, builder, enable_web_search, expected
+    ):
+        builder._web_search_blocked_domains = ["evil.com"]
+
+        params = builder._prepare_component_params(
+            {
+                "name": "agent",
+                "type": "OneOffComponent",
+                "enable_web_search": enable_web_search,
+            },
+            _config(flow={}),
+        )
+
+        assert params.get("web_search_blocked_domains") == expected
+
     @pytest.fixture(name="mock_state_graph_class")
     def mock_state_graph_class_fixture(self):
         with patch(f"{_MODULE}.StateGraph") as state_graph_class:

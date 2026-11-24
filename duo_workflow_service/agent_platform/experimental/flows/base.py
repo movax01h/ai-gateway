@@ -354,6 +354,11 @@ class Flow(AbstractWorkflow):
             }
         )
 
+        if comp_params.get("enable_web_search"):
+            comp_params["web_search_blocked_domains"] = self._workflow_config.get(
+                "web_search_denied_domains", []
+            )
+
         if "pre_approved_tools" in comp_params:
             comp_params["pre_approved_tools"] = filter_pre_approvals_by_policy(
                 comp_params["pre_approved_tools"], tools_registry

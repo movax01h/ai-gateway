@@ -155,6 +155,8 @@ class AgentComponentBase(BaseComponent):
     # by the dependency_bump_web_search flag, the client's "web_search"
     # capability, and a model cleared to search natively.
     enable_web_search: bool = False
+    # Group web-search denylist, set by the flow from the workflow config.
+    web_search_blocked_domains: list[str] = Field(default_factory=list)
 
     @field_validator("max_cycles")
     @classmethod
@@ -326,7 +328,12 @@ class AgentComponentBase(BaseComponent):
         """Build the agent prompt with the given tool list and tool choice."""
         extra_params: dict[str, Any] = {}
         if self._web_search_enabled():
-            extra_params["bind_tools_params"] = {"web_search_options": {}}
+            options = (
+                {"blocked_domains": self.web_search_blocked_domains}
+                if self.web_search_blocked_domains
+                else {}
+            )
+            extra_params["bind_tools_params"] = {"web_search_options": options}
         return self.prompt_registry.get_on_behalf(
             self.user,
             self.prompt_id,

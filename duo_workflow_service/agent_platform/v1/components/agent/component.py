@@ -278,6 +278,8 @@ class AgentComponentBase(PromptReference, BaseComponent):
     # by the dependency_bump_web_search flag, the client's "web_search"
     # capability, and a model cleared to search natively.
     enable_web_search: bool = False
+    # Group web-search denylist, set by the flow from the workflow config.
+    web_search_blocked_domains: list[str] = Field(default_factory=list)
 
     prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
@@ -575,7 +577,12 @@ class AgentComponentBase(PromptReference, BaseComponent):
         model_metadata = get_model_metadata(self.model_tags)
         extra_params: dict[str, Any] = {}
         if web_search and self._web_search_enabled():
-            extra_params["bind_tools_params"] = {"web_search_options": {}}
+            options = (
+                {"blocked_domains": self.web_search_blocked_domains}
+                if self.web_search_blocked_domains
+                else {}
+            )
+            extra_params["bind_tools_params"] = {"web_search_options": options}
         return self.prompt_registry.get_on_behalf(
             self.user,
             self.prompt_id,

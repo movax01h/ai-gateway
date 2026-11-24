@@ -1,6 +1,6 @@
 """Build a LangGraph ``StateGraph`` from a flow config."""
 
-from typing import Any
+from typing import Any, Optional
 
 from gitlab_cloud_connector import CloudConnectorUser
 from langgraph.graph import StateGraph
@@ -82,6 +82,7 @@ class FlowGraphBuilder:
         internal_event_client: InternalEventsClient,
         catalog_items: CatalogItems,
         allow_agent_to_request_user: bool = False,
+        web_search_blocked_domains: Optional[list[str]] = None,
     ):
         self._tools_registry = tools_registry
         self._flow_prompt_registry = prompt_registry
@@ -91,6 +92,7 @@ class FlowGraphBuilder:
         self._user = user
         self._internal_event_client = internal_event_client
         self._allow_agent_to_request_user = allow_agent_to_request_user
+        self._web_search_blocked_domains = web_search_blocked_domains or []
         # Per-run, like the tools registry: the items belong to the request, not the
         # config. `Flow.__init__` normalizes a request without items to `CatalogItems()`.
         self._catalog_items = catalog_items
@@ -186,6 +188,9 @@ class FlowGraphBuilder:
                 "allow_agent_to_request_user": self._allow_agent_to_request_user,
             }
         )
+
+        if comp_params.get("enable_web_search"):
+            comp_params["web_search_blocked_domains"] = self._web_search_blocked_domains
 
         if "pre_approved_tools" in comp_params:
             comp_params["pre_approved_tools"] = filter_pre_approvals_by_policy(

@@ -646,3 +646,23 @@ class TestAMessageIsDeliveredOnce:
             await _turn(flow, compiled, WorkflowStatusEventEnum.RESUME, "   ")
 
         assert len(model.calls) == 1
+
+
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+@pytest.mark.parametrize(
+    ("workflow_config", "expected"),
+    [({"web_search_denied_domains": ["evil.com"]}, ["evil.com"]), ({}, [])],
+    ids=["denylist", "no_denylist"],
+)
+def test_chat_flow_wires_the_web_search_denylist_into_the_builder(
+    user, workflow_config, expected, monkeypatch
+):
+    flow = _chat_flow(user)
+    monkeypatch.setattr(flow, "_workflow_config", workflow_config)
+
+    with patch(
+        "duo_workflow_service.agent_platform.v1.chat_engine.flow.ChatGraphBuilder"
+    ) as mock_builder_class:
+        flow._graph_builder(Mock(spec=ToolsRegistry))
+
+    assert mock_builder_class.call_args.kwargs["web_search_blocked_domains"] == expected

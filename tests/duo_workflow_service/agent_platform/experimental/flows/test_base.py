@@ -301,6 +301,27 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         assert params["pre_approved_tools"] == ["notify_me_when"]
 
+    @pytest.mark.parametrize(
+        ("enable_web_search", "expected"),
+        [(True, ["evil.com"]), (False, None)],
+        ids=["web_search_on", "web_search_off"],
+    )
+    def test_prepare_component_params_passes_the_web_search_denylist(
+        self, flow_instance, mock_tools_registry, enable_web_search, expected
+    ):
+        flow_instance._workflow_config["web_search_denied_domains"] = ["evil.com"]
+
+        params = flow_instance._prepare_component_params(
+            {
+                "name": "agent",
+                "type": "AgentComponent",
+                "enable_web_search": enable_web_search,
+            },
+            mock_tools_registry,
+        )
+
+        assert params.get("web_search_blocked_domains") == expected
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "status_event,goal,expected_type,first_checkpoint",

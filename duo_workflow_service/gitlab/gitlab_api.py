@@ -73,6 +73,7 @@ class WorkflowConfig(TypedDict):
     allow_agent_to_request_user: bool
     web_search_enabled: bool
     web_search_allowed_for_group: bool
+    web_search_denied_domains: list[str]
     gitlab_host: str
     first_checkpoint: Optional[Checkpoint]
     latest_checkpoint: Optional[Checkpoint]
@@ -267,6 +268,7 @@ async def fetch_workflow_and_container_data(
         web_search_allowed_for_group=_web_search_allowed(
             workflow, project_data, namespace_data
         ),
+        web_search_denied_domains=workflow.get("webSearchDeniedDomains") or [],
         first_checkpoint=workflow.get("firstCheckpoint", None),
         latest_checkpoint=workflow.get("latestCheckpoint", None),
         gitlab_host=gitlab_host,
@@ -329,4 +331,5 @@ def empty_workflow_config() -> WorkflowConfig:
         "stalled": False,
         "web_search_enabled": False,
         "web_search_allowed_for_group": False,
+        "web_search_denied_domains": [],
     }

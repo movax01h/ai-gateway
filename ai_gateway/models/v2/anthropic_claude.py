@@ -210,8 +210,13 @@ class ChatAnthropic(_LChatAnthropic):
         tools_list = list(tools)
         web_search_options = kwargs.pop("web_search_options", None)
         if web_search_options is not None:
-            tools_list.append(dict(_WEB_SEARCH_TOOL))
-            tools_list.append(dict(_WEB_FETCH_TOOL))
+            domain_filter = (
+                {"blocked_domains": blocked}
+                if (blocked := web_search_options.get("blocked_domains"))
+                else {}
+            )
+            tools_list.append({**_WEB_SEARCH_TOOL, **domain_filter})
+            tools_list.append({**_WEB_FETCH_TOOL, **domain_filter})
 
         return super().bind_tools(
             tools_list,
