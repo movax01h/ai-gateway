@@ -277,6 +277,9 @@ secret_detection:
 
 pages:
   stage: deploy_pages
+  # The script reads only files in the repository, so the job does not wait for
+  # other jobs or download their artifacts.
+  needs: []
   script:
     - mkdir -p public
     - python -m scripts.prompt_directory_json_builder
