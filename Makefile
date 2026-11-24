@@ -302,9 +302,11 @@ test-litellm-params: install-test-deps
 # `integration_tests/` drives a deployed AI Gateway over HTTP. The Duo Workflow Service tests in
 # `integration_tests/duo_workflow_service/` instead run a gRPC server in-process, reusing fixtures from
 # `tests/` via their conftest. `integration_tests/` is outside pytest's `testpaths`, so `make test` skips them.
+# There are only a few tests, so they run in one process. Each xdist worker imports the app again, which
+# takes longer than the tests.
 test-integration: install-test-deps
 	@echo "Running integration tests..."
-	@poetry run pytest integration_tests/ -n auto
+	@poetry run pytest integration_tests/
 
 .PHONY: test-agents
 # --dist loadgroup keeps tests that score the same cached LLM response on one
