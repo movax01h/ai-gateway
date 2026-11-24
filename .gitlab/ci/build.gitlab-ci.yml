@@ -6,9 +6,14 @@
     when: never
   - when: on_success
 
+# install, the model gateway image builds and the FIPS base image builds use
+# only the repository, so they set `needs: []` and do not wait for the .pre
+# stage. Security policies add a dependency resolution job there, which takes
+# about 30 seconds.
 install:
   extends: .poetry
   stage: build
+  needs: []
   rules: *skip-on-version-tag-rules
   cache:
     policy: push
@@ -47,6 +52,7 @@ build-docker-model-gateway-arch:
   stage: build
   extends:
     - .docker-build-arch
+  needs: []  # Do not wait for .pre. See the comment above install.
   rules: *skip-on-version-tag-rules
   variables:
     BUILD_TAG: "${TARGET_IMAGE}"
@@ -176,6 +182,7 @@ build:self-hosted-ai-gateway-latest-image:
   stage: build
   extends:
     - .docker-build-arch
+  needs: []  # Do not wait for .pre. See the comment above install.
   variables:
     BUILD_FILE: docker/fips/Dockerfile
     BUILD_TAG: "${FIPS_TARGET_IMAGE}"
