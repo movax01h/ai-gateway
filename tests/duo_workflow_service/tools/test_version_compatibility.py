@@ -34,6 +34,7 @@ from duo_workflow_service.tools.version_compatibility import (
     supports_labels_by_name,
     supports_licensed_feature_availability,
     supports_note_resolved_and_resolvable_fields,
+    supports_project_vulnerabilities_rest_scope,
     supports_tool_access_policies_field,
     supports_vulnerability_tracked_ref,
 )
@@ -164,6 +165,10 @@ class TestVersionCompatibilityFunctions:
             (supports_ascp_security_boundary, "19.5.0", True),
             (supports_ascp_security_boundary, "19.4.1", False),
             (supports_ascp_security_boundary, "18.6.0", False),
+            # supports_project_vulnerabilities_rest_scope (threshold: 19.0.0)
+            (supports_project_vulnerabilities_rest_scope, "19.0.0", True),
+            (supports_project_vulnerabilities_rest_scope, "19.1.0", True),
+            (supports_project_vulnerabilities_rest_scope, "18.11.0", False),
             # supports_group_level_custom_instructions (threshold: 19.0.0)
             (supports_group_level_custom_instructions, "19.0.0", True),
             (supports_group_level_custom_instructions, "19.1.0", True),
