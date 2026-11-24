@@ -217,7 +217,6 @@ duo_workflow_service/agent_platform/v1/flows/configs/agentic_chat
 duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline
 duo_workflow_service/agent_platform/v1/flows/configs/flow_creator
 duo_workflow_service/agent_platform/v1/flows/configs/gitlab_duo_mention_assistant
-duo_workflow_service/agent_platform/v1/flows/configs/readiness_score
 duo_workflow_service/agent_platform/v1/flows/configs/resolve_dependency_bump
 duo_workflow_service/agent_platform/v1/flows/configs/software_development
 duo_workflow_service/agent_platform/v1/flows/configs/support_assistant
