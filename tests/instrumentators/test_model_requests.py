@@ -292,6 +292,38 @@ class TestWatchContainer:
             ),
         )
 
+    def test_register_token_usage_tracks_billable_characters(
+        self, internal_event_client
+    ):
+        container = ModelRequestInstrumentator.WatchContainer(
+            model_provider="test_provider",
+            labels={"model_engine": "test_engine", "model_name": "test_model"},
+            streaming=False,
+            limits=None,
+            unit_primitive=GitLabUnitPrimitive.GENERATE_EMBEDDINGS_CODEBASE,
+            internal_event_client=internal_event_client,
+        )
+        init_llm_operations()
+
+        with capture_logs() as cap_logs:
+            container.register_token_usage(
+                "test_model",
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=0,
+                    total_tokens=1,
+                    input_token_details={"billable_characters": 24},
+                ),
+            )
+
+        assert cap_logs[0]["event"] == "LLM call finished with token usage"
+        assert cap_logs[0]["billable_characters"] == 24
+
+        additional_properties = internal_event_client.track_event.call_args.kwargs[
+            "additional_properties"
+        ]
+        assert additional_properties.extra["billable_characters"] == 24
+
     @pytest.mark.parametrize(
         ("model_vendor", "expected_vendor"),
         [("fireworks_ai", "fireworks_ai"), ("", "test_provider")],

@@ -390,10 +390,19 @@ class ModelRequestInstrumentator:
                 "ephemeral_1h_input_tokens": ephemeral_1h_input_tokens,
             }
 
+            # Only set when the provider reports it: 0 would read as "billed nothing", not "unknown"
+            billable_characters = input_token_details.get("billable_characters")
+            extra_token_usage_data = (
+                {"billable_characters": billable_characters}
+                if billable_characters is not None
+                else {}
+            )
+
             logger.info(
                 "LLM call finished with token usage",
                 **token_usage_data,
                 **token_cache_usage_data,
+                **extra_token_usage_data,
             )
 
             if self.internal_event_client and self.unit_primitive:
@@ -401,8 +410,10 @@ class ModelRequestInstrumentator:
                     label="cache_details",
                     model_vendor=self.model_vendor,
                     **token_cache_usage_data,
+                    **extra_token_usage_data,
                     **internal_event_extra,
                 )
+
                 self.internal_event_client.track_event(
                     f"token_usage_{self.unit_primitive}",
                     category=__name__,

@@ -301,6 +301,48 @@ class BaseTestCodeEmbeddings:
         # The new key coexists with the existing cache extras
         assert extra["cache_read"] == 4
 
+    @pytest.mark.usefixtures("mock_litellm_aembedding")
+    def test_billable_characters_in_token_usage_event(
+        self,
+        mock_client: TestClient,
+        mock_litellm_aembedding_response: AsyncMock,
+        mock_track_internal_event: Mock,
+    ):
+        mock_litellm_aembedding_response.usage.prompt_tokens_details.character_count = (
+            26
+        )
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+
+        extra = self._token_usage_event_extra(mock_track_internal_event)
+
+        assert extra["billable_characters"] == 26
+        assert extra["input_characters"] == 24
+        assert extra["cache_read"] == 4
+
+    @pytest.mark.usefixtures("mock_litellm_aembedding")
+    def test_billable_characters_absent_when_not_reported(
+        self,
+        mock_client: TestClient,
+        mock_track_internal_event: Mock,
+    ):
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+
+        extra = self._token_usage_event_extra(mock_track_internal_event)
+
+        assert "billable_characters" not in extra
+
     @pytest.mark.parametrize(
         ("contents", "expected_input_characters"),
         [
