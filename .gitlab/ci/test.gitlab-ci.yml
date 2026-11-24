@@ -12,6 +12,18 @@ tests:unit:
   needs: []
   script:
     - make test-coverage-ci
+    # On MRs, check that the changed lines have test coverage. This runs here and
+    # not in a separate job, because it only needs the coverage report from the
+    # tests above.
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        if [[ ",${CI_MERGE_REQUEST_LABELS}," == *",pipeline:skip-undercoverage,"* ]]; then
+          echo "The 'pipeline:skip-undercoverage' label is set on the MR, skipping the coverage check of changed lines."
+        else
+          git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_SHA --depth=1
+          make test-undercoverage UNDERCOVERAGE_COMPARE_BRANCH=$CI_MERGE_REQUEST_TARGET_BRANCH_SHA UNDERCOVERAGE_DIFF_RANGE_NOTATION=..
+        fi
+      fi
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:
     when: always
@@ -29,24 +41,6 @@ tests:unit:
     # - asyncio checks for coroutines that were not awaited and logs them; this mitigates the “forgotten await” pitfall.
     # - Many non-threadsafe asyncio APIs (such as loop.call_soon() and loop.call_at() methods) raise an exception if they are called from a wrong thread.
     PYTHONASYNCIODEBUG: "True"
-
-tests:undercoverage:
-  extends: .poetry
-  stage: test
-  needs:
-    - job: tests:unit
-      artifacts: true
-  script:
-    - if [[ ",${CI_MERGE_REQUEST_LABELS}," == *",pipeline:skip-undercoverage,"* ]]; then
-        echo "The 'pipeline:skip-undercoverage' label is set on the MR, exiting early.";
-        exit 0;
-      else
-        echo "The 'pipeline:skip-undercoverage' label is not set on the MR, proceeding.";
-      fi
-    - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_SHA --depth=1
-    - make test-undercoverage UNDERCOVERAGE_COMPARE_BRANCH=$CI_MERGE_REQUEST_TARGET_BRANCH_SHA UNDERCOVERAGE_DIFF_RANGE_NOTATION=..
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
 tests:integration:
   extends: .poetry
