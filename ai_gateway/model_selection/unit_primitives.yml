@@ -601,6 +601,7 @@ configurable_unit_primitives:
       - identifier: "claude_sonnet_5_5_vertex"
     selectable_models:
       - "claude_sonnet_5_5_vertex"
+      - "claude_opus_5_5_vertex"
 
   - feature_setting: "sast_vulnerability_fp_detection"
     unit_primitives: []
