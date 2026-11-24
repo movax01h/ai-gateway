@@ -326,6 +326,9 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
             "ephemeral_1h_input_tokens": getattr(
                 cache_creation_details, "ephemeral_1h_input_tokens", None
             ),
+            # Characters the provider bills on, such as Vertex AI's billableCharacterCount
+            # Not every model reports it, so it may be None and is then omitted
+            "billable_characters": getattr(details, "character_count", None),
         }
 
         # The keys are NotRequired, so omit unset ones rather than report them as None
