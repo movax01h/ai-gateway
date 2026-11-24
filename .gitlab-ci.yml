@@ -202,11 +202,15 @@ include:
     rules: *skip-if-not-canonical
 
   - component: ${CI_SERVER_FQDN}/gitlab-org/components/danger-review/danger-review@2.1.0
-    rules:
+    rules: &danger-review-include-rules
       # The security mirror's job token allowlist rejects the component's cross-project git fetch (#3731)
       - if: $CI_PROJECT_ID == "39903947" && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == "61869127"
         when: never
       - if: $CI_SERVER_HOST == "gitlab.com"
+  # Adds a gem cache to the danger-review job. Same rules as the component,
+  # because without the component the job would have no script.
+  - local: .gitlab/ci/danger-review.gitlab-ci.yml
+    rules: *danger-review-include-rules
   - component: $CI_SERVER_FQDN/gitlab-org/analytics-section/analytics-instrumentation/ci-components/internal_events_validation@v1.1.0
     rules:
       - if: $CI_SERVER_HOST == "gitlab.com"
