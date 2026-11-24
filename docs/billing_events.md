@@ -7,18 +7,16 @@ The billing events system tracks consumption of AI features (tokens, requests, e
 
 ## Trigger events
 
-To trigger a billing event, call the `track_billing_event` method of the `BillingEventsClient` object with the desired arguments:
+To trigger a billing event, call the `track_billing_event` method of the `BillingEventsClient` object with the desired arguments.
+Use a string marker such as `Provide["billing_event.client"]`. It resolves by path against the wired container, so the module does not import `ai_gateway.container`.
 
 ```python
 from lib.billing_events import BillingEventsClient, BillingEvent
 from dependency_injector.wiring import Provide, inject
-from ai_gateway.container import ContainerApplication
 
 @inject
 async def ai_completion_feature(
-    billing_event_client: BillingEventsClient = Provide[
-        ContainerApplication.billing_event.client
-    ],
+    billing_event_client: BillingEventsClient = Provide["billing_event.client"],
 ):
 
    billing_event_client.track_billing_event(
