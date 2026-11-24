@@ -2,6 +2,7 @@
 import functools
 import importlib.resources
 import json
+import threading
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
@@ -13,6 +14,8 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import SecretStr, ValidationError
 from pyfakefs.fake_filesystem import FakeFilesystem
 
+from ai_gateway.catalog import CatalogDocuments, CatalogLoadError, CatalogProvider
+from ai_gateway.config import ConfigModelCatalog
 from ai_gateway.model_selection.model_selection_config import (
     MODEL_RESTRICTIONS_CONFIG_PATH,
     ChatAnthropicDefinition,
@@ -610,13 +613,13 @@ def test_singleton_caches_yaml_loading():
         return original_safe_load(*args, **kwargs)
 
     with patch("yaml.safe_load", side_effect=counting_safe_load):
-        # First access - should load YAML (2 files: models.yml + unit_primitives.yml)
+        # First access loads the whole catalog once: models.yml, unit_primitives.yml and model_restrictions.yml
         config = ModelSelectionConfig.instance()
         llm_defs1 = config.get_llm_definitions()
         unit_primitives1 = config.get_unit_primitive_config_map()
 
         first_load_count = call_count
-        assert first_load_count == 2, "Should load 2 YAML files on first access"
+        assert first_load_count == 3, "Should load 3 YAML files on first access"
 
         # Second access - should NOT reload YAML (uses cached data)
         llm_defs2 = config.get_llm_definitions()
@@ -2631,3 +2634,199 @@ def test_selectable_models_on_a_reasoning_path_declare_effort_levels(
         f"{missing}. Declare the levels the provider accepts, or add the "
         "entry to _EFFORT_LEVELS_EXEMPT with a reason."
     )
+
+
+def _catalog(version: str, model_id: str) -> CatalogDocuments:
+    """A minimal catalog whose only feature defaults to ``model_id``, the only model it defines."""
+    return CatalogDocuments(
+        models={
+            "models": [
+                {
+                    "name": model_id,
+                    "gitlab_identifier": model_id,
+                    "requires_paid_credits": False,
+                    "model_class_provider": "litellm",
+                    "max_context_tokens": 1000,
+                    "params": {"model": model_id, "custom_llm_provider": "openai"},
+                }
+            ]
+        },
+        unit_primitives={
+            "configurable_unit_primitives": [
+                {
+                    "feature_setting": "chat",
+                    "unit_primitives": ["duo_chat"],
+                    "default_models": [model_id],
+                }
+            ]
+        },
+        model_restrictions={"restricted_models": []},
+        version=version,
+    )
+
+
+class _StubCatalogProvider(CatalogProvider):
+    """Serves the catalogs it is given, the last one again once the list runs out."""
+
+    def __init__(self, *catalogs: CatalogDocuments | Exception) -> None:
+        self._catalogs = list(catalogs)
+        self.loads = 0
+
+    @property
+    def storage(self) -> str:
+        return "stub"
+
+    def load(self) -> CatalogDocuments:
+        self.loads += 1
+        catalog = (
+            self._catalogs.pop(0) if len(self._catalogs) > 1 else self._catalogs[0]
+        )
+        if isinstance(catalog, Exception):
+            raise catalog
+        return catalog
+
+
+class TestCatalogSnapshot:
+    def test_loads_the_catalog_from_its_provider_on_first_use(self):
+        provider = _StubCatalogProvider(_catalog("v1", "model_a"))
+        config = ModelSelectionConfig(
+            default_models_override={}, catalog_provider=provider
+        )
+
+        assert provider.loads == 0
+        assert config.get_model_for_feature("chat").gitlab_identifier == "model_a"
+        assert config.catalog_version == "v1"
+        assert config.catalog_storage == "stub"
+        config.get_llm_definitions()
+        assert provider.loads == 1
+
+    def test_refresh_swaps_in_the_new_catalog(self):
+        config = ModelSelectionConfig(
+            default_models_override={},
+            catalog_provider=_StubCatalogProvider(
+                _catalog("v1", "model_a"), _catalog("v2", "model_b")
+            ),
+        )
+        old_definitions = config.get_llm_definitions()
+
+        config.refresh()
+
+        assert config.catalog_version == "v2"
+        assert config.get_model_for_feature("chat").gitlab_identifier == "model_b"
+        # What a reader already holds is never changed in place.
+        assert set(old_definitions) == {"model_a"}
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            CatalogLoadError("unreachable"),
+            CatalogDocuments(
+                models={"models": [{"gitlab_identifier": "broken"}]},
+                unit_primitives={"configurable_unit_primitives": []},
+                version="v2",
+            ),
+        ],
+    )
+    def test_refresh_keeps_the_current_catalog_when_loading_fails(self, failure):
+        config = ModelSelectionConfig(
+            default_models_override={},
+            catalog_provider=_StubCatalogProvider(_catalog("v1", "model_a"), failure),
+        )
+        config.get_llm_definitions()
+
+        with pytest.raises((CatalogLoadError, ValidationError)):
+            config.refresh()
+
+        assert config.catalog_version == "v1"
+        assert config.get_model_for_feature("chat").gitlab_identifier == "model_a"
+
+    def test_refresh_with_validate_rejects_an_inconsistent_catalog(self):
+        inconsistent = _catalog("v2", "model_b")
+        inconsistent.unit_primitives["configurable_unit_primitives"][0][
+            "default_models"
+        ] = ["missing_model"]
+        config = ModelSelectionConfig(
+            default_models_override={},
+            catalog_provider=_StubCatalogProvider(
+                _catalog("v1", "model_a"), inconsistent
+            ),
+        )
+        config.get_llm_definitions()
+
+        with pytest.raises(ValueError, match="missing_model"):
+            config.refresh(validate=True)
+
+        assert config.catalog_version == "v1"
+
+    def test_overrides_apply_to_every_loaded_catalog(self):
+        config = ModelSelectionConfig(
+            default_models_override={"chat": ["model_b"]},
+            model_params_override={"model_b": {"temperature": 0.5}},
+            models_for_tags_override={"chat": {"fast": "model_b"}},
+            catalog_provider=_StubCatalogProvider(
+                _catalog("v1", "model_a"), _catalog("v2", "model_b")
+            ),
+        )
+        chat = config.get_unit_primitive_config_map()["chat"]
+        assert chat.default_model_identifiers == ["model_b"]
+        assert chat.models_for_tags["fast"].models == ["model_b"]
+
+        config.refresh()
+
+        chat = config.get_unit_primitive_config_map()["chat"]
+        assert chat.models_for_tags["fast"].models == ["model_b"]
+        assert config.get_model_for_feature("chat").params.temperature == 0.5
+
+    def test_readers_never_see_a_mix_of_two_catalogs(self):
+        """Each catalog's feature defaults to a model only that catalog defines.
+
+        A read that took the feature list from one catalog and the model from the other would fail with "Invalid model
+        identifier".
+        """
+        catalogs = [_catalog("v1", "model_a"), _catalog("v2", "model_b")]
+        config = ModelSelectionConfig(
+            default_models_override={},
+            catalog_provider=_StubCatalogProvider(*catalogs * 50),
+        )
+        errors: list[Exception] = []
+        stop = threading.Event()
+
+        def read() -> None:
+            while not stop.is_set():
+                try:
+                    config.get_model_for_feature("chat")
+                    config.find_by_identifier("openai/model_a")
+                    config.restricted_flows_for(["model_a"], ["model_b"])
+                except Exception as exc:  # pylint: disable=broad-except
+                    errors.append(exc)
+                    return
+
+        readers = [threading.Thread(target=read) for _ in range(4)]
+        for reader in readers:
+            reader.start()
+        for _ in range(99):
+            config.refresh()
+        stop.set()
+        for reader in readers:
+            reader.join()
+
+        assert not errors
+
+    def test_instance_reads_the_catalog_storage_setting(self):
+        ModelSelectionConfig._instance = None
+        mock_config = MagicMock()
+        mock_config.model_selection.default_models = {}
+        mock_config.model_selection.model_params = {}
+        mock_config.model_selection.prompt_params = {}
+        mock_config.model_selection.model_releases = None
+        mock_config.model_selection.catalog = ConfigModelCatalog(
+            storage="repo", repo_project="group/catalog", repo_token=SecretStr("t")
+        )
+
+        with patch(
+            "ai_gateway.model_selection.model_selection_config.get_config",
+            return_value=mock_config,
+        ):
+            instance = ModelSelectionConfig.instance()
+
+        assert instance.catalog_storage == "repo"

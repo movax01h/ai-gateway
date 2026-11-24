@@ -29,6 +29,7 @@ from ai_gateway.config import (
     ConfigInstrumentator,
     ConfigLogging,
     ConfigMockUsageQuotaServer,
+    ConfigModelCatalog,
     ConfigModelLimits,
     ConfigModelSelection,
     ConfigMtls,
@@ -1043,6 +1044,80 @@ def test_config_model_selection_feature_allowlist_modes_default_per_surface():
 def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode(variable):
     with mock.patch.dict(os.environ, {variable: "strict"}, clear=True):
         with pytest.raises(ValidationError):
+            Config(_env_file=None)
+
+
+def test_config_model_catalog_defaults_to_the_shipped_files():
+    with mock.patch.dict(os.environ, {}, clear=True):
+        catalog = Config(_env_file=None).model_selection.catalog
+
+    assert catalog.storage == "file"
+    assert catalog.repo_ref == ""
+    assert catalog.repo_path == "catalog.yml"
+
+
+def test_config_model_catalog_reads_repo_settings():
+    env = {
+        "AIGW_MODEL_SELECTION__CATALOG__STORAGE": "repo",
+        "AIGW_MODEL_SELECTION__CATALOG__REPO_PROJECT": "group/catalog",
+        "AIGW_MODEL_SELECTION__CATALOG__REPO_TOKEN": "token",
+    }
+    with mock.patch.dict(os.environ, env, clear=True):
+        catalog = Config(_env_file=None).model_selection.catalog
+
+    assert catalog.storage == "repo"
+    assert catalog.repo_project == "group/catalog"
+    assert catalog.repo_token is not None
+    assert catalog.repo_token.get_secret_value() == "token"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://gitlab.com",
+        "https://gitlab.example.com:8443/",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000/",
+        "http://[::1]:3000",
+    ],
+)
+def test_config_model_catalog_accepts_https_and_local_gitlab_urls(url):
+    assert ConfigModelCatalog(repo_gitlab_url=url).repo_gitlab_url == url
+
+
+@pytest.mark.parametrize(
+    ("url", "message"),
+    [
+        ("http://gitlab.com", "must use https://"),
+        ("http://gdk.test:3000", "must use https://"),
+        ("ftp://gitlab.com", "must use https://"),
+        ("gitlab.com", "absolute URL with a host"),
+        ("https://", "absolute URL with a host"),
+        ("", "absolute URL with a host"),
+    ],
+)
+def test_config_model_catalog_rejects_unsafe_gitlab_urls(url, message):
+    env = {"AIGW_MODEL_SELECTION__CATALOG__REPO_GITLAB_URL": url}
+    with mock.patch.dict(os.environ, env, clear=True):
+        with pytest.raises(ValidationError, match=message):
+            Config(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    ("env", "missing"),
+    [
+        ({}, "repo_project, repo_token"),
+        (
+            {"AIGW_MODEL_SELECTION__CATALOG__REPO_PROJECT": "group/catalog"},
+            "repo_token",
+        ),
+        ({"AIGW_MODEL_SELECTION__CATALOG__REPO_TOKEN": "token"}, "repo_project"),
+    ],
+)
+def test_config_model_catalog_repo_storage_needs_project_and_token(env, missing):
+    env = {"AIGW_MODEL_SELECTION__CATALOG__STORAGE": "repo", **env}
+    with mock.patch.dict(os.environ, env, clear=True):
+        with pytest.raises(ValidationError, match=f"needs {missing}"):
             Config(_env_file=None)
 
 
