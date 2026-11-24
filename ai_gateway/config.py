@@ -790,8 +790,14 @@ class ConfigFeatureFlags(BaseModel):
     cancel_on_client_disconnect: bool = True
 
 
-class ConfigProxyEndpoints(BaseModel):
-    """Configuration for allowing proxy endpoints per realm (allowlist model).
+class ConfigProxyEndpoints(ConfigActorLimits):
+    """Configuration for the proxy endpoints (/v1/proxy/): the per-realm allowlist and the actor limits.
+
+    The per-actor limits on in-flight requests are inherited from ``ConfigActorLimits`` and are off by
+    default, so a gateway only rejects proxy requests when the operator sets
+    ``AIGW_PROXY_ENDPOINTS__ACTOR_LIMIT_MODE``.
+
+    Proxy endpoints are allowed per realm (allowlist model).
 
     Each realm is controlled by a single environment variable accepting a
     comma-separated list of IDs:
@@ -806,6 +812,9 @@ class ConfigProxyEndpoints(BaseModel):
 
         # Allow only specific SaaS root namespace IDs
         AIGW_PROXY_ENDPOINTS__SAAS_ENABLED="12345,67890"
+
+        # Limit the in-flight requests per actor on the proxy routes
+        AIGW_PROXY_ENDPOINTS__ACTOR_LIMIT_MODE="log"
     """
 
     self_managed_enabled: str = Field(

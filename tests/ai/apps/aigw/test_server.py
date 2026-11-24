@@ -256,6 +256,11 @@ def test_each_route_group_has_its_own_actor_limit(fastapi_server_app):
             ("/v1/prompts/", "/v2/prompts/"),
             config.prompts,
         ),
+        (
+            "proxy_actor_limit",
+            ("/v1/proxy/",),
+            config.proxy_endpoints,
+        ),
     ]
 
 

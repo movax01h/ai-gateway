@@ -72,7 +72,8 @@ _CODE_SUGGESTIONS_PATH_PREFIXES = (
 )
 _CODE_SUGGESTIONS_MAX_BODY_BYTES = 600_000
 # Proxy requests are larger than the others (up to about 17 MiB) and never carry
-# model_metadata, so the general request body limit leaves them out.
+# model_metadata, so the general request body limit leaves them out. They have their own
+# per-actor in-flight limit.
 _PROXY_PATH_PREFIXES = ("/v1/proxy/",)
 _PROMPTS_PATH_PREFIXES = (
     "/v1/prompts/",
@@ -250,6 +251,12 @@ def create_fast_api_server(config: Config):
                 limits=config.prompts,
                 path_prefixes=_PROMPTS_PATH_PREFIXES,
                 control_name="prompts_actor_limit",
+            ),
+            Middleware(
+                ActorLimitMiddleware,
+                limits=config.proxy_endpoints,
+                path_prefixes=_PROXY_PATH_PREFIXES,
+                control_name="proxy_actor_limit",
             ),
             Middleware(ModelConfigMiddleware, skip_endpoints=_SKIP_ENDPOINTS),
         ],
