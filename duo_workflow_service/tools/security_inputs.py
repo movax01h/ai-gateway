@@ -51,7 +51,7 @@ ProjectFullPath = Annotated[
 
 GitLabGlobalIdStr = Annotated[
     str,
-    StringConstraints(max_length=MAX_GITLAB_GLOBAL_ID_LENGTH),
+    StringConstraints(min_length=1, max_length=MAX_GITLAB_GLOBAL_ID_LENGTH),
 ]
 
 VulnerabilityIdList = Annotated[

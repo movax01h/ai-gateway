@@ -108,6 +108,11 @@ def test_global_id_rejects_oversized_values(value):
         _CoercedIdModel(id=value)
 
 
+def test_global_id_rejects_empty_string():
+    with pytest.raises(ValidationError, match="at least 1 character"):
+        _CoercedIdModel(id="")
+
+
 @pytest.mark.parametrize("count", [0, 1, MAX_VULNERABILITY_IDS])
 def test_vulnerability_id_list_accepts_up_to_limit(count):
     ids = [f"gid://gitlab/Vulnerability/{i}" for i in range(count)]
@@ -125,6 +130,7 @@ def test_vulnerability_id_list_accepts_up_to_limit(count):
             ["1", "x" * (MAX_GITLAB_GLOBAL_ID_LENGTH + 1)],
             f"at most {MAX_GITLAB_GLOBAL_ID_LENGTH} characters",
         ),
+        (["1", ""], "at least 1 character"),
     ],
 )
 def test_vulnerability_id_list_rejects_oversized_input(ids, expected_error):
