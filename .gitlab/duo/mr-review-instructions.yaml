@@ -169,7 +169,8 @@ instructions:
       1. If a resource is provided in a container, avoid instantiating it directly — use the container instead.
       1. Container definitions should use `providers.Singleton` for stateless services and `providers.Factory`
         for objects that need fresh instances per request.
-      1. Verify that new containers are properly nested under the main `ai_gateway/container.py`.
+      1. Verify that a new container is nested in `ai/platform/container.py` when both apps use it, or in
+        `ai/apps/<app>/container.py` when one app uses it. New providers do not go in `ai_gateway/container.py`.
 
   - name: FastAPI Endpoints
     fileFilters:

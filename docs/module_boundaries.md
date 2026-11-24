@@ -232,8 +232,12 @@ Ownership of providers follows the same feature-first rule as everything else:
   only** — no business logic — so it does not drift into the god object the per-app
   split exists to retire.
 
-This is the end-state shape; how the present shared `ContainerApplication` and
-`config.py` get carved into it is a migration concern, not a structural one.
+The container files have this shape: `ai/platform/container.py` holds the
+platform providers, and `ai/apps/aigw/container.py` and `ai/apps/dws/container.py`
+each add the providers of one app. At boot, both entrypoints still use the union of
+the two app containers in `ai_gateway/container.py`, so each deployable still has
+every provider until each entrypoint uses its own app container. How `config.py` gets carved into
+per-app slices is a migration concern, not a structural one.
 
 ## Ownership and CODEOWNERS
 
