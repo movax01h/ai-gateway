@@ -12,7 +12,6 @@ from gitlab_cloud_connector import (
 
 from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE
 from ai_gateway.config import ConfigProxyEndpoints
-from ai_gateway.container import ContainerApplication
 from lib.context import StarletteUser
 from lib.internal_events.context import current_event_context
 
@@ -35,7 +34,7 @@ EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS = {
 @inject
 async def _check_proxy_endpoints_enabled(
     request: Request,
-    proxy_cfg: dict = Provide[ContainerApplication.config.proxy_endpoints],
+    proxy_cfg: dict = Provide["config.proxy_endpoints"],
 ) -> None:
     """Raise HTTP 402 if the request realm is not on the proxy endpoint allowlist.
 

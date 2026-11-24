@@ -8,18 +8,16 @@ See [this issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggesti
 
 ## Trigger events
 
-To trigger an event, call the `track_event` method of the `InternalEventsClient` object with the desired arguments:
+To trigger an event, call the `track_event` method of the `InternalEventsClient` object with the desired arguments.
+Use a string marker such as `Provide["internal_event.client"]`. It resolves by path against the wired container, so the module does not import `ai_gateway.container`.
 
 ```python
 from lib.internal_events import InternalEventsClient
 from dependency_injector.wiring import Provide, inject
-from ai_gateway.container import ContainerApplication
 
 @inject
 async def awesome_feature(
-    internal_event_client: InternalEventsClient = Provide[
-        ContainerApplication.internal_event.client
-    ],
+    internal_event_client: InternalEventsClient = Provide["internal_event.client"],
 ):
     # Send "request_awesome_feature" event to Snowplow.
     internal_event_client.track_event("request_awesome_feature")

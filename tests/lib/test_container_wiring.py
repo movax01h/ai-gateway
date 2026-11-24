@@ -1,9 +1,6 @@
 """Boot-time wiring validation: fail loud on unresolved injection markers."""
 
-import os
 import re
-import subprocess
-import sys
 import warnings
 from pathlib import Path
 from typing import Sequence
@@ -16,6 +13,7 @@ from duo_workflow_service.agent_platform.serving_surface import (
     collect_serving_surfaces,
 )
 from lib.container_wiring import UnwiredDependencyError, wire_and_validate
+from tests.fresh_interpreter import run_in_fresh_interpreter
 from tests.lib import wiring_fixtures, wiring_fixtures_unwired
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -58,21 +56,7 @@ def _validate_wiring_in_subprocess(code: str) -> None:
     wire()/unwire() patch @inject targets at the module level, so doing either in-process would clobber wiring set up by
     other tests in the same session (e.g. the module-scoped container fixture in tests/duo_workflow_service).
     """
-    env = {
-        **os.environ,  # pylint: disable=direct-environment-variable-reference
-        "PYTHONPATH": str(REPO_ROOT),
-        "HF_HUB_OFFLINE": "1",
-        "LANGCHAIN_TRACING_V2": "false",
-    }
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
-    )
+    result = run_in_fresh_interpreter(code)
     assert result.returncode == 0, result.stderr
 
 

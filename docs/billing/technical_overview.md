@@ -23,18 +23,15 @@ Key fields to provide when calling `BillingEventsClient` or `BillingEventService
 
 `BillingEventsClient` (`lib/billing_events/client.py`) is the low-level Snowplow emitter used in AI Gateway. It takes a `BillingEvent`, assembles a `BillingEventContext` from `current_event_context` and the provided `CloudConnectorUser`, and sends it as a `StructuredEvent` to the Snowplow collector. It also fires an internal `usage_billing_event` for correlation.
 
-Inject it via `ContainerApplication.billing_event.client`. In Duo Workflow Service, use `BillingEventService` instead — it wraps this client and handles LLM operation resolution and self-hosted deployments automatically.
+Inject it with `Provide["billing_event.client"]`. In Duo Workflow Service, use `BillingEventService` instead — it wraps this client and handles LLM operation resolution and self-hosted deployments automatically.
 
 ```python
 from lib.billing_events import BillingEventsClient, BillingEvent
 from dependency_injector.wiring import Provide, inject
-from ai_gateway.container import ContainerApplication
 
 @inject
 async def my_handler(
-    billing_client: BillingEventsClient = Provide[
-        ContainerApplication.billing_event.client
-    ],
+    billing_client: BillingEventsClient = Provide["billing_event.client"],
 ):
     billing_metadata = {
         "execution_environment": "code_generations",
@@ -58,18 +55,15 @@ async def my_handler(
 
 `BillingEventService` (`lib/billing_events/service.py`) is the preferred billing entry point in Duo Workflow Service. It wraps `BillingEventsClient` and resolves LLM operation metadata automatically from the request context via `get_llm_operations()` — prefer this path for new implementations. The `llm_ops` parameter is available for cases where automatic resolution is not possible, such as self-hosted deployments. If no operations can be resolved from any source, it raises a `ValueError`.
 
-Inject it via `ContainerApplication.billing_event.service`.
+Inject it with `Provide["billing_event.service"]`.
 
 ```python
 from lib.billing_events import BillingEvent, BillingEventService, ExecutionEnvironment
 from dependency_injector.wiring import Provide, inject
-from ai_gateway.container import ContainerApplication
 
 @inject
 async def my_workflow_handler(
-    billing_service: BillingEventService = Provide[
-        ContainerApplication.billing_event.service
-    ],
+    billing_service: BillingEventService = Provide["billing_event.service"],
 ):
     billing_service.track_billing(
         workflow_id="wf_123456",
