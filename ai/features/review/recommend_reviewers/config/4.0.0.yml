@@ -4,7 +4,7 @@ components:
   - name: "suggest_reviewers"
     type: OneOffComponent
     prompt_id: "recommend_reviewers_assign"
-    prompt_version: "3.0.0-dev"
+    prompt_version: "^3.0.0"
     inputs:
       - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"

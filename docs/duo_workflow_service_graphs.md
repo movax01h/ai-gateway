@@ -1208,7 +1208,7 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `recommend_reviewers 4.0.0-dev (v1)` (Flow Registry)
+## Graph: `recommend_reviewers 4.0.0 (v1)` (Flow Registry)
 
 ```mermaid
 ---
