@@ -581,6 +581,19 @@ class TestFlowGraphBuilder:
             ),
             # An entry with empty options contributes the name only.
             ([{"read_file": None}], ["read_file"], {}),
+            # Real tool + option: proves create_file_with_contents carries
+            # allowed_directories through the YAML split unchanged.
+            (
+                [
+                    {
+                        "create_file_with_contents": {
+                            "allowed_directories": ["src", "docs"]
+                        }
+                    }
+                ],
+                ["create_file_with_contents"],
+                {"create_file_with_contents": {"allowed_directories": ["src", "docs"]}},
+            ),
         ],
     )
     def test_toolset_entries_are_split_into_names_and_options(
