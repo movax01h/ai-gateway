@@ -193,15 +193,15 @@ def real_llm(execution_model):
 
     Temperature is read from the direct-Anthropic row (model_class_provider: anthropic) in
     ai_gateway/model_selection/models.yml for the model name, because agent tests call the Anthropic API directly.
-    Production resolves model_tags to the vertex/litellm row, which shares the same temperature today. Only
-    temperature is applied from the row; other params (top_p, top_k, extra_headers) are not, and max_tokens=4096 is a
-    deliberate test cost cap versus production's higher limit.
+    Production resolves model_tags to the vertex/litellm row, which shares the same temperature today. Only temperature
+    is applied from the row; other params (top_p, top_k, extra_headers) are not, and max_tokens=4096 is a deliberate
+    test cost cap versus production's higher limit.
     """
     kwargs: dict[str, Any] = {"model": execution_model, "max_tokens": 4096}
     params = _production_params(execution_model)
     if params.temperature is not None:
         kwargs["temperature"] = params.temperature
-    return ChatAnthropic(**kwargs)  # type: ignore[call-arg]
+    return ChatAnthropic(**kwargs)
 
 
 @pytest.fixture
@@ -582,8 +582,8 @@ NO_CASE = "(no case)"
 def _case_id(nodeid: str) -> str:
     """Return the parametrize id a row scores, or a placeholder when the test takes no parameters.
 
-    Agent suites parametrize one test per benchmark case, so the parametrize id names the case. pytest-xdist's
-    loadgroup scheduler appends "@<group>" after the closing bracket, which is dropped here.
+    Agent suites parametrize one test per benchmark case, so the parametrize id names the case. pytest-xdist's loadgroup
+    scheduler appends "@<group>" after the closing bracket, which is dropped here.
     """
     name = nodeid.split("::", maxsplit=1)[-1]
     if "]" in name:
