@@ -8,6 +8,13 @@ lint:
   script:
     - BUF_VERSION=$(grep '^buf ' .tool-versions | awk '{print $2}') && curl -sSL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-$(uname -s)-$(uname -m)" -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf && sha256sum /usr/local/bin/buf
     - make lint-code
+    # Check that .gitlab/ci/dws-dependencies.yml is up to date. The script uses
+    # only the standard library, so it runs here and not in a separate job.
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        make duo-workflow-service-dependencies
+        git diff --exit-code .gitlab/ci/dws-dependencies.yml || (echo "ERROR: The dependencies at .gitlab/ci/dws-dependencies.yml are out of date. Run 'make duo-workflow-service-dependencies' locally to update the file." && exit 1)
+      fi
     - poetry lock --no-cache
     - git diff --exit-code
   after_script:
