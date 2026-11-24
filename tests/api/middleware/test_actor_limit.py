@@ -23,6 +23,8 @@ CODE_PATHS = ("/v2/completions", "/v2/code/", "/v3/code/", "/v4/code/")
 PROMPT_PATHS = ("/v1/prompts/", "/v2/prompts/")
 CONTROL = "code_suggestions_actor_limit"
 PROMPTS_CONTROL = "prompts_actor_limit"
+PROXY_PATHS = ("/v1/proxy/",)
+PROXY_CONTROL = "proxy_actor_limit"
 GATEWAY_ISSUER = "gitlab-ai-gateway"
 REJECTION = {
     "detail": "Too many concurrent requests",
@@ -140,6 +142,7 @@ def held_app_fixture(gate: asyncio.Event, entered: list[str]) -> FastAPI:
     @app.post("/v2/code/completions")
     @app.post("/v4/code/suggestions")
     @app.post("/v1/prompts/other")
+    @app.post("/v1/proxy/anthropic/v1/messages")
     async def held(request: Request) -> dict[str, str]:
         entered.append(request.url.path)
         await gate.wait()
@@ -509,44 +512,48 @@ async def test_enforce_rejects_users_of_one_saas_root_namespace(client, limiter,
 
 
 @pytest.mark.asyncio
-async def test_each_control_counts_only_its_own_routes(held_app, limiter, gate):
-    prompts_limiter = ActorLimitMiddleware(
+@pytest.mark.parametrize(
+    ("path_prefixes", "control", "path"),
+    [
+        (PROMPT_PATHS, PROMPTS_CONTROL, "/v1/prompts/other"),
+        (PROXY_PATHS, PROXY_CONTROL, "/v1/proxy/anthropic/v1/messages"),
+    ],
+    ids=["prompts", "proxy"],
+)
+async def test_each_control_counts_only_its_own_routes(
+    held_app, limiter, gate, path_prefixes, control, path
+):
+    other_limiter = ActorLimitMiddleware(
         held_app,
         limits=make_limits(),
-        path_prefixes=PROMPT_PATHS,
-        control_name=PROMPTS_CONTROL,
+        path_prefixes=path_prefixes,
+        control_name=control,
     )
-    limiter.app = prompts_limiter
+    limiter.app = other_limiter
     labels = {"mode": "enforce", "outcome": "rejected", "bucket": "user"}
-    rejected_before = sample("actor_limit_total", labels, control=PROMPTS_CONTROL)
+    rejected_before = sample("actor_limit_total", labels, control=control)
     code_rejected_before = sample("actor_limit_total", labels)
     transport = httpx.ASGITransport(
         app=UserFromHeaders(limiter), raise_app_exceptions=False
     )
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        held = [
-            asyncio.create_task(post(client, path="/v1/prompts/other"))
-            for _ in range(LIMIT)
-        ]
+        held = [asyncio.create_task(post(client, path=path)) for _ in range(LIMIT)]
         await wait_until(
-            lambda: prompts_limiter._in_flight.get(("user", "inst-1:user-a")) == LIMIT
+            lambda: other_limiter._in_flight.get(("user", "inst-1:user-a")) == LIMIT
         )
 
-        rejected = await post(client, path="/v1/prompts/other")
+        rejected = await post(client, path=path)
         completion = asyncio.create_task(post(client))
         await wait_until(lambda: limiter._in_flight.get(("user", "inst-1:user-a")) == 1)
         gate.set()
         responses = await asyncio.gather(*held, completion)
 
     assert rejected.status_code == 429
-    assert rejected.headers["x-gitlab-rate-limit"] == PROMPTS_CONTROL
+    assert rejected.headers["x-gitlab-rate-limit"] == control
     assert [r.status_code for r in responses] == [200] * (LIMIT + 1)
     assert not limiter._in_flight
-    assert not prompts_limiter._in_flight
-    assert (
-        sample("actor_limit_total", labels, control=PROMPTS_CONTROL)
-        == rejected_before + 1
-    )
+    assert not other_limiter._in_flight
+    assert sample("actor_limit_total", labels, control=control) == rejected_before + 1
     assert sample("actor_limit_total", labels) == code_rejected_before
 
 

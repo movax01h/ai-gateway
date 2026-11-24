@@ -34,6 +34,7 @@ from ai_gateway.config import (
     ConfigModelSelection,
     ConfigMtls,
     ConfigPrompts,
+    ConfigProxyEndpoints,
     ConfigSnowplow,
     ConfigTLS,
     ConfigVertexSearch,
@@ -1185,6 +1186,44 @@ def test_config_model_catalog_repo_storage_needs_project_and_token(env, missing)
             "prompts",
             ConfigPrompts(),
         ),
+        (
+            {},
+            "proxy_endpoints",
+            ConfigProxyEndpoints(
+                actor_limit_mode="off",
+                user_limit=5,
+                instance_limit=20,
+                instance_limit_per_seat=0.05,
+                namespace_limit=20,
+            ),
+        ),
+        (
+            {
+                "AIGW_PROXY_ENDPOINTS__ACTOR_LIMIT_MODE": "log",
+                "AIGW_PROXY_ENDPOINTS__USER_LIMIT": "7",
+                "AIGW_PROXY_ENDPOINTS__INSTANCE_LIMIT": "35",
+                "AIGW_PROXY_ENDPOINTS__INSTANCE_LIMIT_PER_SEAT": "0.3",
+                "AIGW_PROXY_ENDPOINTS__NAMESPACE_LIMIT": "45",
+                "AIGW_PROXY_ENDPOINTS__SAAS_ENABLED": "123",
+            },
+            "proxy_endpoints",
+            ConfigProxyEndpoints(
+                actor_limit_mode="log",
+                user_limit=7,
+                instance_limit=35,
+                instance_limit_per_seat=0.3,
+                namespace_limit=45,
+                saas_enabled="123",
+            ),
+        ),
+        (
+            {
+                "AIGW_CODE_SUGGESTIONS__USER_LIMIT": "3",
+                "AIGW_PROMPTS__ACTOR_LIMIT_MODE": "enforce",
+            },
+            "proxy_endpoints",
+            ConfigProxyEndpoints(),
+        ),
     ],
     ids=[
         "code suggestions defaults",
@@ -1192,6 +1231,9 @@ def test_config_model_catalog_repo_storage_needs_project_and_token(env, missing)
         "prompts defaults",
         "prompts from env",
         "prompts do not read the code suggestions settings",
+        "proxy endpoints defaults",
+        "proxy endpoints from env",
+        "proxy endpoints do not read the other routes' settings",
     ],
 )
 def test_config_actor_limits(values: dict, field: str, expected: ConfigActorLimits):
@@ -1216,6 +1258,11 @@ def test_config_actor_limits(values: dict, field: str, expected: ConfigActorLimi
         {"AIGW_PROMPTS__INSTANCE_LIMIT": "0"},
         {"AIGW_PROMPTS__INSTANCE_LIMIT_PER_SEAT": "-1"},
         {"AIGW_PROMPTS__NAMESPACE_LIMIT": "0"},
+        {"AIGW_PROXY_ENDPOINTS__ACTOR_LIMIT_MODE": "strict"},
+        {"AIGW_PROXY_ENDPOINTS__USER_LIMIT": "0"},
+        {"AIGW_PROXY_ENDPOINTS__INSTANCE_LIMIT": "0"},
+        {"AIGW_PROXY_ENDPOINTS__INSTANCE_LIMIT_PER_SEAT": "-1"},
+        {"AIGW_PROXY_ENDPOINTS__NAMESPACE_LIMIT": "0"},
     ],
 )
 def test_config_actor_limits_reject_invalid_values(values: dict):
