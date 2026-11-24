@@ -24,6 +24,7 @@ from ai_gateway.model_selection import (
     ModelSelectionConfig,
     ensure_paid_credits_model_access,
 )
+from ai_gateway.proxy.clients.caller_identity import resolve_caller_identity
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
 from lib.billing_events import BillingEvent
 from lib.billing_events.service import BillingEventService, ExecutionEnvironment
@@ -189,6 +190,9 @@ class ProxyClient:
                 stream=model.stream,
                 unit_primitive=GitLabUnitPrimitive.AI_GATEWAY_MODEL_PROVIDER_PROXY,
                 internal_event_client=self.internal_event_client,
+                event_context=resolve_caller_identity(
+                    request.headers
+                ).to_event_context(),
             ) as watcher:
                 # Setup token tracking
                 self.watcher = watcher
