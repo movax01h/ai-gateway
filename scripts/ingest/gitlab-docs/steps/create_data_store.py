@@ -78,10 +78,40 @@ def import_documents():
     print(metadata)
 
 
-if __name__ == "__main__":
+def delete_data_store() -> None:
+    client = discoveryengine.DataStoreServiceClient()
+
+    request = discoveryengine.DeleteDataStoreRequest(
+        name=f"projects/{project_id}/locations/global/collections/default_collection/"
+        f"dataStores/{data_store_id}",
+    )
+
+    operation = client.delete_data_store(request=request)
+
+    print("Waiting for operation to complete...")
+
+    operation.result()
+
+
+def run() -> None:
+    created = True
+
     try:
         create_data_store()
     except AlreadyExists as ex:
+        created = False
         print(f"INFO: Data store already exists. Skipped. {ex}")
 
-    import_documents()
+    try:
+        import_documents()
+    except Exception:
+        if created:
+            print(
+                "ERROR: Import failed. Deleting the data store that this run created."
+            )
+            delete_data_store()
+        raise
+
+
+if __name__ == "__main__":
+    run()
