@@ -40,6 +40,8 @@ def _flow_prompt_system(config: Path, prompt_name: str):
     def load() -> list[str]:
         flow = yaml.safe_load(config.read_text())
         prompt = next(p for p in flow["prompts"] if p["name"] == prompt_name)
+        if "template" in prompt:
+            return list(Template(**prompt["template"]).system_texts)
         return prompt["prompt_template"]["system"]
 
     return load
@@ -82,6 +84,9 @@ _LAYOUTS = {
     ),
     "developer/3.0.0": _flow_prompt_system(
         _DEVELOPER_CONFIGS / "3.0.0.yml", "developer_agent_prompt"
+    ),
+    "developer/4.0.0": _flow_prompt_system(
+        _DEVELOPER_CONFIGS / "4.0.0.yml", "developer_agent_prompt"
     ),
 }
 

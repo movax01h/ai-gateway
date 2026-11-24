@@ -1016,9 +1016,10 @@ def shipped_chat_partial_configs():
         for config_file in config_dir.glob("*.yml")
     )
     for config_id, config_file in chain(legacy, features):
-        environment = yaml.safe_load(config_file.read_text()).get("environment")
-        if environment == CHAT_PARTIAL_ENVIRONMENT:
-            yield config_id, config_file.stem
+        data = yaml.safe_load(config_file.read_text())
+        if data.get("environment") == CHAT_PARTIAL_ENVIRONMENT:
+            uses_template = any("template" in p for p in data.get("prompts") or [])
+            yield config_id, config_file.stem, uses_template
 
 
 def _as_registry_config(config_cls, data):
@@ -1120,17 +1121,19 @@ def test_a_known_registry_file_loads_as_its_environment_class_with_its_identity(
     assert (config.config_id, config.config_version) == ("assistant", "1.0.0")
 
 
-def test_every_shipped_chat_partial_config_stays_on_legacy_chat():
+def test_every_shipped_chat_partial_config_runs_on_the_engine_its_prompt_format_picks():
+    # Only a `template` prompt opts a config into the chat engine; every other one stays on legacy chat.
     with patch.dict(flow_config._FEATURE_FLOW_ROOTS):
         flow_config.discover_feature_flow_configs()
         configs = list(shipped_chat_partial_configs())
 
-        assert ("duo_permissions_assistant", "2.0.0") in configs
+        assert ("duo_permissions_assistant", "2.0.0", False) in configs
 
-        for config_id, version in configs:
+        for config_id, version, uses_template in configs:
             factory = _load_flow_from_registry(config_id, "v1", version).factory
 
-            assert factory.func is chat.Workflow, f"{config_id}/{version}"
+            expected = ChatFlow if uses_template else chat.Workflow
+            assert factory.func is expected, f"{config_id}/{version}"
 
 
 def test_an_inline_template_flow_never_reaches_the_engine():
