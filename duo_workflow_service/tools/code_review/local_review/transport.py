@@ -69,6 +69,9 @@ from duo_workflow_service.bl_security.executor_output import (
     strip_size_limit_notice,
 )
 from duo_workflow_service.executor.action import _execute_action, _read_file_fully
+from duo_workflow_service.tools.code_review.custom_instructions import (
+    INSTRUCTIONS_FILE_PATH,
+)
 from duo_workflow_service.tools.filesystem import validate_duo_context_exclusions
 from duo_workflow_service.tools.read_only_git import (
     GIT_GLOBAL_FLAGS as HARDENED_GIT_GLOBAL_FLAGS,
@@ -140,6 +143,9 @@ _REQUIRED_FLAGS = {
 
 # Git takes the last spelling: `status` accepts the negation and both take `=none`.
 _SUBMODULE_OPTIONS = ("--ignore-submodules", "--no-ignore-submodules")
+
+# Literal paths only, never model-controlled: the instructions file lives under denylisted `.gitlab/duo`.
+_DENYLIST_EXEMPT_PATHS = frozenset({INSTRUCTIONS_FILE_PATH})
 
 
 class GitCommandError(ToolException):
@@ -218,10 +224,11 @@ class GitRunner:
             file_path: The path, relative to the executor's directory.
 
         Returns:
-            The whole file, or None when the path is on the managed Duo context-exclusion denylist or the read
-            fails for any reason. A denylisted path sends no action to the executor.
+            The whole file, or None when the path is on the managed Duo context-exclusion denylist, outside
+            `_DENYLIST_EXEMPT_PATHS`, or the read fails for any reason. A denylisted path sends no action to
+            the executor.
         """
-        if is_denylisted(file_path):
+        if file_path not in _DENYLIST_EXEMPT_PATHS and is_denylisted(file_path):
             return None
 
         try:

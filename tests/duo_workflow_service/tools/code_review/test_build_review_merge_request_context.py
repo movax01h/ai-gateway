@@ -711,6 +711,20 @@ async def test_build_review_context_nested_vs_root_patterns(
             ),
             "Build review context for merge request !123 in project 42 (lightweight)",
         ),
+        (
+            BuildReviewMergeRequestContextInput(surface="checkout"),
+            "Build review context for the local checkout (working tree)",
+        ),
+        (
+            BuildReviewMergeRequestContextInput(
+                surface="checkout", mode="branch", base_ref="origin/main"
+            ),
+            "Build review context for the local checkout (committed changes against origin/main)",
+        ),
+        (
+            BuildReviewMergeRequestContextInput(surface="checkout", lightweight=True),
+            "Build review context for the local checkout (working tree) (lightweight)",
+        ),
     ],
 )
 def test_build_review_context_format_display_message(input_data, expected_message):
@@ -1776,6 +1790,9 @@ def test_output_flags_are_hidden_from_the_model_but_open_to_the_flow(metadata):
     model_facing = convert_to_openai_tool(tool)["function"]["parameters"]["properties"]
     assert "include_instruction_format_hint" not in model_facing
     assert "include_changed_files_list" not in model_facing
+    # With `surface` hidden no model can reach the checkout surface, so its knobs are hidden too.
+    assert "mode" not in model_facing
+    assert "base_ref" not in model_facing
     # Flags a model may legitimately choose are still its to choose.
     assert "lightweight" in model_facing
     assert "only_diffs" in model_facing
@@ -1788,11 +1805,15 @@ def test_output_flags_are_hidden_from_the_model_but_open_to_the_flow(metadata):
             "merge_request_iid": 123,
             "include_instruction_format_hint": "false",
             "include_changed_files_list": "true",
+            "mode": "branch",
+            "base_ref": "origin/main",
         },
         None,
     )
     assert parsed["include_instruction_format_hint"] is False
     assert parsed["include_changed_files_list"] is True
+    assert parsed["mode"] == "branch"
+    assert parsed["base_ref"] == "origin/main"
 
     # And the flow config's inputs: list still validates against that schema.
     validate_against_schema(
@@ -1802,6 +1823,8 @@ def test_output_flags_are_hidden_from_the_model_but_open_to_the_flow(metadata):
             "merge_request_iid",
             "include_instruction_format_hint",
             "include_changed_files_list",
+            "mode",
+            "base_ref",
         },
     )
 
@@ -1856,3 +1879,34 @@ def test_has_collapsed_diff_distinguishes_a_dropped_patch_from_a_patchless_chang
         )
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_omitting_surface_is_the_merge_request_surface(
+    gitlab_client_mock, metadata, mr_data, diffs_data
+):
+    """Rails stopped injecting a surface for merge request review, and a flow input that is missing resolves to an
+    explicit None, so both have to reach the same payload as a caller that names the surface."""
+
+    def responses():
+        return [
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(status_code=404, body="{}"),
+        ]
+
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    args = {"project_id": 1, "merge_request_iid": 123, "only_diffs": True}
+
+    gitlab_client_mock.aget = AsyncMock(side_effect=responses())
+    omitted = await tool.ainvoke(args)
+
+    gitlab_client_mock.aget = AsyncMock(side_effect=responses())
+    nulled = await tool.ainvoke({**args, "surface": None})
+
+    gitlab_client_mock.aget = AsyncMock(side_effect=responses())
+    explicit = await tool.ainvoke({**args, "surface": "merge_request"})
+
+    assert omitted == nulled == explicit
+    assert "<mr_title>" in omitted
+    assert BuildReviewMergeRequestContextInput.model_fields["surface"].default is None
