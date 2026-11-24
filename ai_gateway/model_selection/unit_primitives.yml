@@ -657,6 +657,48 @@ configurable_unit_primitives:
       - "claude_sonnet_5_5"
       - "claude_sonnet_5_5_vertex"
       - "claude_sonnet_5_vertex"
+  - feature_setting: "risk_assessment"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_models:
+      - identifier: "claude_sonnet_5_5_vertex"
+    selectable_models:
+      - "claude_opus_4_6_20260205"
+      - "claude_opus_4_6_bedrock"
+      - "claude_opus_4_6_vertex"
+      - "claude_opus_4_7"
+      - "claude_opus_4_7_bedrock"
+      - "claude_opus_4_7_vertex"
+      - "claude_opus_4_8"
+      - "claude_opus_4_8_bedrock"
+      - "claude_opus_4_8_vertex"
+      - "claude_opus_5"
+      - "claude_opus_5_5"
+      - "claude_opus_5_5_bedrock"
+      - "claude_opus_5_5_vertex"
+      - "claude_opus_5_bedrock"
+      - "claude_opus_5_vertex"
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_bedrock"
+      - "claude_sonnet_4_6_vertex"
+      - "claude_sonnet_5"
+      - "claude_sonnet_5_5"
+      - "claude_sonnet_5_5_bedrock"
+      - "claude_sonnet_5_5_vertex"
+      - "claude_sonnet_5_bedrock"
+      - "claude_sonnet_5_vertex"
+      - "gpt_6_1_sol"
+      - "gpt_6_1_sol_bedrock"
+      - "gpt_6_2_astra"
+      - "gpt_6_2_astra_bedrock"
+      - "gpt_6_2_sol"
+      - "gpt_6_2_sol_bedrock"
+      - "gpt_6_astra"
+      - "gpt_6_astra_bedrock"
+      - "gpt_6_luna"
+      - "gpt_6_luna_bedrock"
+      - "gpt_6_sol"
+      - "gpt_6_sol_bedrock"
   - feature_setting: "risk_classification"
     unit_primitives:
       - "duo_agent_platform"
@@ -727,6 +769,7 @@ flows:
   recommend_reviewers: [recommend_reviewers_assign]
   resolve_dependency_bump: [resolve_dependency_bump]
   resolve_sast_vulnerability: [sast_vulnerability_resolution]
+  risk_assessment: [risk_assessment]
   risk_classification: [risk_classification]
   sast_fp_detection: [sast_vulnerability_fp_detection]
   secrets_fp_detection: [secret_vulnerability_fp_detection]

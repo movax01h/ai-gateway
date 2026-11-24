@@ -1,0 +1,101 @@
+version: "v1"
+
+environment: ambient
+
+# Assesses a merge request against the risk assessment criteria GitLab sends: one risk level
+# and reason per touched area. GitLab matches files to area definitions, applies minimum risk
+# levels and decides the overall risk level. See
+# https://gitlab.com/gitlab-org/gitlab/-/work_items/641087
+components:
+  # Step 1: Fetch the MR diff only (no file content).
+  - name: "fetch_mr_diffs"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "true"
+        as: "only_diffs"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 2: One risk level and reason per area, each against that area's criteria. No tools:
+  # the criteria are written to be applied to the diff alone.
+  - name: "assess_risk"
+    type: AgentComponent
+    prompt_id: "risk_assessment"
+    prompt_version: "^1.0.0"
+    response_schema_id: "risk_assessment_results"
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: "context:inputs.agent_platform_risk_assessment_context.areas"
+        as: "areas"
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_diffs"
+    toolset: []
+    ui_log_events:
+      - "on_agent_final_answer"
+
+  # Step 3: Post the assessment to GitLab. The response schema already validated it, so it goes
+  # to the tool unchanged, without a model call that could change it.
+  - name: "submit_risk_assessment"
+    type: DeterministicStepComponent
+    tool_name: "submit_merge_request_risk_assessment"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_diff_sha"
+        as: "diff_sha"
+      - from: "context:assess_risk.final_answer.areas"
+        as: "areas"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "fetch_mr_diffs"
+    condition:
+      input: "context:fetch_mr_diffs.execution_result"
+      routes:
+        "success": "assess_risk"
+        "default_route": "abort"
+  - from: "assess_risk"
+    to: "submit_risk_assessment"
+  - from: "submit_risk_assessment"
+    condition:
+      input: "context:submit_risk_assessment.execution_result"
+      routes:
+        "success": "end"
+        "default_route": "abort"
+
+flow:
+  entry_point: "fetch_mr_diffs"
+  inputs:
+    - category: agent_platform_resource_context
+      version_constraint: "^1.1.0"
+      input_schema:
+        merge_request_id:
+          type: string
+          description: IID of the merge request being assessed.
+        merge_request_diff_sha:
+          type: string
+          description: >
+            The full SHA of the diff revision being assessed. GitLab stores it with the
+            assessment and rejects a submission that names any other revision.
+    - category: agent_platform_risk_assessment_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        areas:
+          type: array
+          description: >
+            The area definitions the change touches, in the format of the criteria file
+            (.gitlab/duo/mr-risk-assessment-criteria.yaml): {"name": string,
+            "fileFilters": [string], "minimumLevel": "low" | "medium" | "high" |
+            "critical" (optional), "criteria": string}. The agent gives exactly one risk
+            level per area definition, in the same order.

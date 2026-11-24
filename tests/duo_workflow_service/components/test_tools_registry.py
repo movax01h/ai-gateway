@@ -20,6 +20,9 @@ from ai.features.review.code_review.components import (
     PostDuoCodeReview,
     PostDuoCodeReviewFindings,
 )
+from ai.features.review.risk_assessment.components import (
+    SubmitMergeRequestRiskAssessment,
+)
 from ai.features.security.sast_fp_detection.components.post_sast_fp_analysis_to_gitlab import (
     PostSastFpAnalysisToGitlab,
 )
@@ -311,6 +314,7 @@ _outbox = MagicMock(spec=Outbox)
                 "post_duo_code_review",
                 "post_duo_code_review_findings",
                 "submit_merge_request_risk_classification",
+                "submit_merge_request_risk_assessment",
                 "extract_lines_from_text",
                 "get_glql_schema",
                 "fetch_glql_schema",
@@ -675,6 +679,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_work_item_statuses": tools.GetWorkItemStatuses(metadata=expected_metadata),
         "post_duo_code_review": PostDuoCodeReview(metadata=expected_metadata),
         "submit_merge_request_risk_classification": tools.SubmitMergeRequestRiskClassification(
+            metadata=expected_metadata
+        ),
+        "submit_merge_request_risk_assessment": SubmitMergeRequestRiskAssessment(
             metadata=expected_metadata
         ),
         "extract_lines_from_text": tools.ExtractLinesFromText(

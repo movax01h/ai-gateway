@@ -1,0 +1,12 @@
+name: risk_assessment
+model:
+  params:
+    max_tokens: 16_384
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'risk_assessment/system/1.0.0.jinja' %}
+  user: |
+    {% include 'risk_assessment/user/1.0.0.jinja' %}
+params:
+  timeout: 180

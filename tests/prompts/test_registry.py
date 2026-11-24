@@ -1961,6 +1961,7 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "resolve_sast_vulnerability_execution",
         "resolve_sast_vulnerability_push",
         "resolve_sast_vulnerability_push_and_create_mr",
+        "risk_assessment",
         "risk_classification",
         "sast_fp_detection_agent_prompt",
         "sast_post_results_to_gitlab_agent_prompt",
