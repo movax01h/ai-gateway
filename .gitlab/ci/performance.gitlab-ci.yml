@@ -47,7 +47,6 @@ tests:performance:
   trigger:
     project: gitlab-org/quality/component-performance-testing
     branch: main
-    strategy: depend
     forward:
       pipeline_variables: true
       yaml_variables: true
@@ -59,9 +58,16 @@ tests:performance:
     PARENT_PIPELINE_COMMIT_BRANCH: $CI_COMMIT_BRANCH
     PARENT_PIPELINE_SOURCE: $CI_PIPELINE_SOURCE
     COMPONENT_MR_CI_COMMIT_SHA: $CI_COMMIT_SHORT_SHA
-    COMPONENT_SERVICE_NAME: "ai-gateway-influx"
+    # New name, so ClickHouse trend history does not mix with the Docker-era runs
+    COMPONENT_SERVICE_NAME: "ai-gateway-caproni"
     TEST_FILE_LOCATION: "performance_tests/k6_test"
-    DOCKER_COMPOSE_FILE_LOCATION: "performance_tests/setup"
+    CAPRONI_CONFIG_LOCATION: "performance_tests/caproni/caproni.yaml"
+    # A released chart tag, so its default GitLab images are public and stable
+    GITLAB_HELM_CHART_REF: "v10.5.6"
+    # The AI Gateway is reachable only through the cluster's port 80
+    USE_TELEGRAF_METRICS: "false"
+    # CPT's job image sets KUBECTL_VERSION=1.28.0, too old for Caproni
+    KUBECTL_VERSION: "1.34.13"
   rules:
     - if: $CI_PROJECT_NAMESPACE =~ /^gitlab-org\/security.*/
       when: never

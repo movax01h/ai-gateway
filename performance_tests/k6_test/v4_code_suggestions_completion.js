@@ -37,7 +37,7 @@ scenarios:  {
 };
 
 export default function () {
-  const url = `http://${__ENV.AI_GATEWAY_IP}:5052/v4/code/suggestions`;
+  const url = `http://ai-gateway.${__ENV.AI_GATEWAY_IP}.nip.io/v4/code/suggestions`;
   const payload = JSON.stringify({
     "prompt_components": [
       {

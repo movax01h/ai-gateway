@@ -2,13 +2,13 @@
 
 ## `tests:performance` job
 
-The `test:performance` job runs in MR pipelines. It runs all the tests under the [`performance_test/k6_test`](../../performance_tests/k6_test/) directory against a Docker instance of AI Gateway. The Docker Compose file for the instance that the tests run against is under [`performance_test/setup`](../../performance_tests/setup/docker-compose.yml). The tests use [Grafana K6](https://grafana.com/docs/k6/latest/) to write the test.
+The `test:performance` job runs in MR pipelines. It runs all the tests under the [`performance_test/k6_test`](../../performance_tests/k6_test/) directory against the AI Gateway image built in the pipeline, deployed in a Kubernetes cluster with [Caproni](https://gitlab-org.gitlab.io/caproni/) alongside a released GitLab Helm chart. The Caproni config for that deployment is under [`performance_tests/caproni`](../../performance_tests/caproni/caproni.yaml). The tests use [Grafana K6](https://grafana.com/docs/k6/latest/) to write the test.
 
-The test uses the [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) tool, which is maintained by [Performance Enablement Group](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/developer-experience/performance-enablement/). For any questions or feedback, reach out to the [`#g_performance_enablement`](https://gitlab.enterprise.slack.com/archives/C081476PPAM) Slack channel.
+The test uses the [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing) tool, which is maintained by [Performance Enablement Group](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/developer-experience/performance-enablement/). For any questions or feedback, reach out to the [`#g_performance_enablement`](https://gitlab.enterprise.slack.com/archives/C081476PPAM) Slack channel.
 
 These tests are aimed to run against a mocked instance of AI Gateway. They ensure the changes submitted in the merge request cause no degradation in the TTFB values.
 
-The `test:performance` job triggers a multi-project pipeline in [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) project. This project spins up the AI Gateway instance as per the Docker Compose file, and runs the k6_test against it.
+The `test:performance` job triggers a multi-project pipeline in the [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing) project. This project deploys the AI Gateway with the Caproni config, and runs the k6 tests against it. Tests reach the AI Gateway at `http://ai-gateway.${__ENV.AI_GATEWAY_IP}.nip.io`. The pinned chart version is `GITLAB_HELM_CHART_REF` in the [CI configuration file](../../.gitlab/ci/performance.gitlab-ci.yml).
 
 The job finds tests recursively, so it runs and measures every `.js` file anywhere under `performance_tests/k6_test`.
 Tests that should be kept, but not measured in CI, live outside that directory in
@@ -101,6 +101,6 @@ The `tests:performance` job is intended to run only on merge requests and in the
 
 ### Code-related failures
 
-If the `tests:performance` job fails due to code-related issues rather than permissions, post a message in the [`#g_performance_enablement`](https://gitlab.enterprise.slack.com/archives/C081476PPAM) Slack channel for help.
+The `tests:performance` job does not wait for the CPT pipeline, so it passes even when the tests fail. If no performance results comment appears on the merge request, open the downstream CPT pipeline linked from the `tests:performance` job. For help with a failure there, post a message in the [`#g_performance_enablement`](https://gitlab.enterprise.slack.com/archives/C081476PPAM) Slack channel.
 
 The `tests:performance` job should run only in merge request pipelines, and main branch pipeline of the canonical [`ai-assist`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist) project.

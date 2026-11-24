@@ -1,0 +1,118 @@
+# yaml-language-server: $schema=https://gitlab.com/gitlab-org/caproni/-/raw/main/schema/config.v2.schema.json
+# AI Gateway under test inside a released GitLab chart, deployed by CPT.
+# Based on gitlab-org/gitlab qa/caproni/caproni.yaml and caproni.duo-agent-platform.yaml.
+
+version: 2
+
+variables:
+  # CPT overrides this with <server ip>.nip.io in caproni.local.yaml
+  BASE_DOMAIN: cng.test
+  # CPT sets GITLAB_CHART_PACKAGE; the archive URL is the local-run fallback
+  CHART: ${GITLAB_CHART_PACKAGE:-https://gitlab.com/gitlab-org/charts/gitlab/-/archive/${GITLAB_HELM_CHART_REF:?set GITLAB_HELM_CHART_REF or GITLAB_CHART_PACKAGE}/gitlab-${GITLAB_HELM_CHART_REF}.tar.gz}
+  GL_CNPG_VERSION: "0.29.0"
+  GL_DEV_STACK_VERSION: "1.6.0"
+  # build-docker-model-gateway tags the image with the short SHA
+  AIGW_IMAGE_TAG: ${CI_COMMIT_SHORT_SHA:?set CI_COMMIT_SHORT_SHA to the model-gateway image tag}
+
+deployers:
+  # gitlab-dev-stack writes its secrets here, so create it first
+  prerequisites:
+    type: namespace
+    namespace:
+      namespaces:
+        - gitlab
+
+  cloudnative-pg:
+    type: helm
+    helm:
+      namespace: cnpg-system
+      wait: true
+      repository:
+        name: cnpg
+        url: https://cloudnative-pg.github.io/charts
+      release:
+        name: cloudnative-pg
+        chart: cnpg/cloudnative-pg
+        version: ${GL_CNPG_VERSION}
+      dynamic_overrides:
+        - type: inline
+          value_map:
+            crds.create: true
+
+  gitlab-dev-stack:
+    type: helm
+    needs: [prerequisites, cloudnative-pg]
+    helm:
+      namespace: gitlab-dev-stack
+      wait: true
+      timeout: 10m
+      values_file: ./values/gitlab-dev-stack.yaml
+      release:
+        name: gitlab-dev-stack
+        chart: oci://registry.gitlab.com/gitlab-org/cloud-native/charts/gitlab-dev-stack/gitlab-dev-stack:${GL_DEV_STACK_VERSION}
+
+  gitlab:
+    type: helm
+    needs: [prerequisites, gitlab-dev-stack]
+    helm:
+      namespace: gitlab
+      values_file: ./values/gitlab.yaml
+      # The AI Gateway image is large; Caproni has no deploy retry
+      wait: true
+      timeout: 15m
+      release:
+        name: gitlab
+        # GitLab images are the chart's released defaults, so pin a chart tag, not a branch
+        chart: ${CHART}
+      dynamic_overrides:
+        - type: inline
+          value_map:
+            global.hosts.domain: ${BASE_DOMAIN}
+
+            global.gatewayApi.enabled: true
+            global.ingress.enabled: false
+            global.gatewayApi.installEnvoy: true
+            global.gatewayApi.configureCertmanager: false
+            gatewayApiResources.gateway.protocol: HTTP
+
+            ai-gateway.install: true
+            ai-gateway.image.tag: ${AIGW_IMAGE_TAG}
+            ai-gateway.authBypassExternal: true
+            ai-gateway.customModels.enabled: false
+            ai-gateway.duoWorkflow.enabled: false
+            ai-gateway.duoWorkflow.authEnabled: false
+            ai-gateway.livenessProbe.initialDelaySeconds: 60
+            ai-gateway.readinessProbe.initialDelaySeconds: 30
+            # Same limits as the old Docker Compose service, so results stay comparable
+            ai-gateway.resources.requests.cpu: "1"
+            ai-gateway.resources.requests.memory: 4Gi
+            ai-gateway.resources.limits.cpu: "1"
+            ai-gateway.resources.limits.memory: 4Gi
+            ai-gateway.extraEnvironmentVariables:
+              - name: AIGW_AUTH__BYPASS_EXTERNAL
+                value: "true"
+              - name: AIGW_AUTH__BYPASS_EXTERNAL_WITH_HEADER
+                value: "false"
+              - name: AIGW_AUTH__BYPASS_JWT_SIGNATURE
+                value: "1"
+              - name: AIGW_MOCK_MODEL_RESPONSES
+                value: "true"
+              - name: AIGW_LOGGING__LEVEL
+                value: debug
+
+cluster:
+  driver: k3d
+  network:
+    hostname: gitlab.${BASE_DOMAIN}
+    additional_hostnames:
+      - ai-gateway.${BASE_DOMAIN}
+  k3d:
+    servers: 1
+    image: rancher/k3s:v1.34.9-k3s1
+    k3s:
+      # k3s's Traefik would fight the chart's Envoy for ports 80 and 22
+      disable:
+        - traefik
+    port_mappings:
+      - "80:80@loadbalancer"
+      - "22:22@loadbalancer"
