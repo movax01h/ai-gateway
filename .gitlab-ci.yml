@@ -140,7 +140,9 @@ include:
   - local: .gitlab/ci/ingest.gitlab-ci.yml
     rules: *skip-when-expedited-or-version-tag-include
   - template: Jobs/Container-Scanning.latest.gitlab-ci.yml
-  - template: Jobs/Dependency-Scanning.latest.gitlab-ci.yml
+  # Do not include Jobs/Dependency-Scanning.latest.gitlab-ci.yml. GitLab security
+  # settings outside this file add the dependency-scanning-profile-0 job, which
+  # scans all the lock files. The template only adds duplicate Gemnasium jobs.
   - template: Jobs/SAST.latest.gitlab-ci.yml
   - template: Jobs/Secret-Detection.latest.gitlab-ci.yml
 
@@ -232,12 +234,6 @@ gitlab-advanced-sast:
 
 # secret_detection only needs the source, not the build.
 secret_detection:
-  needs: []
-
-gemnasium-dependency_scanning:
-  needs: []
-
-gemnasium-python-dependency_scanning:
   needs: []
 
 .poetry:
