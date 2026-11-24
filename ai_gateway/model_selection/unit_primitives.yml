@@ -723,7 +723,6 @@ flows:
   issue_to_merge_request: [duo_agent_platform]
   onboarding_guide: [duo_agent_platform_agentic_chat]
   orbit_agent: [duo_agent_platform_agentic_chat]
-  readiness_score: [duo_agent_platform]
   recommend_reviewers: [recommend_reviewers_assign]
   resolve_dependency_bump: [resolve_dependency_bump]
   resolve_sast_vulnerability: [sast_vulnerability_resolution]

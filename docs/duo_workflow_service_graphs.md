@@ -1088,46 +1088,6 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `readiness_score 1.0.0 (v1)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> fetch;
-    fetch(fetch<br>#91;DeterministicStepComponent#93;);
-    fetch_notes(fetch_notes<br>#91;DeterministicStepComponent#93;);
-    rubric(rubric<br>#91;AgentComponent#93;);
-    coverage(coverage<br>#91;AgentComponent#93;);
-    falsifier(falsifier<br>#91;AgentComponent#93;);
-    xexam_rubric(xexam_rubric<br>#91;AgentComponent#93;);
-    xexam_coverage(xexam_coverage<br>#91;AgentComponent#93;);
-    xexam_falsifier(xexam_falsifier<br>#91;AgentComponent#93;);
-    verdict(verdict<br>#91;AgentComponent#93;);
-    persist(persist<br>#91;DeterministicStepComponent#93;);
-    fetch -.->|"success"| fetch_notes;
-    fetch -.->|"default_route"| abort;
-    fetch_notes -.->|"success"| rubric;
-    fetch_notes -.->|"default_route"| abort;
-    rubric --> coverage;
-    coverage --> falsifier;
-    falsifier --> xexam_rubric;
-    xexam_rubric --> xexam_coverage;
-    xexam_coverage --> xexam_falsifier;
-    xexam_falsifier --> verdict;
-    verdict --> persist;
-    persist -.->|"success"| __end__;
-    persist -.->|"default_route"| abort;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
 ## Graph: `recommend_reviewers 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
