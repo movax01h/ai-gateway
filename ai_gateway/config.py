@@ -534,6 +534,87 @@ ActorLimitMode = Literal["off", "log", "enforce"]
 
 PaidCreditModelsGateMode = Literal["off", "log", "enforce"]
 
+CatalogStorage = Literal["file", "repo"]
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+class ConfigModelCatalog(BaseModel):
+    """Where the model catalog (models, feature model lists and restrictions) is read from."""
+
+    storage: CatalogStorage = Field(
+        default="file",
+        description=(
+            "'file': the models.yml, unit_primitives.yml and model_restrictions.yml shipped in the "
+            "image. 'repo': a single catalog file in a GitLab repository, read through the GitLab API "
+            "(GitLab.com only)."
+        ),
+    )
+    repo_gitlab_url: str = Field(
+        default="https://gitlab.com",
+        description=(
+            "GitLab instance that hosts the catalog repository. Must use https://, except for a "
+            "loopback host (localhost, 127.0.0.1, ::1) in local development."
+        ),
+    )
+    repo_project: str = Field(
+        default="",
+        description="Full path or ID of the catalog repository. Required when storage is 'repo'.",
+    )
+    repo_ref: str = Field(
+        default="",
+        description=(
+            "Tag, branch or commit to read the catalog at. Empty (default): the tag of the latest release, "
+            "which is the active catalog."
+        ),
+    )
+    repo_path: str = Field(
+        default="catalog.yml",
+        description="Path of the catalog file in the repository.",
+    )
+    repo_token: Optional[SecretStr] = Field(
+        default=None,
+        description="Read-only project access token for the catalog repository. Required when storage is 'repo'.",
+    )
+    repo_timeout: float = Field(
+        default=10.0,
+        gt=0,
+        description="Timeout in seconds for one read of the catalog repository.",
+    )
+
+    @field_validator("repo_gitlab_url")
+    @classmethod
+    def _repo_gitlab_url_is_https(cls, value: str) -> str:
+        # The catalog token is sent to this host, so never send it in plain text.
+        parsed = urlparse(value)
+        if not parsed.hostname:
+            raise ValueError("repo_gitlab_url must be an absolute URL with a host")
+        if parsed.scheme == "https":
+            return value
+        if parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS:
+            return value
+        raise ValueError(
+            "repo_gitlab_url must use https:// (http:// is allowed only for localhost, "
+            "127.0.0.1 and ::1)"
+        )
+
+    @model_validator(mode="after")
+    def _repo_settings_present(self) -> "ConfigModelCatalog":
+        if self.storage == "repo":
+            missing = [
+                name
+                for name, value in (
+                    ("repo_project", self.repo_project),
+                    ("repo_token", self.repo_token),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    f"model catalog storage 'repo' needs {', '.join(missing)}"
+                )
+        return self
+
 
 class ConfigModelSelection(BaseModel):
     default_models: dict[str, list[str]] = Field(
@@ -624,6 +705,10 @@ class ConfigModelSelection(BaseModel):
             "not checked. 'off': no check. 'log': log the model that would be denied. "
             "'enforce': reject it (HTTP 403, gRPC PERMISSION_DENIED)."
         ),
+    )
+    catalog: ConfigModelCatalog = Field(
+        default_factory=ConfigModelCatalog,
+        description="Where the model catalog is read from.",
     )
 
 

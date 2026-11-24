@@ -374,6 +374,41 @@ gcloud auth print-identity-token --impersonate-service-account=<email> \
   | jq -rR 'split(".")[1] | gsub("-";"+") | gsub("_";"/") | @base64d | fromjson'
 ```
 
+## Catalog storage
+
+The model catalog is the data in `models.yml`, `unit_primitives.yml` and `model_restrictions.yml`.
+`ModelSelectionConfig` reads it through a `CatalogProvider` (`ai_gateway/catalog/`), validates it and keeps it in
+memory as one snapshot. `AIGW_MODEL_SELECTION__CATALOG__STORAGE` selects the provider:
+
+- `file` (default): the three files shipped in the image, which is today's behavior. Self-hosted gateways get
+  their selectable model list from their GitLab instance, but still resolve the self-hosted model families (for
+  example `Self-Hosted Claude`) from the shipped `models.yml`, so they keep using `file`. This option is not meant to
+  stay: once those families live in code, it goes away.
+- `repo`: one `catalog.yml` read from a GitLab repository through the GitLab API. For GitLab.com only. The
+  latest release of the repository is the active catalog: the provider looks up the tag of the latest release
+  (by `released_at`), reads `catalog.yml` at that tag, and reports the tag as the catalog version. To read a
+  fixed tag, branch or commit instead, set `AIGW_MODEL_SELECTION__CATALOG__REPO_REF`.
+
+A `catalog.yml` holds the top-level keys of the three files in one document: `models`,
+`configurable_unit_primitives`, `flows` and `restricted_models`.
+
+`ModelSelectionConfig.refresh()` loads the catalog again and swaps the new snapshot in as one step. If the load
+fails, the current snapshot stays in use. Each public method reads one snapshot from start to end, so a swap never
+gives a caller, for example, the feature lists of one version and the model definitions of the next.
+
+### Validate a catalog
+
+```shell
+# The catalog files shipped in this checkout or image
+poetry run python -m ai_gateway.catalog validate
+
+# A single-file catalog, for example in the catalog repository's CI
+poetry run python -m ai_gateway.catalog validate path/to/catalog.yml
+```
+
+The command runs the same checks as `ModelSelectionConfig.validate()`. It exits with `0` when the catalog is valid
+and `1` when it is not. Environment overrides such as `AIGW_MODEL_SELECTION__DEFAULT_MODELS` are not applied.
+
 ## Configuring model selection
 
 Each Unit Primitive can be configured with:
