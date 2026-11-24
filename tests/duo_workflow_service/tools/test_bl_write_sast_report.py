@@ -426,7 +426,7 @@ class TestWriteExecute:
 
         monkeypatch.setattr(bl, "_execute_action", _fake)
 
-        async def _boom(self, findings):
+        async def _boom(self, findings, verifier=None):
             raise RuntimeError("reanchor exploded")
 
         monkeypatch.setattr(BlWriteSastReport, "_verify_anchors", _boom)
@@ -2015,9 +2015,10 @@ def cancel_order(order_id):
             }
             for start, end, cwe in spans
         ]
-        contents: dict = {}
-        asyncio.run(_verify_anchors(_writer(), findings, contents))
-        return [f["body"] for f in _collapse_after_reanchor(findings, contents)]
+        writer = _writer()
+        verifier = bl._AnchorVerifier(writer)
+        asyncio.run(_verify_anchors(writer, findings, verifier))
+        return [f["body"] for f in _collapse_after_reanchor(findings, verifier.cache)]
 
     @pytest.mark.parametrize(
         "first,second",
@@ -2077,9 +2078,10 @@ def other(request):
             {"cwe": "CWE-639", "file": "views.py", "new_line": 1, "code_excerpt": exc}
             for exc in excerpts
         ]
-        sources: dict = {}
-        asyncio.run(_verify_anchors(_writer(), findings, sources))
-        return findings, _collapse_after_reanchor(findings, sources)
+        writer = _writer()
+        verifier = bl._AnchorVerifier(writer)
+        asyncio.run(_verify_anchors(writer, findings, verifier))
+        return findings, _collapse_after_reanchor(findings, verifier.cache)
 
     def test_a_decorator_first_quote_does_not_reach_the_next_function(
         self, monkeypatch
@@ -2633,9 +2635,10 @@ class TestPathRepair:
             }
             for file in files
         ]
-        sources: dict = {}
-        asyncio.run(_verify_anchors(_writer(), findings, sources))
-        return findings, _collapse_after_reanchor(findings, sources), calls
+        writer = _writer()
+        verifier = bl._AnchorVerifier(writer)
+        asyncio.run(_verify_anchors(writer, findings, verifier))
+        return findings, _collapse_after_reanchor(findings, verifier.cache), calls
 
     def test_a_dropped_prefix_is_repaired_and_merges_with_its_twin(self, monkeypatch):
         findings, out, calls = self._run(
@@ -2671,7 +2674,7 @@ class TestPathRepair:
 
         monkeypatch.setattr(bl, "_execute_action", _fake)
         findings = [{"cwe": "CWE-639", "file": "vpn/x.py", "code_excerpt": "x()"}]
-        asyncio.run(_verify_anchors(_writer(), findings, {}))
+        asyncio.run(_verify_anchors(_writer(), findings))
         assert findings[0]["file"] == "vpn/x.py"
         assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
 
@@ -2729,3 +2732,66 @@ class TestPathRepair:
         assert audit[bl._ANCHOR_DETAIL_KEY] == bl._ANCHOR_CORRECTED
         assert audit[bl._ANCHOR_CLAIMED_DETAIL_KEY] == "1"
         assert audit[bl._ANCHOR_CLAIMED_FILE_DETAIL_KEY] == "vpn/graphql/schema.py"
+
+
+class TestExecuteOwnsTheAnchorCache:
+    @pytest.mark.asyncio
+    async def test_files_read_before_a_raise_still_reach_the_collapse(self):
+        """``_execute`` hands the files read before the pass raised to ``_collapse_after_reanchor``."""
+        writer = BlWriteSastReport(metadata={"outbox": object()})
+        findings = [
+            {"file": "a.rb", "new_line": 1, "code_excerpt": "Record.find"},
+            {"file": "b.rb", "new_line": 1, "code_excerpt": "Record.find"},
+        ]
+        real_mark = bl._mark_anchor
+        marks: list = []
+
+        def _mark_then_boom(f, *args):
+            # The first finding is marked; the second raises past ``check``'s guard.
+            marks.append(f.file)
+            if f.file == "b.rb":
+                raise RuntimeError("boom")
+            return real_mark(f, *args)
+
+        async def _fake(metadata, action):
+            if action.HasField("runReadFile"):
+                return "Record.find(params[:id])"
+            return "ok"
+
+        with (
+            patch.object(bl, "_execute_action", side_effect=_fake),
+            patch.object(bl, "_mark_anchor", side_effect=_mark_then_boom),
+            patch.object(
+                bl, "_collapse_after_reanchor", wraps=bl._collapse_after_reanchor
+            ) as collapse,
+        ):
+            out = await writer._execute(findings)
+        assert "Wrote 2 vulnerabilities" in out
+        assert marks[0] == "a.rb" and "b.rb" in marks
+        assert collapse.call_args.args[1] == {
+            "a.rb": "Record.find(params[:id])",
+            "b.rb": "Record.find(params[:id])",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_project_rule_does_not_fail_the_report(self):
+        """A bad exclusion rule fails the verifier's construction: the report is still written, anchors stay claims."""
+        writer = BlWriteSastReport(
+            metadata={"outbox": object(), "project": {"exclusion_rules": [None]}}
+        )
+        findings = [
+            {"file": "a.rb", "new_line": 1, "code_excerpt": "Record.find"},
+        ]
+
+        written: dict = {}
+
+        async def _fake(metadata, action):
+            if action.HasField("runWriteFile"):
+                written["contents"] = action.runWriteFile.contents
+            return "ok"
+
+        with patch.object(bl, "_execute_action", side_effect=_fake):
+            out = await writer._execute(findings)
+        assert "Wrote 1 vulnerabilities" in out
+        (vuln,) = json.loads(written["contents"])["vulnerabilities"]
+        assert vuln["description"].endswith(bl.UNVERIFIED_LINE_NOTE)

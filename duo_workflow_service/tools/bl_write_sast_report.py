@@ -752,6 +752,98 @@ class BlWriteSastReportInput(BaseModel):
 _MAX_PATH_LOOKUPS = 20
 
 
+class _AnchorVerifier:
+    """One anchor-verification pass: the files read, the paths listed, and the outcome counts.
+
+    The caller holds the verifier, so the files read so far outlive a pass that raises.
+    """
+
+    def __init__(self, tool: "BlWriteSastReport") -> None:
+        self.tool = tool
+        self.cache: dict = {}
+        self.counts = dict.fromkeys(_ANCHOR_STATES, 0)
+        self.listed: dict = {}
+        self.policy = FileExclusionPolicy(tool.project)
+
+    def record(
+        self,
+        finding: Finding,
+        status: str,
+        reason: str = "",
+        claimed: Optional[int] = None,
+    ) -> Finding:
+        marked = _mark_anchor(finding, status, reason, claimed)
+        self.counts[status] += 1
+        return marked
+
+    def allowed(self, path: str) -> bool:
+        # The file comes from model output: apply the project's rules AND the
+        # always-on denylist and traversal guard, as ReadFile does.
+        try:
+            validate_duo_context_exclusions(path)
+        except ToolException:
+            return False
+        return self.policy.is_allowed(path)
+
+    async def read(self, path: str) -> Optional[str]:
+        if path not in self.cache:
+            try:
+                # MUST follow read pagination: against a prefix, every
+                # quote below the cut is either a false "not present" or
+                # is matched to a lookalike inside the prefix and MOVED.
+                resp = await _read_file_fully(
+                    self.tool.metadata or {}, path, execute=_execute_action
+                )
+                self.cache[path] = resp if isinstance(resp, str) else None
+            except Exception as exc_err:
+                _log.info("bl_anchor read failed", file=path, err=str(exc_err))
+                self.cache[path] = None
+        return self.cache.get(path)
+
+    def reject_reason(self, f: Finding) -> str:
+        """Why the finding's anchor cannot be checked at all, or ``""`` when it can."""
+        if not f.file:
+            return _ANCHOR_NO_FILE
+        if not f.excerpt.strip():
+            # No quote was ever emitted, so this anchor is uncheckable
+            # by construction, not merely unchecked.
+            return _ANCHOR_NO_EXCERPT
+        if not self.allowed(f.file):
+            return _ANCHOR_EXCLUDED
+        return ""
+
+    async def check(self, f: Finding) -> Finding:
+        """The finding annotated with its anchor outcome, relocated or repaired where the check could."""
+        try:
+            if reason := self.reject_reason(f):
+                return self.record(f, _ANCHOR_UNVERIFIED, reason)
+            file = f.file
+            content = await self.read(file)
+            repaired = (
+                "" if content else await self.tool._repair_path(file, self.listed)
+            )
+            if repaired and self.allowed(repaired) and await self.read(repaired):
+                f = f.with_changes(claimed_file=file, file=repaired)
+                content = self.cache[repaired]
+            if not content:
+                return self.record(f, _ANCHOR_UNVERIFIED, _ANCHOR_UNREADABLE)
+            claimed = f.line
+            ln = _find_excerpt_line(content, f.excerpt, hint=claimed)
+            if not ln:
+                return self.record(f, _ANCHOR_UNVERIFIED, _ANCHOR_NOT_PRESENT)
+            if ln == claimed:
+                return self.record(f, _ANCHOR_VERIFIED)
+            return self.record(
+                f.with_changes(new_line=ln),
+                _ANCHOR_CORRECTED,
+                "" if claimed else _ANCHOR_NO_CLAIM,
+                claimed,
+            )
+        except Exception as loop_err:
+            _log.info("bl_anchor finding skipped", err=str(loop_err))
+            return self.record(f, _ANCHOR_UNVERIFIED, _ANCHOR_RAISED)
+
+
 class BlWriteSastReport(DuoBaseTool):
     name: str = "bl_write_sast_report"
     description: str = dedent(
@@ -777,7 +869,7 @@ class BlWriteSastReport(DuoBaseTool):
         return f"Writing SAST report for {count} findings"
 
     async def _verify_anchors(
-        self, findings: List[Finding], cache: Optional[dict] = None
+        self, findings: List[Finding], verifier: Optional[_AnchorVerifier] = None
     ) -> dict:
         """Check every finding's line against the file, and RECORD WHICH of the three outcomes it was.
 
@@ -796,87 +888,13 @@ class BlWriteSastReport(DuoBaseTool):
         check the first page only and it would relocate quotes onto lookalikes in that prefix. Best-effort: it MUST
         NEVER fail report generation, so every step is defensively guarded - but a guard that fires yields
         ``unverified`` rather than silence. Replaces each finding in the list with its annotated copy; returns the
-        per-outcome counts. The file contents it read are left in ``cache``.
+        per-outcome counts. The file contents it read are left in ``verifier.cache``; ``_execute`` passes its own
+        verifier, so they survive a raise and it still hands them to ``_collapse_after_reanchor``.
         """
-        cache = {} if cache is None else cache
-        counts = dict.fromkeys(_ANCHOR_STATES, 0)
-
-        def _record(
-            i: int, status: str, reason: str = "", claimed: Optional[int] = None
-        ) -> None:
-            findings[i] = _mark_anchor(findings[i], status, reason, claimed)
-            counts[status] += 1
-
-        listed: dict = {}
-        policy = FileExclusionPolicy(self.project)
-
-        def _allowed(path: str) -> bool:
-            # The file comes from model output: apply the project's rules AND the
-            # always-on denylist and traversal guard, as ReadFile does.
-            try:
-                validate_duo_context_exclusions(path)
-            except ToolException:
-                return False
-            return policy.is_allowed(path)
-
-        async def _read(path: str) -> Optional[str]:
-            if path not in cache:
-                try:
-                    # MUST follow read pagination: against a prefix, every
-                    # quote below the cut is either a false "not present" or
-                    # is matched to a lookalike inside the prefix and MOVED.
-                    resp = await _read_file_fully(
-                        self.metadata or {}, path, execute=_execute_action
-                    )
-                    cache[path] = resp if isinstance(resp, str) else None
-                except Exception as exc_err:
-                    _log.info("bl_anchor read failed", file=path, err=str(exc_err))
-                    cache[path] = None
-            return cache.get(path)
-
+        verifier = verifier or _AnchorVerifier(self)
         for i, f in enumerate(findings):
-            try:
-                exc = f.excerpt
-                file = f.file
-                if not file:
-                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_NO_FILE)
-                    continue
-                if not exc.strip():
-                    # No quote was ever emitted, so this anchor is uncheckable
-                    # by construction, not merely unchecked.
-                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_NO_EXCERPT)
-                    continue
-                if not _allowed(file):
-                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_EXCLUDED)
-                    continue
-                content = await _read(file)
-                repaired = "" if content else await self._repair_path(file, listed)
-                if repaired and _allowed(repaired) and await _read(repaired):
-                    f = findings[i] = f.with_changes(claimed_file=file, file=repaired)
-                    file = repaired
-                    content = cache[file]
-                if not content:
-                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_UNREADABLE)
-                    continue
-                claimed = f.line
-                ln = _find_excerpt_line(content, exc, hint=claimed)
-                if not ln:
-                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_NOT_PRESENT)
-                elif ln == claimed:
-                    _record(i, _ANCHOR_VERIFIED)
-                else:
-                    findings[i] = f.with_changes(new_line=ln)
-                    _record(
-                        i,
-                        _ANCHOR_CORRECTED,
-                        "" if claimed else _ANCHOR_NO_CLAIM,
-                        claimed,
-                    )
-            except Exception as loop_err:
-                _log.info("bl_anchor finding skipped", err=str(loop_err))
-                _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_RAISED)
-                continue
-        return counts
+            findings[i] = await verifier.check(f)
+        return verifier.counts
 
     async def _repair_path(self, file: str, listed: dict) -> str:
         """The one repository path ending in ``/<file>``, or ``""``: a model sometimes drops a leading directory.
@@ -1055,7 +1073,10 @@ class BlWriteSastReport(DuoBaseTool):
         ]
         sources: dict = {}
         try:
-            anchors = await self._verify_anchors(parsed, sources)
+            # Built inside the guard: its policy compiles the project's rules.
+            verifier = _AnchorVerifier(self)
+            sources = verifier.cache
+            anchors = await self._verify_anchors(parsed, verifier)
         except Exception as e:  # pylint: disable=exception-swallowing-in-tool
             # The pass must never fail report generation - but a report built
             # from findings it never annotated is not a clean one, and
