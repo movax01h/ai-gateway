@@ -30,8 +30,8 @@ def discover_flow_configs_fixture():
         ("^3.0.0", "3.1.0", "2.1.0"),
         # 3.0.0 pins the prompt to ^2.0.0, so it also gets the compact 2.1.0 prompt.
         ("3.0.0", "3.0.0", "2.1.0"),
-        # Only an exact request serves the dev config, so only the Rails feature flag selects it.
-        ("4.0.0-dev", "4.0.0-dev", "3.0.0-dev"),
+        # The 4.x flow takes the optional Rails fields, so only a ^4.0.0 request selects it.
+        ("^4.0.0", "4.0.0", "3.0.0"),
     ],
 )
 def test_config_resolution(
