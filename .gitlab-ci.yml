@@ -223,12 +223,16 @@ Internal event definitions validation:
 # Cache taint-signature analysis results between pipeline runs so unchanged
 # files are not re-analyzed on every scan.
 # https://docs.gitlab.com/user/application_security/sast/gitlab_advanced_sast/#incremental-scanning
+# The analyzer uses one core less than MAX_UNVERIFIED_CORES (default 4).
+# A value of 8 gives 7 workers on the 8-core runner, with about 4 GB of memory each.
+# https://docs.gitlab.com/user/application_security/sast/gitlab_advanced_sast/#tune-runner-resources
 gitlab-advanced-sast:
   needs: []
   tags:
     - saas-linux-large-amd64
   variables:
     GITLAB_ADV_SAST_INCR_SCAN: "true"
+    MAX_UNVERIFIED_CORES: "8"
 
 # secret_detection only needs the source, not the build.
 secret_detection:
