@@ -1,5 +1,6 @@
 .performance-changes: &performance-changes
   - ai/apps/aigw/**/*
+  - ai/platform/**/*
   - ai_gateway/**/*
   - lib/**/*
   - Dockerfile

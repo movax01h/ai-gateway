@@ -1,97 +1,49 @@
-from dependency_injector import containers, providers
-from py_grpc_prometheus.prometheus_client_interceptor import PromClientInterceptor
+from dependency_injector import providers
 
+from ai.platform.container import ContainerPlatform
 from ai_gateway.auth.container import ContainerSelfSignedJwt
 from ai_gateway.chat.container import ContainerChat
 from ai_gateway.code_suggestions.container import ContainerCodeSuggestions
-from ai_gateway.integrations.container import ContainerIntegrations
 from ai_gateway.models.container import ContainerModels
-from ai_gateway.models.v2.container import ContainerModels as ContainerModelsV2
-from ai_gateway.prompts.container import ContainerPrompts
-from ai_gateway.response_schemas.container import ContainerSchemas
-from ai_gateway.searches.container import ContainerSearches
 from ai_gateway.tracking.container import ContainerTracking
 from duo_workflow_service.audit_events.container import ContainerAuditEvent
-from lib.billing_events import ContainerBillingEvent
-from lib.internal_events import ContainerInternalEvent
-from lib.usage_quota import ContainerUsageQuota
 
 __all__ = [
     "ContainerApplication",
 ]
 
 
-class ContainerApplication(containers.DeclarativeContainer):
-    config = providers.Configuration(strict=True)
-
-    interceptor: providers.Singleton = providers.Singleton(
-        PromClientInterceptor,
-        enable_client_handling_time_histogram=True,
-        enable_client_stream_receive_time_histogram=True,
-        enable_client_stream_send_time_histogram=True,
+class ContainerApplication(ContainerPlatform):
+    snowplow = providers.Container(
+        ContainerTracking, config=ContainerPlatform.config.snowplow
     )
 
-    searches = providers.Container(
-        ContainerSearches,
-        config=config,
-    )
-
-    snowplow = providers.Container(ContainerTracking, config=config.snowplow)
-
-    internal_event = providers.Container(
-        ContainerInternalEvent, config=config.internal_event
-    )
-
-    billing_event = providers.Container(
-        ContainerBillingEvent,
-        config=config.billing_event,
-        internal_event=internal_event,
-    )
-
-    audit_event = providers.Container(ContainerAuditEvent, config=config.audit_event)
-
-    integrations = providers.Container(
-        ContainerIntegrations,
-        config=config,
+    audit_event = providers.Container(
+        ContainerAuditEvent, config=ContainerPlatform.config.audit_event
     )
 
     pkg_models = providers.Container(
         ContainerModels,
-        config=config,
-        integrations=integrations,
-        internal_event=internal_event,
-        billing_event=billing_event,
+        config=ContainerPlatform.config,
+        integrations=ContainerPlatform.integrations,
+        internal_event=ContainerPlatform.internal_event,
+        billing_event=ContainerPlatform.billing_event,
     )
-    pkg_models_v2 = providers.Container(
-        ContainerModelsV2,
-        config=config,
-        integrations=integrations,
-    )
-    pkg_prompts = providers.Container(
-        ContainerPrompts,
-        models=pkg_models_v2,
-        internal_event=internal_event,
-        config=config,
-    )
-    pkg_schemas = providers.Container(ContainerSchemas)
 
     code_suggestions = providers.Container(
         ContainerCodeSuggestions,
         models=pkg_models,
-        config=config.feature_flags,
+        config=ContainerPlatform.config.feature_flags,
         snowplow=snowplow,
-        billing_event=billing_event,
+        billing_event=ContainerPlatform.billing_event,
     )
     chat = providers.Container(
         ContainerChat,
-        prompts=pkg_prompts,
-        internal_event=internal_event,
-        config=config,
+        prompts=ContainerPlatform.pkg_prompts,
+        internal_event=ContainerPlatform.internal_event,
+        config=ContainerPlatform.config,
     )
     self_signed_jwt = providers.Container(
         ContainerSelfSignedJwt,
-        config=config,
-    )
-    usage_quota = providers.Container(
-        ContainerUsageQuota,
+        config=ContainerPlatform.config,
     )
