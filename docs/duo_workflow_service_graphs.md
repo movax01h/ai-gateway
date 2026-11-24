@@ -1418,6 +1418,31 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `risk_assessment 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> fetch_mr_diffs;
+    fetch_mr_diffs(fetch_mr_diffs<br>#91;DeterministicStepComponent#93;);
+    assess_risk(assess_risk<br>#91;AgentComponent#93;);
+    submit_risk_assessment(submit_risk_assessment<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_diffs -.->|"success"| assess_risk;
+    fetch_mr_diffs -.->|"default_route"| abort;
+    assess_risk --> submit_risk_assessment;
+    submit_risk_assessment -.->|"success"| __end__;
+    submit_risk_assessment -.->|"default_route"| abort;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `risk_classification 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
