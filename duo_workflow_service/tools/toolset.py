@@ -1,5 +1,17 @@
 import collections.abc
-from typing import Any, Collection, Mapping, Optional, Protocol, Type, Union, cast
+import types
+from typing import (
+    Any,
+    Collection,
+    Mapping,
+    Optional,
+    Protocol,
+    Type,
+    Union,
+    cast,
+    get_args,
+    get_origin,
+)
 
 import structlog
 from langchain.tools import BaseTool
@@ -10,6 +22,24 @@ from duo_workflow_service.entities.state import ApprovalSource
 from lib.context import record_approval_source
 
 log = structlog.stdlib.get_logger(__name__)
+
+_SEQUENCE_TYPES = (list, tuple, set, frozenset, collections.abc.Sequence)
+
+
+def _field_expects_sequence(annotation: Any) -> bool:
+    """Whether a Pydantic field annotation accepts a list/tuple/set (recursing through Optional/Union).
+
+    A str/bytes is itself a Sequence but is iterated character by character, which is the footgun we want to flag, so
+    only the collection types above count. Handles both ``typing.Union`` and the ``X | None`` form
+    (``types.UnionType``), and a bare builtin collection (``list``), which ``get_origin`` returns as ``None``.
+    """
+    if annotation in _SEQUENCE_TYPES:
+        return True
+    origin = get_origin(annotation)
+    if origin in (Union, types.UnionType):
+        return any(_field_expects_sequence(arg) for arg in get_args(annotation))
+    return origin in _SEQUENCE_TYPES
+
 
 # The sources a call can skip approval with; anything else persisted is dropped.
 _SKIP_SOURCES = frozenset(
@@ -295,8 +325,8 @@ class Toolset(collections.abc.Mapping):
     def _validate_tool_options(
         tool_name: str, tool: BaseTool, options: dict[str, Any]
     ) -> None:
-        """Validate that each option key is a valid parameter on the tool's input schema and that option values do not
-        contain deeply nested structures.
+        """Validate that each option key is a valid parameter on the tool's input schema, that its value matches the
+        field's declared type, and that option values do not contain deeply nested structures.
 
         Args:
             tool_name: The name of the tool.
@@ -304,18 +334,32 @@ class Toolset(collections.abc.Mapping):
             options: The option overrides to validate.
 
         Raises:
-            ValueError: If an option key is not a valid parameter for the tool,
-                or if an option value contains nested structures.
+            ValueError: If an option key is not a valid parameter for the tool, its value does not match the field's
+                declared type, or an option value contains nested structures.
         """
         schema_cls = cast(Type[BaseModel], tool.get_input_schema())
-        valid_fields = set(schema_cls.model_fields.keys())
+        model_fields = schema_cls.model_fields
         for key in options:
-            if key not in valid_fields:
+            if key not in model_fields:
                 raise ValueError(
                     f"Invalid tool option '{key}' for tool '{tool_name}'. "
-                    f"Valid parameters are: {sorted(valid_fields)}"
+                    f"Valid parameters are: {sorted(model_fields.keys())}"
                 )
         Toolset._validate_tool_option_values(tool_name, options)
+        for key, value in options.items():
+            # tool_options are injected into _execute without pydantic coercion, so a string given for a sequence
+            # field is iterated character by character at runtime rather than rejected. Catch that one footgun here
+            # (a str/bytes where the field expects a list/tuple/set) so it fails loud at toolset build. This is
+            # deliberately narrow: other type mismatches (e.g. an int for an Optional[str] field) already reach
+            # _execute uncoerced today, so rejecting them would break backward compatibility for stable v1 flows.
+            if isinstance(value, (str, bytes)) and _field_expects_sequence(
+                model_fields[key].annotation
+            ):
+                raise ValueError(
+                    f"Tool option '{key}' for tool '{tool_name}' expects a list, but got a "
+                    f"string: {value!r}. A string would be iterated character by character; "
+                    "wrap it in a list."
+                )
 
     @staticmethod
     def _validate_tool_option_values(tool_name: str, options: dict[str, Any]) -> None:

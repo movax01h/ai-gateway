@@ -18,6 +18,7 @@ from duo_workflow_service.executor.action import ToolExceptionWithResponse
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.security.secret_redaction import REDACTED_PLACEHOLDER
+from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.filesystem import (  # Mkdir,
     _UPLOAD_HINT_BARE,
     DEFAULT_CONTEXT_EXCLUSIONS,
@@ -41,6 +42,7 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     WriteFile,
     WriteFileInput,
     _is_trusted_absolute_path,
+    _is_within_allowed_directories,
     validate_duo_context_exclusions,
 )
 from lib.context import (
@@ -61,6 +63,11 @@ from tests.duo_workflow_service.tools.constants import (
     SENSITIVE_FILES,
     SUSPICIOUS_PATHS,
 )
+
+# Captured at import time, before the autouse conftest fixture patches
+# DuoBaseTool._arun to skip _apply_tool_options. The integration test needs the
+# genuine _arun so flow tool_options are actually injected into _execute.
+_REAL_DUO_ARUN = DuoBaseTool._arun
 
 
 @pytest.fixture(name="mock_project")
@@ -1614,6 +1621,239 @@ class TestWriteFile:
             await WriteFile(description="Write file content")._arun(
                 path, "file contents"
             )
+
+    @pytest.mark.asyncio
+    async def test_write_file_rejects_path_outside_allowed_directories(
+        self, mock_project
+    ):
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_response("done")
+        )
+        tool = WriteFile(description="Write file content")
+        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+
+        response = await tool._arun(
+            "scripts/deploy.sh", "contents", allowed_directories=["src", "docs"]
+        )
+
+        assert "Access denied" in response
+        assert "scripts/deploy.sh" in response
+        # The configured allowlist must not be echoed back to the model.
+        assert "docs" not in response
+        mock_outbox.put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_write_file_allows_path_inside_allowed_directories(
+        self, mock_project
+    ):
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_response("done")
+        )
+        tool = WriteFile(description="Write file content")
+        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+
+        response = await tool._arun(
+            "src/app/main.py", "contents", allowed_directories=["src", "docs"]
+        )
+
+        assert response == "done"
+        action = mock_outbox.put_action_and_wait_for_response.call_args[0][0]
+        assert action.runWriteFile.filepath == "src/app/main.py"
+
+    @pytest.mark.asyncio
+    async def test_write_file_without_allowed_directories_is_unrestricted(
+        self, mock_project
+    ):
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_response("done")
+        )
+        tool = WriteFile(description="Write file content")
+        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+
+        response = await tool._arun("anywhere/file.py", "contents")
+
+        assert response == "done"
+
+    @pytest.mark.asyncio
+    async def test_write_file_empty_allowed_directories_denies_all(self, mock_project):
+        """An explicit empty list is a deny-all allowlist, distinct from None."""
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_response("done")
+        )
+        tool = WriteFile(description="Write file content")
+        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+
+        response = await tool._arun("src/main.py", "contents", allowed_directories=[])
+
+        assert "Access denied" in response
+        mock_outbox.put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_write_file_denial_emits_security_event(self, mock_project):
+        """A denied write outside the allowlist emits one security event; an allowed write emits none."""
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_response("done")
+        )
+        tool = WriteFile(description="Write file content")
+        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+
+        with patch("duo_workflow_service.tools.filesystem._security_log") as mock_log:
+            await tool._arun("other/x.py", "c", allowed_directories=["src"])
+            assert mock_log.info.call_count == 1
+            kwargs = mock_log.info.call_args.kwargs
+            assert (
+                kwargs["event_type"] == "security.policy_violation.write_file_directory"
+            )
+            assert kwargs["target_details"] == "other/x.py"
+            assert kwargs["details"]["outcome"] == "failure"
+
+            mock_log.reset_mock()
+            await tool._arun("src/x.py", "c", allowed_directories=["src"])
+            mock_log.info.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_write_file_allowed_directories_from_tool_options(self, mock_project):
+        """allowed_directories supplied via flow tool_options reaches _execute.
+
+        The tools-test conftest patches _arun to skip _apply_tool_options, so the option is applied explicitly here to
+        mirror the real _arun path.
+        """
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_response("done")
+        )
+        tool = WriteFile(description="Write file content")
+        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+        tool._tool_options = {
+            "create_file_with_contents": {"allowed_directories": ["src"]}
+        }
+
+        kwargs = tool._apply_tool_options({"file_path": "other/file.py"})
+        response = await tool._execute(contents="contents", **kwargs)
+
+        assert "Access denied" in response
+        mock_outbox.put_action_and_wait_for_response.assert_not_called()
+
+
+class TestIsWithinAllowedDirectories:
+    @pytest.mark.parametrize(
+        "file_path,allowed,expected",
+        [
+            ("src/main.py", ["src"], True),
+            ("src/app/main.py", ["src"], True),
+            ("./src/main.py", ["src"], True),
+            ("/src/main.py", ["src"], True),
+            ("src/main.py", ["src/"], True),
+            ("src\\main.py", ["src"], True),
+            ("scripts/deploy.sh", ["src", "docs"], False),
+            ("source/main.py", ["src"], False),
+            ("src", ["src"], True),
+            ("anything.py", [""], True),
+            ("anything.py", ["."], True),
+            ("docs/a.md", ["src", "docs"], True),
+        ],
+    )
+    def test_is_within_allowed_directories(self, file_path, allowed, expected):
+        assert _is_within_allowed_directories(file_path, allowed) is expected
+
+
+class TestWriteFileAllowedDirectoriesIntegration:
+    """End-to-end wiring: flow YAML -> real _parse_toolset -> Toolset -> _arun -> _execute.
+
+    Unlike the unit tests above, this exercises the whole chain in one run and
+    uses the production ``FlowGraphBuilder._parse_toolset`` to split the YAML into
+    tool names and tool_options (rather than re-implementing that logic), so a
+    change to the real parser is caught here. It then builds a real Toolset (which
+    validates and applies tool_options onto the tool instance) and invokes the
+    genuine DuoBaseTool._arun so _apply_tool_options actually runs. The tools-test
+    conftest patches _arun per test, so the real implementation is captured at
+    import time (``_REAL_DUO_ARUN``).
+    """
+
+    @staticmethod
+    def _build_tool_from_yaml(yaml_snippet: str, mock_project):
+        """Parse a flow toolset YAML via the real parser and return the wired WriteFile."""
+        from types import SimpleNamespace
+        from typing import cast
+
+        import yaml
+
+        from duo_workflow_service.agent_platform.v1.flows.graph_builder import (
+            FlowGraphBuilder,
+        )
+        from duo_workflow_service.tools.toolset import Toolset
+
+        toolset_config = yaml.safe_load(yaml_snippet)["toolset"]
+
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_response("written")
+        )
+        tool = WriteFile(description="Write file content")
+        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+
+        # Stand-in registry: _parse_toolset calls self._tools_registry.toolset(...),
+        # which here builds a real Toolset so the tool_options are genuinely applied.
+        def _build_toolset(tool_names, tool_options=None):
+            return Toolset(
+                pre_approved=set(),
+                all_tools=dict.fromkeys(tool_names, tool),
+                tool_options=tool_options or {},
+            )
+
+        registry = SimpleNamespace(toolset=_build_toolset, mcp_tool_names=lambda: [])
+        flow_config = MagicMock()
+        flow_config.should_auto_inject_mcp_tools.return_value = False
+
+        # Call the real production parser with our stand-in as ``self`` so a change
+        # to the YAML-splitting logic is caught here (cast keeps mypy happy).
+        builder = cast(FlowGraphBuilder, SimpleNamespace(_tools_registry=registry))
+        toolset = FlowGraphBuilder._parse_toolset(builder, toolset_config, flow_config)
+        return toolset["create_file_with_contents"], mock_outbox
+
+    @pytest.mark.asyncio
+    async def test_yaml_allowed_directories_enforced_end_to_end(self, mock_project):
+        yaml_snippet = (
+            "toolset:\n"
+            "  - create_file_with_contents:\n"
+            '      allowed_directories: ["src", "docs"]\n'
+        )
+        tool, mock_outbox = self._build_tool_from_yaml(yaml_snippet, mock_project)
+
+        # Use the genuine _arun captured at import time (conftest patches the
+        # class attribute per test) so _apply_tool_options injects
+        # allowed_directories from the flow config.
+        real_arun = _REAL_DUO_ARUN
+
+        # Inside the allowlist -> written.
+        allowed = await real_arun(tool, "src/app/main.py", "contents")
+        assert allowed == "written"
+
+        # Outside the allowlist -> denied, action never sent, allowlist not leaked.
+        mock_outbox.put_action_and_wait_for_response.reset_mock()
+        denied = await real_arun(tool, "scripts/deploy.sh", "contents")
+        assert "Access denied" in denied
+        assert "docs" not in denied
+        mock_outbox.put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_yaml_bare_string_allowed_directories_is_rejected(self, mock_project):
+        """A bare string (not a list) is rejected when the toolset is built.
+
+        Through the real parser this used to pass validation and then be iterated
+        character by character, so ``allowed_directories: src`` denied ``src/a.py``
+        and allowed ``s/a.py``. It must now fail loud at build time.
+        """
+        yaml_snippet = (
+            "toolset:\n  - create_file_with_contents:\n      allowed_directories: src\n"
+        )
+        with pytest.raises(ValueError, match="expects a list, but got a string"):
+            self._build_tool_from_yaml(yaml_snippet, mock_project)
 
 
 def test_read_file_format_display_message(mock_project):

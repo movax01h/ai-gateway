@@ -1,3 +1,4 @@
+from typing import Dict, List, Optional
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -13,7 +14,9 @@ from duo_workflow_service.tools import (
     ToolType,
     UnknownToolError,
 )
+from duo_workflow_service.tools.filesystem import WriteFile, WriteFileInput
 from duo_workflow_service.tools.merge_request_notes import CreateMergeRequestNote
+from duo_workflow_service.tools.toolset import _field_expects_sequence
 from lib.context.approval_sources import (
     approval_sources,
     get_approval_source,
@@ -192,6 +195,109 @@ class TestToolset:
                 tool_options={
                     "create_merge_request_note": {"body": [["nested", "list"]]}
                 },
+            )
+
+    def test_write_file_accepts_allowed_directories_option(self):
+        """create_file_with_contents accepts allowed_directories as a valid option.
+
+        This mirrors the flow YAML
+        ``- create_file_with_contents: {allowed_directories: [...]}`` after the
+        graph builder splits it into tool_options. The field is on WriteFileInput
+        (so the toolset accepts it) but marked SkipJsonSchema, so it never ships in
+        the model-facing tool definition.
+        """
+        tool = WriteFile(description="Write file content")
+        all_tools = {"create_file_with_contents": tool}
+        options = {
+            "create_file_with_contents": {"allowed_directories": ["src", "docs"]}
+        }
+
+        toolset = Toolset(pre_approved=set(), all_tools=all_tools, tool_options=options)
+
+        assert toolset._tool_options == options
+
+    def test_allowed_directories_absent_from_model_facing_schema(self):
+        """The allowlist is a flow-only control: present as a field but hidden from the tool definition the model
+        actually receives (via convert_to_openai_tool), so the model cannot see or set it."""
+        from langchain_core.utils.function_calling import convert_to_openai_tool
+
+        tool = WriteFile(description="Write file content")
+        assert "allowed_directories" in WriteFileInput.model_fields
+        model_facing = convert_to_openai_tool(tool)["function"]["parameters"][
+            "properties"
+        ]
+        assert "allowed_directories" not in model_facing
+        assert set(model_facing) == {"file_path", "contents"}
+
+    def test_write_file_rejects_non_list_allowed_directories(self):
+        """A bare string is rejected at toolset build time, not iterated character by character at runtime."""
+        tool = WriteFile(description="Write file content")
+        all_tools = {"create_file_with_contents": tool}
+        with pytest.raises(ValueError, match="expects a list, but got a string"):
+            Toolset(
+                pre_approved=set(),
+                all_tools=all_tools,
+                tool_options={
+                    "create_file_with_contents": {"allowed_directories": "src"}
+                },
+            )
+
+    def test_scalar_tool_option_type_mismatch_stays_accepted(self):
+        """A non-sequence type mismatch (a string for an Optional[int] field) is left alone: it reaches _execute
+        uncoerced today, so rejecting it would break backward compatibility for stable v1 flows.
+
+        Only a string for a sequence field is rejected, because that one is silently iterated.
+        """
+        tool = CreateMergeRequestNote(
+            metadata={
+                "gitlab_client": None,
+                "gitlab_host": "gitlab.com",
+                "project": None,
+            }
+        )
+        all_tools = {"create_merge_request_note": tool}
+
+        toolset = Toolset(
+            pre_approved=set(),
+            all_tools=all_tools,
+            tool_options={"create_merge_request_note": {"merge_request_iid": "123"}},
+        )
+
+        assert toolset._tool_options == {
+            "create_merge_request_note": {"merge_request_iid": "123"}
+        }
+
+    @pytest.mark.parametrize(
+        "annotation,expected",
+        [
+            (List[str], True),
+            (Optional[List[str]], True),
+            (list[str] | None, True),
+            (Optional[list], True),
+            (list, True),
+            (tuple[int, ...] | None, True),
+            (set[str], True),
+            (str, False),
+            (Optional[str], False),
+            (int, False),
+            (Optional[int], False),
+            (Dict[str, str], False),
+            (None, False),
+        ],
+    )
+    def test_field_expects_sequence(self, annotation, expected):
+        """Covers typing.Union, the X | None (types.UnionType) form, and bare builtin collections."""
+        assert _field_expects_sequence(annotation) is expected
+
+    def test_write_file_rejects_unknown_option_key(self):
+        """A typo'd option on create_file_with_contents is rejected, not ignored."""
+        tool = WriteFile(description="Write file content")
+        all_tools = {"create_file_with_contents": tool}
+        with pytest.raises(ValueError, match="Invalid tool option 'allowed_dirs'"):
+            Toolset(
+                pre_approved=set(),
+                all_tools=all_tools,
+                tool_options={"create_file_with_contents": {"allowed_dirs": ["src"]}},
             )
 
     def test_tool_options_validation_rejects_list_with_dicts(self):
