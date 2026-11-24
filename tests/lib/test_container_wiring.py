@@ -60,21 +60,27 @@ def _validate_wiring_in_subprocess(code: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_real_dws_container_wires_clean():
+@pytest.mark.parametrize(
+    "container_module", ["ai_gateway.container", "ai.apps.dws.container"]
+)
+def test_real_dws_container_wires_clean(container_module):
     # Every @inject target reachable from the DWS container resolves at boot.
     _validate_wiring_in_subprocess(
-        "from ai_gateway.container import ContainerApplication\n"
+        f"from {container_module} import ContainerApplication\n"
         "from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES\n"
         "from lib.container_wiring import wire_and_validate\n"
         "wire_and_validate(ContainerApplication(), packages=CONTAINER_APPLICATION_PACKAGES)\n"
     )
 
 
-def test_real_aigw_container_wires_clean():
+@pytest.mark.parametrize(
+    "container_module", ["ai_gateway.container", "ai.apps.aigw.container"]
+)
+def test_real_aigw_container_wires_clean(container_module):
     # Every @inject target in AIGW's explicit module list resolves at boot.
     _validate_wiring_in_subprocess(
         "from ai.apps.aigw.server import CONTAINER_APPLICATION_MODULES\n"
-        "from ai_gateway.container import ContainerApplication\n"
+        f"from {container_module} import ContainerApplication\n"
         "from lib.container_wiring import wire_and_validate\n"
         "wire_and_validate(ContainerApplication(), modules=CONTAINER_APPLICATION_MODULES)\n"
     )
