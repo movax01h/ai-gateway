@@ -1,13 +1,17 @@
 from typing import Dict, List, Optional, Set
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.gitlab_api import Project
+from duo_workflow_service.tools.code_review.local_review import (
+    LocalReviewContextBuilder,
+)
 from duo_workflow_service.tools.code_review.local_review.transport import (
     DIFF_FLAGS,
     GIT_GLOBAL_FLAGS,
+    GitCommandError,
 )
 
 
@@ -98,7 +102,9 @@ class FakeGit:
         if argv[:2] == ["rev-parse", "--verify"]:
             ref = argv[-1].removesuffix("^{commit}")
             if ref not in self.known_refs:
-                raise ToolException(f"Action error: git rev-parse exited with 1: {ref}")
+                raise GitCommandError(
+                    "rev-parse", "1", f"fatal: Needed a single revision: {ref}"
+                )
             return ""
 
         # Longest match wins: the working_tree range is a prefix of the branch range, so
@@ -189,6 +195,15 @@ def _mirror_ranges(overrides: Dict[str, str]) -> Dict[str, str]:
         mirrored.setdefault(twin, value)
 
     return mirrored
+
+
+async def run_tool(fake: FakeGit, metadata, **kwargs) -> str:
+    builder = LocalReviewContextBuilder(metadata, metadata.get("project"))
+    with patch(
+        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        side_effect=fake,
+    ):
+        return await builder.build(**kwargs)
 
 
 def _file_diff(name: str, lines: int, text: str) -> str:

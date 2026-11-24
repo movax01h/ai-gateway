@@ -2,7 +2,7 @@ import base64
 import html
 import json
 import re
-from typing import Annotated, Any, Dict, Iterable, List, Optional, Type
+from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Type
 from urllib.parse import quote, unquote
 
 import structlog
@@ -22,6 +22,10 @@ from duo_workflow_service.tools.code_review.diff_format import (
     format_renamed_files,
     walk_diff_lines,
 )
+from duo_workflow_service.tools.code_review.local_review import (
+    LocalReviewContextBuilder,
+)
+from duo_workflow_service.tools.code_review.local_review.render import escape_text
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 from duo_workflow_service.tools.tool_output_manager import TruncationConfig
@@ -58,6 +62,46 @@ SHA_PATTERN = re.compile(r"\A[0-9a-fA-F]{7,64}\Z")
 class BuildReviewMergeRequestContextInput(ProjectResourceInput):
     """Input schema for building merge request review context."""
 
+    # Nullable rather than defaulted: a flow input can only be required or resolve to None,
+    # so a config wiring this in cannot express "absent means merge_request" on its own.
+    surface: Annotated[
+        Optional[Literal["merge_request", "checkout"]], InjectedToolArg
+    ] = Field(
+        default=None,
+        description=(
+            "Where the change under review lives. 'checkout' reads it from the local git "
+            "checkout the executor is running in; 'merge_request', or no value at all, reads "
+            "it from the API. Named for the context source rather than the client, so it "
+            "stays valid when a review is delegated from a web session onto a remote executor."
+        ),
+    )
+    # Injected like `surface`: with that field hidden no model can reach the checkout surface,
+    # so these two would only widen the schema of the flows that expose this tool to a model.
+    mode: Annotated[Optional[Literal["branch", "working_tree"]], InjectedToolArg] = (
+        Field(
+            default=None,
+            description=(
+                "Checkout surface only. 'working_tree' (the default) reviews everything the branch "
+                "has changed, committed or not; 'branch' restricts it to committed changes, i.e. "
+                "exactly what a merge request would contain."
+            ),
+        )
+    )
+    base_ref: Annotated[Optional[str], InjectedToolArg] = Field(
+        default=None,
+        description=(
+            "Checkout surface only. Ref to diff against; defaults to the project's default "
+            "branch, preferring the remote-tracking copy."
+        ),
+    )
+    # Injected: a guess at the author's intent would reach the reviewer as their own words.
+    intent: Annotated[Optional[str], InjectedToolArg] = Field(
+        default=None,
+        description=(
+            "Checkout surface only. What the change is meant to accomplish, in the author's "
+            "words, standing in for the merge request title and description."
+        ),
+    )
     merge_request_iid: Optional[int] = Field(
         default=None,
         description="The internal ID of the project merge request. Required if URL is not provided.",
@@ -142,6 +186,9 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
     async def _execute(self, **kwargs: Any) -> str:
         """Execute the tool to build merge request context."""
+        if kwargs.get("surface") == "checkout":
+            return await self._build_checkout_context(**kwargs)
+
         validation_result = self._validate_merge_request_url(
             kwargs.get("url"), kwargs.get("project_id"), kwargs.get("merge_request_iid")
         )
@@ -170,6 +217,19 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             include_diff_links=include_diff_links,
             include_instruction_format_hint=include_instruction_format_hint,
             include_changed_files_list=include_changed_files_list,
+        )
+
+    async def _build_checkout_context(self, **kwargs: Any) -> str:
+        """Dispatch to the local checkout builder, which renders the same payload from git."""
+        return await LocalReviewContextBuilder(self.metadata or {}, self.project).build(
+            mode=kwargs.get("mode") or "working_tree",
+            base_ref=kwargs.get("base_ref"),
+            intent=kwargs.get("intent"),
+            lightweight=kwargs.get("lightweight", False),
+            include_changed_files_list=kwargs.get("include_changed_files_list", False),
+            include_instruction_format_hint=kwargs.get(
+                "include_instruction_format_hint", True
+            ),
         )
 
     async def _build_context(
@@ -755,7 +815,9 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         )
         changed_files_section = (
             "<changed_files>\n"
-            + "\n".join(f"- {path}" for path in changed_paths)
+            # Escaped like the <file_diff> attributes: a path is a legal place to write a
+            # closing tag, and a bare list item closes an element just as well.
+            + "\n".join(f"- {escape_text(path)}" for path in changed_paths)
             + "\n</changed_files>"
             if include_changed_files_list
             else ""
@@ -860,7 +922,9 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         self, args: BuildReviewMergeRequestContextInput, tool_response: Any = None
     ) -> str:
         """Format a user-friendly display message."""
-        if args.url:
+        if args.surface == "checkout":
+            base_msg = self._describe_checkout(args)
+        elif args.url:
             base_msg = f"Build review context for merge request {args.url}"
         else:
             base_msg = (
@@ -877,6 +941,13 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             base_msg += self._format_exclusion_message(tool_response)
 
         return base_msg
+
+    @staticmethod
+    def _describe_checkout(args: BuildReviewMergeRequestContextInput) -> str:
+        change = "committed changes" if args.mode == "branch" else "working tree"
+        against = f" against {args.base_ref}" if args.base_ref else ""
+
+        return f"Build review context for the local checkout ({change}{against})"
 
     def _format_exclusion_message(self, tool_response: Any) -> str:
         """Format exclusion message from tool response."""

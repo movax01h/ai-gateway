@@ -1,12 +1,17 @@
 """The executor boundary: argv, the read-only allowlist and the exit-code envelope."""
 
+from typing import List
 from unittest.mock import patch
 
 import pytest
 from langchain_core.tools import ToolException
 
 from duo_workflow_service.bl_security.executor_output import executor_truncated
+from duo_workflow_service.tools.code_review.custom_instructions import (
+    INSTRUCTIONS_FILE_PATH,
+)
 from duo_workflow_service.tools.code_review.local_review.transport import (
+    ALLOWED_GIT_SUBCOMMANDS,
     DIFF_FLAGS,
     GIT_GLOBAL_FLAGS,
     STATUS_FLAGS,
@@ -19,8 +24,14 @@ from duo_workflow_service.tools.read_only_git import (
     GIT_GLOBAL_FLAGS as READ_ONLY_GIT_GLOBAL_FLAGS,
 )
 from tests.duo_workflow_service.tools.code_review.conftest import (
+    APP_DIFF,
+    BASE_SHA,
+    DIFF,
     FakeGit,
+    _strip_global_flags,
+    numstat,
     responses,
+    run_tool,
 )
 
 
@@ -505,3 +516,215 @@ async def test_a_refused_lazy_fetch_is_reported_as_a_partial_clone(metadata):
     with patch(PATCH, side_effect=lambda *_: f"Exit code: 128\n{body}"):
         with pytest.raises(ToolException, match="partial clone"):
             await git.run("diff", *DIFF_FLAGS)
+
+
+LFS_CONFIG = (
+    "filter.lfs.clean\ngit-lfs clean -- %f\0"
+    "filter.lfs.smudge\ngit-lfs smudge -- %f\0"
+    "filter.lfs.process\ngit-lfs filter-process\0"
+    "filter.lfs.required\ntrue\0"
+)
+
+
+def _overrides_in(argv: List[str]) -> List[str]:
+    """The `filter.*` overrides a raw git invocation carried, as `key=value` strings."""
+    return [
+        argv[i + 1]
+        for i, token in enumerate(argv[:-1])
+        if token == "-c" and argv[i + 1].startswith("filter.")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_never_writes_to_the_repository(metadata):
+    """Every emitted git action is read-only.
+
+    This is the tool's core guarantee.
+    """
+    fake = FakeGit(
+        responses(
+            status=numstat(" M app/a.rb", "?? scratch.txt"),
+            **{
+                f"{DIFF} --numstat -z {BASE_SHA}": numstat("1\t1\tapp/a.rb"),
+                f"{DIFF} {BASE_SHA}": APP_DIFF,
+            },
+        ),
+        files={"scratch.txt": "new line\n"},
+    )
+
+    await run_tool(fake, metadata, mode="working_tree")
+    await run_tool(fake, metadata, mode="branch")
+    await run_tool(fake, metadata, only_instructions=True)
+
+    forbidden = {
+        "add",
+        "commit",
+        "checkout",
+        "switch",
+        "stash",
+        "reset",
+        "restore",
+        "write-tree",
+        "update-index",
+        "fetch",
+        "push",
+        "clean",
+        "apply",
+        "-N",
+        "--intent-to-add",
+    }
+    for argv in fake.git_argvs:
+        assert argv[0] in ALLOWED_GIT_SUBCOMMANDS, argv
+        assert not forbidden.intersection(argv), argv
+
+    # Without this flag, `status` and `diff` opportunistically rewrite the index.
+    raw_argvs = [
+        list(a.runCommand.arguments)
+        for a in fake.actions
+        if a.WhichOneof("action") == "runCommand"
+    ]
+    assert raw_argvs and all(argv[0] == "--no-optional-locks" for argv in raw_argvs)
+
+
+@pytest.mark.asyncio
+async def test_git_argv_is_never_split_across_the_proto_flags_field(metadata):
+    """The executor concatenates `[...flags, ...args]`, so a split would reorder the argv.
+
+    `-c key=value` is a pair of tokens, and reordering can separate them.
+    """
+    fake = FakeGit(responses())
+
+    await run_tool(fake, metadata)
+
+    commands = [a for a in fake.actions if a.WhichOneof("action") == "runCommand"]
+    assert commands
+    for action in commands:
+        assert list(action.runCommand.flags) == [], action
+
+
+@pytest.mark.asyncio
+async def test_configured_filters_are_disabled_before_the_working_tree_is_read(
+    metadata,
+):
+    """`--no-ext-diff`/`--no-textconv` do not cover clean/smudge/process drivers.
+
+    A `filter` attribute makes git run the configured program to canonicalise working-tree
+    content, which is arbitrary execution from a tool that never asks for approval.
+    """
+    fake = FakeGit(responses(**{"config": LFS_CONFIG}))
+
+    await run_tool(fake, metadata, mode="working_tree")
+
+    expected = [
+        "filter.lfs.clean=",
+        "filter.lfs.process=",
+        "filter.lfs.required=false",
+        "filter.lfs.smudge=",
+    ]
+    worktree_reading = [
+        argv
+        for argv in fake.raw_argvs
+        if _strip_global_flags(argv)[0] in ("status", "diff", "check-attr")
+    ]
+    assert worktree_reading
+    for argv in worktree_reading:
+        assert sorted(_overrides_in(argv)) == expected, argv
+
+
+@pytest.mark.asyncio
+async def test_the_filter_query_runs_before_anything_reads_the_working_tree(metadata):
+    """Overrides discovered after the first worktree read would be too late to matter."""
+    fake = FakeGit(responses(**{"config": LFS_CONFIG}))
+
+    await run_tool(fake, metadata, mode="working_tree")
+
+    subcommands = [argv[0] for argv in fake.git_argvs]
+    first_worktree_read = min(
+        subcommands.index(name) for name in ("status", "diff") if name in subcommands
+    )
+    assert subcommands.index("config") < first_worktree_read
+
+
+@pytest.mark.asyncio
+async def test_a_repository_with_no_filters_adds_no_overrides(metadata):
+    fake = FakeGit(responses())
+
+    await run_tool(fake, metadata, mode="working_tree")
+
+    assert all(_overrides_in(argv) == [] for argv in fake.raw_argvs)
+
+
+@pytest.mark.asyncio
+async def test_driver_names_containing_dots_are_handled(metadata):
+    """`filter.my.driver.clean` names the driver `my.driver`, not `my`."""
+    fake = FakeGit(responses(**{"config": "filter.my.driver.clean\ncat\0"}))
+
+    await run_tool(fake, metadata, mode="working_tree")
+
+    status = next(
+        argv for argv in fake.raw_argvs if _strip_global_flags(argv)[0] == "status"
+    )
+    assert "filter.my.driver.clean=" in _overrides_in(status)
+
+
+@pytest.mark.asyncio
+async def test_a_required_filter_has_its_required_flag_cleared(metadata):
+    """Git reads an emptied command as a filter that failed, not one that is absent.
+
+    `git lfs install` sets `required = true`, so without clearing it every command aborts with "clean filter 'lfs'
+    failed" and the review produces nothing at all.
+    """
+    fake = FakeGit(
+        responses(
+            **{
+                "config": "filter.lfs.clean\ngit-lfs clean -- %f\0filter.lfs.required\ntrue\0"
+            }
+        )
+    )
+
+    await run_tool(fake, metadata, mode="working_tree")
+
+    worktree_reading = [
+        argv
+        for argv in fake.raw_argvs
+        if _strip_global_flags(argv)[0] in ("status", "diff", "check-attr")
+    ]
+    assert worktree_reading
+    for argv in worktree_reading:
+        assert sorted(_overrides_in(argv)) == [
+            "filter.lfs.clean=",
+            "filter.lfs.process=",
+            "filter.lfs.required=false",
+            "filter.lfs.smudge=",
+        ], argv
+
+
+@pytest.mark.asyncio
+async def test_a_diff_whose_content_mentions_the_marker_is_still_reviewed(metadata):
+    """The executor writes the marker on its own line; a diff line is always prefixed.
+
+    Matching it anywhere excluded any file discussing truncation -- including this repository's own tests for it.
+    """
+    mentions = (
+        "diff --git a/app/a.rb b/app/a.rb\n--- a/app/a.rb\n+++ b/app/a.rb\n"
+        "@@ -1,1 +1,2 @@\n-a = 1\n"
+        '+marker = "[... output truncated: showing first and last 25KB of 1.2MB ...]"\n'
+    )
+    fake = FakeGit(responses(**{f"{DIFF} {BASE_SHA} HEAD": mentions}))
+
+    result = await run_tool(fake, metadata, mode="branch")
+
+    assert '<file_diff filename="app/a.rb">' in result
+    assert "diff too large" not in result
+
+
+@pytest.mark.asyncio
+async def test_the_instructions_file_is_read_despite_living_under_the_denylist(
+    metadata,
+):
+    """`.gitlab/duo` is denylisted for general reads; the literal instructions path is the one exemption."""
+    assert is_denylisted(INSTRUCTIONS_FILE_PATH)
+    fake = FakeGit(responses(), files={INSTRUCTIONS_FILE_PATH: "---\n"})
+
+    with patch(PATCH, side_effect=fake):
+        assert await GitRunner(metadata).read_file(INSTRUCTIONS_FILE_PATH) == "---\n"
