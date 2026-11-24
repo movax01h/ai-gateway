@@ -1,0 +1,20 @@
+# The danger-review component has no cache, so every MR installed the gems of
+# our Gemfile again. Keep them in the project folder and cache them. The
+# component runs Danger with bundle exec, so it finds the gems there.
+danger-review:
+  variables:
+    BUNDLE_PATH: vendor/ruby
+    # We have no Gemfile.lock, so Bundler installs each new gem release next to
+    # the old one. Remove the old versions, so that the cache does not grow.
+    BUNDLE_CLEAN: "true"
+  cache:
+    key:
+      files:
+        - Gemfile
+      prefix: danger
+    paths:
+      - vendor/ruby/
+    policy: pull-push
+    # Upload the cache also when Danger fails, because the gems are installed
+    # by then.
+    when: always
