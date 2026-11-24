@@ -3429,6 +3429,24 @@ class TestWebSearchBinding:
         else:
             assert "bind_tools_params" not in call_kwargs
 
+    def test_web_search_binding_carries_the_denylist(
+        self, make_agent_component, mock_prompt_registry
+    ):
+        component = make_agent_component(
+            enable_web_search=True, web_search_blocked_domains=["evil.com"]
+        )
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=True),
+            patch(f"{self._MODULE}.is_client_capable", return_value=True),
+        ):
+            component._build_prompt(tools=[], tool_choice="auto")
+
+        call_kwargs = mock_prompt_registry.get_on_behalf.call_args.kwargs
+        assert call_kwargs["bind_tools_params"] == {
+            "web_search_options": {"blocked_domains": ["evil.com"]}
+        }
+
     def test_web_search_is_not_bound_when_excluded(
         self, make_agent_component, mock_prompt_registry
     ):

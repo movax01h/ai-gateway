@@ -825,6 +825,9 @@ class Flow(AbstractWorkflow):
             allow_agent_to_request_user=self._workflow_config.get(
                 "allow_agent_to_request_user", False
             ),
+            web_search_blocked_domains=self._workflow_config.get(
+                "web_search_denied_domains", []
+            ),
         )
 
     @override

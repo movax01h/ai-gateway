@@ -1158,6 +1158,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             )
 
         tools_registry = Mock()
+        flow._workflow_config["web_search_denied_domains"] = ["evil.com"]
 
         with patch(
             "duo_workflow_service.agent_platform.v1.flows.base.FlowGraphBuilder"
@@ -1177,6 +1178,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "allow_agent_to_request_user": flow._workflow_config.get(
                 "allow_agent_to_request_user", False
             ),
+            "web_search_blocked_domains": ["evil.com"],
         }
 
     def test_inline_response_schemas_are_registered_with_the_flow(

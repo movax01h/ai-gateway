@@ -1295,3 +1295,47 @@ async def test_fetch_workflow_file_attachments_allowed(workflow_fields, expected
     )
 
     assert workflow_config["file_attachments_allowed"] is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "workflow_fields, expected",
+    [
+        pytest.param(
+            {"webSearchDeniedDomains": ["evil.com"]}, ["evil.com"], id="denylist"
+        ),
+        pytest.param({"webSearchDeniedDomains": None}, [], id="null_from_schema"),
+        # GitLab < 19.7 strips the field, so search stays unrestricted as before.
+        pytest.param({}, [], id="field_missing"),
+    ],
+)
+async def test_fetch_workflow_web_search_denied_domains(workflow_fields, expected):
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test.git",
+                        "webUrl": "http://example.com/test",
+                    },
+                    "namespaceId": None,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "latestCheckpoint": None,
+                    **workflow_fields,
+                }
+            ]
+        }
+    }
+
+    _, _, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert workflow_config["web_search_denied_domains"] == expected

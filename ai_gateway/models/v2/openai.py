@@ -56,7 +56,10 @@ class ChatOpenAI(_LChatOpenAI):
 
         web_search_options = kwargs.pop("web_search_options", None)
         if web_search_options is not None:
-            tools_list.append({"type": "web_search"})
+            web_search_tool: dict[str, Any] = {"type": "web_search"}
+            if blocked := web_search_options.get("blocked_domains"):
+                web_search_tool["filters"] = {"blocked_domains": blocked}
+            tools_list.append(web_search_tool)
             kwargs["max_tool_calls"] = _WEB_SEARCH_MAX_TOOL_CALLS
             # A bound `include` wins over the field; carry the field's entries along.
             bound = kwargs["include"] if "include" in kwargs else self.include

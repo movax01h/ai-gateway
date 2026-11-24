@@ -134,3 +134,77 @@ def test_capable_provider_not_cleared_is_not_native():
         frozenset(),
     ):
         assert supports_native_web_search(_model(ModelClassProvider.ANTHROPIC)) is False
+
+
+def _denylist_tool(denied, locally_available=True) -> MagicMock:
+    tool = _tool("web_search", locally_available)
+    tool.metadata = {"web_search_blocked_domains": denied}
+    return tool
+
+
+@pytest.mark.parametrize(
+    "model",
+    [_model(ModelClassProvider.ANTHROPIC), _model(ModelClassProvider.OPENAI), None],
+    ids=["anthropic", "openai", "no_model"],
+)
+@pytest.mark.parametrize(
+    ("denied", "options"),
+    [
+        (["evil.com"], {"blocked_domains": ["evil.com"]}),
+        ([], {}),
+    ],
+    ids=["denylist", "empty_denylist"],
+)
+def test_native_search_takes_the_denylist(model, denied, options):
+    tools = [_tool("read_file"), _denylist_tool(denied)]
+
+    result, params = bind_web_search(tools, model, None)
+
+    assert [tool.name for tool in result] == ["read_file"]
+    assert params == {"web_search_options": options}
+
+
+@pytest.mark.parametrize(
+    ("denied", "bound", "params"),
+    [
+        (["evil.com"], ["web_search"], None),
+        ([], [], {"web_search_options": {}}),
+    ],
+    ids=["denylist_falls_back", "no_denylist_stays_native"],
+)
+def test_litellm_native_search_with_a_denylist(denied, bound, params):
+    """LiteLLM drops domain filters, so the fallback tool enforces the denylist."""
+    with patch(
+        "ai_gateway.models.v2.web_search_support.supports_native_web_search",
+        return_value=True,
+    ):
+        result, bound_params = bind_web_search([_denylist_tool(denied)], _VERTEX, None)
+
+    assert [tool.name for tool in result] == bound
+    assert bound_params == params
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        (
+            _model(ModelClassProvider.ANTHROPIC),
+            {"other": 1, "web_search_options": {"blocked_domains": ["evil.com"]}},
+        ),
+        # No fallback tool on this route, so the offer is dropped instead of running unfiltered.
+        (_VERTEX, {"other": 1}),
+    ],
+    ids=["anthropic_takes_it", "litellm_drops_the_offer"],
+)
+def test_native_only_offer_with_a_denylist(model, expected):
+    options = {"blocked_domains": ["evil.com"]}
+
+    with patch(
+        "ai_gateway.models.v2.web_search_support.supports_native_web_search",
+        return_value=True,
+    ):
+        _, params = bind_web_search(
+            [], model, {"other": 1, "web_search_options": options}
+        )
+
+    assert params == expected

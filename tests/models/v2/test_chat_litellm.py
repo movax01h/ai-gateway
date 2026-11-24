@@ -519,6 +519,23 @@ class TestDropUnsupportedWebSearch:
 
         assert "web_search_options" not in kwargs
 
+    @pytest.mark.usefixtures("vertex_cleared")
+    def test_dropped_with_a_denylist_for_capable_and_cleared_provider(self):
+        kwargs = {
+            "model": "claude-sonnet-4-6",
+            "custom_llm_provider": "vertex_ai",
+            "web_search_options": {"blocked_domains": ["evil.com"]},
+        }
+
+        with patch("ai_gateway.models.v2.chat_litellm.log") as mock_log:
+            _drop_unsupported_web_search(kwargs)
+
+        assert "web_search_options" not in kwargs
+        assert (
+            mock_log.warning.call_args.kwargs["reason"]
+            == "litellm drops the web search denylist"
+        )
+
     @pytest.mark.parametrize(
         "kwargs",
         [

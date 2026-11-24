@@ -92,6 +92,11 @@ def bind_web_search(
 
     With no resolved model, native is assumed: the default models search natively, and it risks
     no search rather than a duplicated, billable one.
+
+    With a denylist set, a model whose built-in search can't apply it gets the AgentCore
+    `web_search` tool instead, which applies the list. If that tool isn't configured, the model
+    gets no web search. A flow component that sets `enable_web_search` offers built-in search
+    only, so the model gets no web search there. Today this applies only to LiteLLM models.
     """
     params = bind_tools_params
     native_only_offer = params is not None and "web_search_options" in params
@@ -104,6 +109,23 @@ def bind_web_search(
 
     # Every prompt with tools binds through here; only an offer needs the model's capabilities.
     native = llm_definition is None or supports_native_web_search(llm_definition)
+    if offer is None:
+        denied = ((params or {}).get("web_search_options") or {}).get("blocked_domains")
+    else:
+        metadata = getattr(offer, "metadata", None)
+        denied = (
+            metadata.get("web_search_blocked_domains")
+            if isinstance(metadata, dict)
+            else None
+        )
+    # LiteLLM drops `blocked_domains`, so its native search would run unfiltered.
+    if (
+        denied
+        and llm_definition
+        and llm_definition.model_class_provider is ModelClassProvider.LITE_LLM
+    ):
+        native = False
+    options = {"blocked_domains": denied} if denied else {}
     if params is not None and native_only_offer and not native:
         params = {k: v for k, v in params.items() if k != "web_search_options"}
 
@@ -114,7 +136,7 @@ def bind_web_search(
     others = [tool for tool in tools if tool is not offer]
     if native:
         _log_route("native", "tool", llm_definition)
-        return others, {**(params or {}), "web_search_options": {}}
+        return others, {**(params or {}), "web_search_options": options}
     if getattr(offer, "locally_available", False):
         _log_route("fallback", "tool", llm_definition)
         return list(tools), params
