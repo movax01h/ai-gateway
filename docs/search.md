@@ -36,6 +36,8 @@ Process:
 1. Create a new data store in Vertex AI Search that imports the BigQuery table. If the data store already
    exists, import the BigQuery table with incremental or full update. See
    <https://cloud.google.com/generative-ai-app-builder/docs/refresh-data>.
+   If the import fails and this run created the data store, delete the data store. An empty data store returns
+   no results, and it stops the [fallback to a stable data store](#search-api-in-ai-gateway).
 1. Create a new search app in Vertex AI Search that connects to the data store. If the search app already exists, skip this step.
 
 As a result, the search app `gitlab-docs-17-0` is connected to the data store `gitlab-docs-17-0`, which was imported from the bigquery table `ai-enablement-dev-69497ba7.gitlab_docs_17_0.2024-04-25-12-43-30`.

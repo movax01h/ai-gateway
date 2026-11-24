@@ -60,7 +60,6 @@ ingest:dev:trigger:
 ingest:prod:
   stage: ingest
   extends: [.ingest-base, .oidc_base_gcp, .ingest-prod]
-  needs: [ingest:dev]
   rules:
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       when: never
@@ -75,7 +74,6 @@ ingest:prod:trigger:
 ingest:leg-prod:
   stage: ingest
   extends: [.ingest-base, .oidc_base_gcp, .ingest-leg-prod]
-  needs: [ingest:dev]
   rules:
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       when: never
