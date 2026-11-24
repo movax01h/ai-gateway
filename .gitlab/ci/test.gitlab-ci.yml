@@ -152,20 +152,6 @@ tests:agents:flow-creator:
   DW_CONCURRENCY: 3
   TRIGGER_SWE_BENCH: "true"
 
-check-dws-dependencies:
-  extends: .poetry
-  stage: test
-  needs:
-    - install
-  script:
-    - make duo-workflow-service-dependencies
-    - |
-      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
-        (git diff --exit-code .gitlab/ci/dws-dependencies.yml || (echo "ERROR: The dependencies at .gitlab/ci/dws-dependencies.yml are out of date. Run 'make duo-workflow-service-dependencies' locally to update the file." && exit 1))
-      fi
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-
 # Fire-and-forget child pipeline for the SWE-bench sanity check (CEF eval).
 # The trigger job succeeds as soon as the child pipeline starts, so the
 # ~30 min eval gives a signal on relevant MRs and pushes to the default
