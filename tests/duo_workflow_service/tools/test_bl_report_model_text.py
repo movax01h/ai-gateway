@@ -1,8 +1,6 @@
 # pylint: disable=file-naming-for-tests
 """Tests for the model's title and impact in the BL SAST report."""
 
-import asyncio
-
 import pytest
 
 from duo_workflow_service.tools.bl_collect_and_flatten import BlCollectAndFlatten
@@ -99,28 +97,27 @@ def test_title_and_impact_do_not_change_identity():
     )
 
 
-def test_title_and_impact_survive_dedup_triage_and_report():
+@pytest.mark.asyncio
+async def test_title_and_impact_survive_dedup_triage_and_report():
     """The real stage chain after the scan: dedup, triage's verdict merge, dedup again, then the writer."""
     finding = _finding(
         title="Webhook secret returned to a non-admin caller",
         impact="Any project member can read the webhook secret.",
     )
-    deduped = asyncio.run(_dedup()._execute([[finding]]))
+    deduped = await _dedup()._execute([[finding]])
     verdict = {
         "explanation": "x" * 20,
         "verdict": "KEEP",
         "clause": "KEEP-1",
         "evidence": "a",
     }
-    collected = asyncio.run(
-        BlCollectAndFlatten(metadata=None)._execute(
-            results=[{"final_answer": verdict}],
-            succeeded=1,
-            failed=0,
-            verdict_items=deduped,
-        )
+    collected = await BlCollectAndFlatten(metadata=None)._execute(
+        results=[{"final_answer": verdict}],
+        succeeded=1,
+        failed=0,
+        verdict_items=deduped,
     )
-    kept = asyncio.run(_dedup()._execute([collected["final_answer"]]))
+    kept = await _dedup()._execute([collected["final_answer"]])
     (v,) = _build_report(kept)["vulnerabilities"]
 
     assert v["name"] == "Webhook secret returned to a non-admin caller"
