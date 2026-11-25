@@ -76,7 +76,7 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
             return value
         return [value]
 
-    def validate_inputs(self, vulnerability_ids):
+    def validate_inputs(self, vulnerability_ids: list[str]) -> None:
         if not vulnerability_ids:
             raise ValueError("At least one vulnerability ID must be provided")
         # Filter out falsy values and check if any valid IDs remain
