@@ -624,7 +624,7 @@ configurable_unit_primitives:
   - feature_setting: "security_review"
     unit_primitives: []
     default_models:
-      - identifier: "claude_sonnet_4_6_vertex"
+      - identifier: "claude_sonnet_5_5_vertex"
     selectable_models:
       - "claude_opus_5_5"
       - "claude_opus_5_5_bedrock"
