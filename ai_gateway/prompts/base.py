@@ -116,6 +116,7 @@ from ai_gateway.prompts.feature_roots import (
     feature_prompt_root,
     nested_prompt_roots,
 )
+from ai_gateway.prompts.jinja2_variables_cache import TemplateVariablesCache
 from ai_gateway.prompts.model_variables import bind_model_variables
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
@@ -720,7 +721,18 @@ jinja_env.filters["parse_json"] = parse_json
 log = structlog.stdlib.get_logger("prompts")
 
 
-def _get_jinja2_variables_from_template(template: str) -> set[str]:
+# Bundled includes don't change at runtime (an edited one keeps its old variables until a restart). Authored templates
+# take under 1 MiB; 512 KiB per entry fits the largest catalog flow prompt (80 KiB of JSON, up to ~320 KB in memory).
+_JINJA2_VARIABLES_CACHE_MAX_BYTES = 16 * 1024 * 1024
+_JINJA2_VARIABLES_CACHE_MAX_ENTRY_BYTES = 512 * 1024
+
+
+def _has_jinja2_syntax(template: str) -> bool:
+    """Rendered text without ``{``, such as the per-session security block, has no variables and skips the cache."""
+    return "{" in template
+
+
+def _parse_jinja2_variables(template: str) -> frozenset[str]:
     ast = jinja_env.parse(template)
     variables = meta.find_undeclared_variables(ast)
 
@@ -732,7 +744,49 @@ def _get_jinja2_variables_from_template(template: str) -> set[str]:
         ast = jinja_env.parse(template_source)
         variables = variables.union(meta.find_undeclared_variables(ast))
 
-    return variables
+    return frozenset(variables)
+
+
+def _parse_jinja2_variables_recursively(template: str) -> frozenset[str]:
+    variables: set[str] = set()
+    visited: set[str] = set()
+
+    def _collect(source: str) -> None:
+        ast = jinja_env.parse(source)
+        variables.update(meta.find_undeclared_variables(ast))
+        for tpl_name in meta.find_referenced_templates(ast):
+            if not tpl_name or tpl_name in visited:
+                continue
+            visited.add(tpl_name)
+            tpl_source, _, _ = jinja_loader.get_source(jinja_env, tpl_name)
+            _collect(tpl_source)
+
+    _collect(template)
+    return frozenset(variables)
+
+
+_jinja2_variables_cache = TemplateVariablesCache(
+    max_bytes=_JINJA2_VARIABLES_CACHE_MAX_BYTES,
+    max_entry_bytes=_JINJA2_VARIABLES_CACHE_MAX_ENTRY_BYTES,
+)
+_jinja2_variables_recursive_cache = TemplateVariablesCache(
+    max_bytes=_JINJA2_VARIABLES_CACHE_MAX_BYTES,
+    max_entry_bytes=_JINJA2_VARIABLES_CACHE_MAX_ENTRY_BYTES,
+)
+
+
+def _cached_variables(
+    template: str,
+    cache: TemplateVariablesCache,
+    parse: Callable[[str], frozenset[str]],
+) -> set[str]:
+    if not _has_jinja2_syntax(template):
+        return set()
+    return set(cache.get(template, parse))
+
+
+def _get_jinja2_variables_from_template(template: str) -> set[str]:
+    return _cached_variables(template, _jinja2_variables_cache, _parse_jinja2_variables)
 
 
 string._get_jinja2_variables_from_template = _get_jinja2_variables_from_template
@@ -1606,21 +1660,11 @@ class BasePromptRegistry(ABC):
             Flat set of all variable names referenced in *template* and any
             templates it includes transitively.
         """
-        variables: set[str] = set()
-        visited: set[str] = set()
-
-        def _collect(source: str) -> None:
-            ast = jinja_env.parse(source)
-            variables.update(meta.find_undeclared_variables(ast))
-            for tpl_name in meta.find_referenced_templates(ast):
-                if not tpl_name or tpl_name in visited:
-                    continue
-                visited.add(tpl_name)
-                tpl_source, _, _ = jinja_loader.get_source(jinja_env, tpl_name)
-                _collect(tpl_source)
-
-        _collect(template)
-        return variables
+        return _cached_variables(
+            template,
+            _jinja2_variables_recursive_cache,
+            _parse_jinja2_variables_recursively,
+        )
 
     async def validate_model(self, model: str):
 

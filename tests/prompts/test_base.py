@@ -1,6 +1,7 @@
 # pylint: disable=too-many-lines
 import asyncio
 import os
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Generator, Iterator, List, Optional, Type, cast
@@ -76,10 +77,14 @@ from ai_gateway.prompts import (
     jinja2_formatter,
 )
 from ai_gateway.prompts.base import (
+    _JINJA2_VARIABLES_CACHE_MAX_ENTRY_BYTES,
     _PARSE_JSON_MAX_INPUT_LENGTH,
     _RETRYABLE_OPENAI_STREAM_ERROR_TYPES,
     TemplateNotFoundError,
     _attempt_failure_log_fields,
+    _get_jinja2_variables_from_template,
+    _jinja2_variables_cache,
+    _jinja2_variables_recursive_cache,
     _log_before_backoff_sleep,
     _log_retries_exhausted,
     _record_attempt_start,
@@ -3960,3 +3965,162 @@ class TestRetryHooks:
         with capture_logs() as cap_logs:
             _log_retries_exhausted(state)
         assert cap_logs == []
+
+
+class TestJinja2VariablesCache:
+    TEMPLATE = "{{ outer }} {% include 'cache_test/partial.jinja' %}"
+
+    @pytest.fixture(name="get_source")
+    def get_source_fixture(self) -> Iterator[mock.MagicMock]:
+        from ai_gateway.prompts import base
+
+        with mock.patch.object(
+            base.jinja_loader,
+            "get_source",
+            return_value=("{{ inner }}", None, None),
+        ) as get_source:
+            yield get_source
+
+    @pytest.mark.parametrize(
+        "collect",
+        [
+            pytest.param(_get_jinja2_variables_from_template, id="from-template"),
+            pytest.param(BasePromptRegistry._collect_jinja2_variables, id="recursive"),
+        ],
+    )
+    def test_reads_includes_once_and_returns_a_fresh_set(self, get_source, collect):
+        first = collect(self.TEMPLATE)
+        first.add("mutated by a caller")
+        second = collect(self.TEMPLATE)
+
+        assert first - {"mutated by a caller"} == {"outer", "inner"}
+        assert second == {"outer", "inner"}
+        get_source.assert_called_once_with(mock.ANY, "cache_test/partial.jinja")
+
+    def test_recursive_collection_reads_a_repeated_include_once(self, get_source):
+        template = (
+            "{% include 'cache_test/partial.jinja' %} "
+            "{% include 'cache_test/partial.jinja' %}"
+        )
+
+        assert BasePromptRegistry._collect_jinja2_variables(template) == {"inner"}
+        get_source.assert_called_once_with(mock.ANY, "cache_test/partial.jinja")
+
+    def test_recursive_collection_follows_includes_of_includes(self):
+        from ai_gateway.prompts import base
+
+        sources = {
+            "cache_test/outer.jinja": "{{ outer }} {% include 'cache_test/inner.jinja' %}",
+            "cache_test/inner.jinja": "{{ middle }} {% include 'cache_test/leaf.jinja' %}",
+            "cache_test/leaf.jinja": "{{ leaf }}",
+        }
+
+        with mock.patch.object(
+            base.jinja_loader,
+            "get_source",
+            side_effect=lambda _env, name: (sources[name], None, None),
+        ):
+            variables = BasePromptRegistry._collect_jinja2_variables(
+                "{{ root }} {% include 'cache_test/outer.jinja' %}"
+            )
+
+        assert variables == {"root", "outer", "middle", "leaf"}
+
+    @pytest.mark.parametrize("recursive_first", [True, False])
+    def test_the_two_lookups_keep_separate_results(self, recursive_first):
+        from ai_gateway.prompts import base
+
+        sources = {
+            "cache_test/outer.jinja": "{{ outer }} {% include 'cache_test/inner.jinja' %}",
+            "cache_test/inner.jinja": "{{ middle }}",
+        }
+        template = "{{ root }} {% include 'cache_test/outer.jinja' %}"
+
+        with mock.patch.object(
+            base.jinja_loader,
+            "get_source",
+            side_effect=lambda _env, name: (sources[name], None, None),
+        ):
+            if recursive_first:
+                BasePromptRegistry._collect_jinja2_variables(template)
+
+            assert _get_jinja2_variables_from_template(template) == {"root", "outer"}
+            assert BasePromptRegistry._collect_jinja2_variables(template) == {
+                "root",
+                "outer",
+                "middle",
+            }
+
+    @pytest.mark.parametrize(
+        "collect,cache",
+        [
+            pytest.param(
+                _get_jinja2_variables_from_template,
+                _jinja2_variables_cache,
+                id="from-template",
+            ),
+            pytest.param(
+                BasePromptRegistry._collect_jinja2_variables,
+                _jinja2_variables_recursive_cache,
+                id="recursive",
+            ),
+        ],
+    )
+    def test_an_entry_heavier_than_the_entry_limit_is_not_kept(
+        self, get_source, collect, cache
+    ):
+        names = {f"name_{index}" for index in range(8000)}
+        template = (
+            "{{ "
+            + ",".join(sorted(names))
+            + " }} {% include 'cache_test/partial.jinja' %}"
+        )
+        assert sys.getsizeof(template) < _JINJA2_VARIABLES_CACHE_MAX_ENTRY_BYTES
+
+        assert collect(template) == names | {"inner"}
+        assert collect(template) == names | {"inner"}
+
+        assert len(cache) == 0
+        assert get_source.call_count == 2
+
+    @pytest.mark.parametrize(
+        "collect",
+        [
+            pytest.param(_get_jinja2_variables_from_template, id="from-template"),
+            pytest.param(BasePromptRegistry._collect_jinja2_variables, id="recursive"),
+        ],
+    )
+    def test_rendered_security_block_stays_out_of_the_cache(self, get_source, collect):
+        from lib.session_owner.context import set_session_owner_username
+
+        set_session_owner_username("cache-test-user")
+        try:
+            block = render_security_block()
+        finally:
+            set_session_owner_username(None)
+
+        assert collect(block) == set()
+        assert len(_jinja2_variables_cache) == 0
+        assert len(_jinja2_variables_recursive_cache) == 0
+        get_source.assert_not_called()
+
+    def test_prompt_messages_cache_only_the_authored_templates(self, get_source):
+        # `from_messages` also parses the inserted security block, which must not be cached.
+        messages = prompt_template_to_messages(
+            {"system": "Hi {{ name }}", "user": "{{ question }}"}
+        )
+
+        ChatPromptTemplate.from_messages(messages, template_format="jinja2")
+
+        assert len(_jinja2_variables_cache) == 2
+
+    @pytest.mark.parametrize(
+        "collect",
+        [
+            pytest.param(_get_jinja2_variables_from_template, id="from-template"),
+            pytest.param(BasePromptRegistry._collect_jinja2_variables, id="recursive"),
+        ],
+    )
+    def test_dynamic_include_is_a_variable_not_a_template(self, get_source, collect):
+        assert collect("{% include partial_name %}") == {"partial_name"}
+        get_source.assert_not_called()
