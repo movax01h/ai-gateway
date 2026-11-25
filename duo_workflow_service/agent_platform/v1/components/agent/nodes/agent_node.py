@@ -39,6 +39,12 @@ from duo_workflow_service.agent_platform.node_naming import component_name_from_
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     WorkflowEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._base import (
+    BaseAgentComponentNode,
+)
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
+    DEFAULT_SESSION_ID_KEY,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
@@ -52,6 +58,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     get_vars_from_state,
     merge_nested_dict,
 )
+from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.audit_events.web_tools import capture_native_web_calls
 from duo_workflow_service.checkpointer.write_mode import (
@@ -202,7 +209,7 @@ class AgentFinalOutput(BaseAgentOutput):
         return self.final_response
 
 
-class AgentNode:  # pylint: disable=too-many-instance-attributes
+class AgentNode(BaseAgentComponentNode):  # pylint: disable=too-many-instance-attributes
     """LangGraph node that invokes an LLM and appends the completion to conversation history.
 
     All state interactions are performed exclusively through ``IOKey`` instances,
@@ -298,17 +305,21 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         response_schema_tool_choice: Literal["any", "auto"] = "any",
         trim_ui_chat_log: bool = True,
         wrap_up_prompt: Optional[WrapUpPrompt] = None,
+        session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
     ):
         # Which inbox messages this agent takes, set by the component that owns the node. Without one the agent
         # claims nothing.
         self.claimant: Optional[Callable[[FlowState], Claimant]] = None
+        super().__init__(
+            name=name,
+            conversation_history_key=conversation_history_key,
+            session_id_key=session_id_key,
+        )
         self._tracker = tracker
-        self.name = name
         self._prompt = prompt
         self._inputs = inputs
         self._error_handler = ModelErrorHandler()
         self._optimizer_pipeline = optimizer_pipeline
-        self._conversation_history_key = conversation_history_key
         self._response_schema = response_schema
         self._ui_history = ui_history
         self._max_context_tokens = max_context_tokens
@@ -713,7 +724,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
         return [rendered]
 
-    async def run(
+    async def _run(
         self,
         state: FlowState,
         runtime: Optional[Runtime[Optional[RunInbox]]] = None,
@@ -726,7 +737,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 agent=self.name,
                 message_ids=[message.id for message in claimed],
             )
-        history_iokey = self._conversation_history_key.to_iokey(state)
+        history_iokey = self._history_iokey(state)
         history = history_iokey.value_from_state(state) or []
         variables = get_vars_from_state(self._inputs, state)
         history = [

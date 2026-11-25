@@ -14,6 +14,9 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._base import (
+    BaseAgentComponentNode,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._loop_detection import (
     IDENTICAL_CALL_NUDGE,
     IDENTICAL_CALL_SKIPPED_UI_MESSAGE,
@@ -24,7 +27,6 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes._loop_detecti
 )
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
     DEFAULT_SESSION_ID_KEY,
-    resolve_session_id,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
     AgentStuckError,
@@ -59,7 +61,7 @@ __all__ = ["ToolNode"]
 IDENTICAL_CALL_MAX_NUDGES = 2
 
 
-class ToolNode:
+class ToolNode(BaseAgentComponentNode):
     """LangGraph node that executes tool calls from the last AIMessage in conversation history.
 
     All state interactions are performed exclusively through ``IOKey`` instances,
@@ -99,21 +101,23 @@ class ToolNode:
         identical_call_max_wrap_up_retries: int = 3,
         halt_on_denied_tool: bool = True,
     ):
-        self.name = name
+        super().__init__(
+            name=name,
+            conversation_history_key=conversation_history_key,
+            session_id_key=session_id_key,
+        )
         self._toolset = toolset
         self._logger = structlog.stdlib.get_logger("agent_platform")
         self._ui_history = ui_history
-        self._conversation_history_key = conversation_history_key
         self._tracker = tracker
-        self._session_id_key = session_id_key
         self._identical_call_limit = identical_call_limit
         self._identical_call_max_wrap_up_retries = identical_call_max_wrap_up_retries
         self._halt_on_denied_tool = halt_on_denied_tool
 
-    async def run(self, state: FlowState) -> dict:
-        history_iokey = self._conversation_history_key.to_iokey(state)
+    async def _run(self, state: FlowState, runtime: Any = None) -> dict:
+        history_iokey = self._history_iokey(state)
         conversation_history = history_iokey.value_from_state(state) or []
-        session_id = resolve_session_id(self._session_id_key, state)
+        session_id = self._session_id(state)
 
         # TODO: add ability to register all tool calls in a follow up
         # context = state["context"].get(self.component_name, {})

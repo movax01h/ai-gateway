@@ -8,9 +8,11 @@ from langgraph.types import interrupt
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._base import (
+    BaseAgentComponentNode,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
     DEFAULT_SESSION_ID_KEY,
-    resolve_session_id,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -33,7 +35,7 @@ from lib.context import record_approval_policy_ref, record_approval_source
 from lib.internal_events.event_enum import EventEnum, EventPropertyEnum
 
 
-class ToolApprovalFetchNode:
+class ToolApprovalFetchNode(BaseAgentComponentNode):
     """Node that waits for approval decision and processes the response.
 
     This node:
@@ -81,12 +83,14 @@ class ToolApprovalFetchNode:
         toolset: Toolset | None = None,
         pre_approved_tools: list[str] | None = None,
     ):
-        self.name = name
-        self._conversation_history_key = conversation_history_key
+        super().__init__(
+            name=name,
+            conversation_history_key=conversation_history_key,
+            session_id_key=session_id_key,
+        )
         self._status_key = status_key
         self._approval_decision_key = approval_decision_key
         self._ui_history = ui_history
-        self._session_id_key = session_id_key
         self._tracker = tracker
         self._approval_requests_key = approval_requests_key
         self._approval_skip_sources_key = approval_skip_sources_key
@@ -202,14 +206,14 @@ class ToolApprovalFetchNode:
             for tool_call in tool_calls
         ]
 
-    async def run(self, state: FlowState) -> dict[str, Any]:
+    async def _run(self, state: FlowState, runtime: Any = None) -> dict[str, Any]:
         """Wait for approval decision and process response."""
 
         # Interrupt workflow to wait for user input
         event: FlowEvent = interrupt("Workflow interrupted; waiting for tool approval.")
 
         # Get conversation history
-        history_iokey = self._conversation_history_key.to_iokey(state)
+        history_iokey = self._history_iokey(state)
         existing_history = history_iokey.value_from_state(state) or []
 
         approval_decision_iokey = self._approval_decision_key.to_iokey(state)
@@ -305,7 +309,7 @@ class ToolApprovalFetchNode:
                 # The writer defaults `additional_context` to `[]` when the
                 # kwarg is omitted; the user's message carries none.
                 additional_context=None,
-                subsession_id=resolve_session_id(self._session_id_key, state),
+                subsession_id=self._session_id(state),
             )
 
             return {

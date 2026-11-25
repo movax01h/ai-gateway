@@ -18,9 +18,11 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._base import (
+    BaseAgentComponentNode,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
     DEFAULT_SESSION_ID_KEY,
-    resolve_session_id,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -87,7 +89,7 @@ def approval_skip_sources_key_for(decision_key: RuntimeIOKey) -> RuntimeIOKey:
     return RuntimeIOKey(alias="tool_approval_skip_sources", factory=_factory)
 
 
-class ToolApprovalRequestNode:
+class ToolApprovalRequestNode(BaseAgentComponentNode):
     """Node that validates tool calls and requests human approval.
 
     This node:
@@ -142,13 +144,15 @@ class ToolApprovalRequestNode:
         halt_on_denied_tool: bool = True,
         halt_on_unanswerable_approval: bool = False,
     ):
-        self.name = name
-        self._conversation_history_key = conversation_history_key
+        super().__init__(
+            name=name,
+            conversation_history_key=conversation_history_key,
+            session_id_key=session_id_key,
+        )
         self._toolset = toolset
         self._pre_approved_tools = set(pre_approved_tools)
         self._status_key = status_key
         self._ui_history = ui_history
-        self._session_id_key = session_id_key
         self._tracker = tracker
         self._approval_requests_key = approval_requests_key
         self._approval_skip_sources_key = approval_skip_sources_key
@@ -162,10 +166,10 @@ class ToolApprovalRequestNode:
             return TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT.format(tool_name=call["name"])
         return str(invalid_by_id[call["id"]])
 
-    async def run(self, state: FlowState) -> dict[str, Any]:
+    async def _run(self, state: FlowState, runtime: Any = None) -> dict[str, Any]:
         """Validate tool calls and request approval."""
         # Get conversation history
-        history_iokey = self._conversation_history_key.to_iokey(state)
+        history_iokey = self._history_iokey(state)
         history = history_iokey.value_from_state(state) or []
 
         if not history:
@@ -265,9 +269,7 @@ class ToolApprovalRequestNode:
                 [call["name"] for call in needs_approval]
             )
 
-        self._emit_approval_requests(
-            needs_approval, resolve_session_id(self._session_id_key, state)
-        )
+        self._emit_approval_requests(needs_approval, self._session_id(state))
 
         result = self._status_key.to_nested_dict(
             WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED, state

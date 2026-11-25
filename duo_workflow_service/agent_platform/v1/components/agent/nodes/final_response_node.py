@@ -1,5 +1,5 @@
 import json
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 import structlog
 from langchain_core.messages import AIMessage, ToolMessage
@@ -11,9 +11,11 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     WorkflowEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._base import (
+    BaseAgentComponentNode,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
     DEFAULT_SESSION_ID_KEY,
-    resolve_session_id,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -40,7 +42,7 @@ __all__ = ["FinalResponseNode"]
 log = structlog.stdlib.get_logger("final_response_node")
 
 
-class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
+class FinalResponseNode(BaseAgentComponentNode):  # pylint: disable=too-many-instance-attributes
     """LangGraph node that handles the final response and writes the result to state.
 
     All state interactions are performed exclusively through ``IOKey`` instances,
@@ -85,21 +87,23 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
         tracker: Optional[WorkflowEventTracker] = None,
     ):
-        self.name = name
+        super().__init__(
+            name=name,
+            conversation_history_key=conversation_history_key,
+            session_id_key=session_id_key,
+        )
         self._ui_history = ui_history
         self._response_schema = response_schema
-        self._conversation_history_key = conversation_history_key
         self._output_key = output_key
         self._response_schema_tracking = response_schema_tracking
         self._response_schema_tracking_context = response_schema_tracking_context or {}
         self._component_name = component_name
-        self._session_id_key = session_id_key
         self._tracker = tracker
 
-    async def run(self, state: FlowState) -> dict:
-        history_iokey = self._conversation_history_key.to_iokey(state)
+    async def _run(self, state: FlowState, runtime: Any = None) -> dict:
+        history_iokey = self._history_iokey(state)
         output_iokey = self._output_key.to_iokey(state)
-        session_id = resolve_session_id(self._session_id_key, state)
+        session_id = self._session_id(state)
 
         last_message, history = self._get_last_ai_message(state, history_iokey)
 
