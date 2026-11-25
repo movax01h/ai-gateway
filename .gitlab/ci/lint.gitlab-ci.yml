@@ -5,6 +5,19 @@ lint:
   # `make lint-code` skips the install; on a cold cache (e.g. a poetry.lock
   # change) it installs for itself, so don't wait on the build stage.
   needs: []
+  # Keep the mypy cache between pipelines, so that mypy checks only the
+  # changed files and the files that import them. mypy checks the cache
+  # against the file contents, so an old cache makes it slower, not wrong.
+  cache:
+    - !reference [.poetry, cache]
+    - key:
+        files:
+          - poetry.lock
+        prefix: mypy
+      paths:
+        - .mypy_cache/
+      policy: pull-push
+      when: always
   script:
     - BUF_VERSION=$(grep '^buf ' .tool-versions | awk '{print $2}') && curl -sSL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-$(uname -s)-$(uname -m)" -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf && sha256sum /usr/local/bin/buf
     - make lint-code
@@ -19,11 +32,12 @@ lint:
     - git diff --exit-code
   after_script:
     - |
-      # Hint for fixing issues
+      # Hints for fixing issues
       MAGENTA=$(printf '\e[35m')
       BOLD=$(printf '\e[1m')
       RESET=$(printf '\e[0m')
       echo "${MAGENTA}Run ${BOLD}make format${RESET}${MAGENTA} to fix formatting issues.${RESET}"
+      echo "${MAGENTA}If mypy stops with ${BOLD}INTERNAL ERROR${RESET}${MAGENTA}, the mypy cache can be the cause. Ask a Maintainer to clear the runner caches (Build > Pipelines).${RESET}"
 
 # Fast-feedback ruff job: runs in a couple of seconds and emits a GitLab Code
 # Quality report so violations annotate the MR diff inline. The full `lint` job
