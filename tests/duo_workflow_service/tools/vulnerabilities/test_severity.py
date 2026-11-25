@@ -193,10 +193,9 @@ async def test_update_vulnerability_severity_arun(gitlab_client_mock, metadata):
         (["id123"], False),
         (["id1", "id2", "id3"], False),
         (["gid://gitlab/Vulnerability/123"], False),
-        (["", "valid_id"], False),  # At least one valid
         ([], True),
-        ([""], True),
-        (["", " "], True),
+        ([" "], True),
+        ([" ", "  "], True),
     ],
 )
 def test_vulnerability_ids_validation(vulnerability_ids, should_fail, tool):
@@ -251,6 +250,8 @@ def test_input_schema_accepts_valid_values(overrides):
         {"vulnerability_ids": ["id"] * (MAX_VULNERABILITY_IDS + 1)},
         {"vulnerability_ids": ["x" * (MAX_GITLAB_GLOBAL_ID_LENGTH + 1)]},
         {"vulnerability_ids": [123]},
+        {"vulnerability_ids": [""]},
+        {"vulnerability_ids": ["", "id"]},
         {"vulnerability_ids": None},
         {"vulnerability_ids": "gid://gitlab/Vulnerability/123"},
     ],

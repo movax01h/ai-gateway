@@ -79,7 +79,7 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
     def validate_inputs(self, vulnerability_ids: list[str]) -> None:
         if not vulnerability_ids:
             raise ValueError("At least one vulnerability ID must be provided")
-        # Filter out falsy values and check if any valid IDs remain
+        # The schema rejects empty strings; this catches empty lists and whitespace-only IDs
         valid_ids = [id for id in vulnerability_ids if id and str(id).strip()]
         if not valid_ids:
             raise ValueError("At least one valid vulnerability ID must be provided")
