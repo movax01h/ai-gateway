@@ -543,7 +543,16 @@ Keyword rules are routing hints and never a security boundary: they are sensitiv
 
 ### Routing the default model by goal
 
-When the `duo_developer_model_routing` feature flag is enabled for a request, Duo Workflow Service routes the request once, when the workflow starts and before the flow is built, so every turn of the flow runs on the same model.
+Duo Workflow Service routes a request when GitLab Rails pushes the `duo_developer_model_routing` feature flag.
+Rails pushes the flag only when all of these are on:
+
+- The `duo_developer_model_routing` feature flag, for the user.
+- Feature preview.
+- The Auto model routing setting.
+
+Rails reads both settings for the top-level group on GitLab.com, and for the instance on GitLab Self-Managed.
+
+Duo Workflow Service routes the request once, when the workflow starts and before the flow is built, so every turn of the flow runs on the same model.
 It reads the task: the title and description of the triggering issue or merge request (from the `agent_platform_resource_context` additional context), otherwise the goal of the `StartWorkflowRequest`.
 A session started by a mention is read differently, because the comment is the task:
 
