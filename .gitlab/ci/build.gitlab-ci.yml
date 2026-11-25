@@ -42,6 +42,8 @@ install:
 .docker-manifest:
   extends:
     - .docker
+  variables:
+    GIT_STRATEGY: none  # The script reads only the registry, not the repository.
   script:
     - docker manifest create ${MANIFEST_TAG}
         ${MANIFEST_TAG}-amd64
@@ -91,6 +93,7 @@ sign:model-gateway:
       aud: sigstore
   variables:
     COSIGN_YES: "true"
+    GIT_STRATEGY: none  # The script reads only the image-digest artifact.
   script:
     - apk add --no-cache cosign
     # Sign the digest, not the tag, and bind the commit so an older signed
