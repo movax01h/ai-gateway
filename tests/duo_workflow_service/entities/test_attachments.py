@@ -4,6 +4,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import ToolException
 from structlog.testing import capture_logs
 
@@ -20,6 +21,7 @@ from duo_workflow_service.entities.attachments import (
     attachment_reference_envelopes,
     parse_attachments,
     partition_attachment_envelopes,
+    reinline_session_files,
     resolve_attachment_envelopes,
     session_file_records,
     session_files_in,
@@ -939,3 +941,218 @@ class TestResolveAttachmentEnvelopes:
 
         with pytest.raises(ValueError):
             parse_attachments(resolved)
+
+
+def user_message(*attachments: Attachment, text: str = "what is this?") -> HumanMessage:
+    """A user message carrying *attachments*, built the way the chat workflow builds one."""
+    return assemble_user_message(
+        text,
+        content_blocks=attachment_content_blocks(attachments),
+        attachments=session_file_records(attachments),
+    )
+
+
+def checkpointed_message(url: str | None = SESSION_FILE_URL) -> HumanMessage:
+    """A user message with one attachment, as it reads back from a checkpoint."""
+    message = user_message(
+        Attachment(mime_type="image/png", data=PNG_B64, filename="shot.png", url=url)
+    )
+    return message.model_copy(update={"content": strip_image_payloads(message.content)})
+
+
+async def reinline(message, gitlab_client, cache=None):
+    return await reinline_session_files(
+        message, gitlab_client, "1234", {} if cache is None else cache
+    )
+
+
+class TestReinlineSessionFiles:
+    @pytest.mark.asyncio
+    async def test_puts_the_fetched_image_back_in_place_of_the_placeholder(
+        self, gitlab_client
+    ):
+        message = checkpointed_message()
+
+        reinlined = await reinline(message, gitlab_client)
+
+        *kept, image = reinlined.content
+        assert kept == message.content[:2]
+        assert (image["type"], image["base64"], image["mime_type"]) == (
+            "image",
+            PNG_B64,
+            "image/png",
+        )
+        gitlab_client.aget.assert_awaited_once_with(
+            path=SESSION_FILE_URL, parse_json=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_image_survives_every_interrupt_of_its_turn(self, gitlab_client):
+        message = user_message(
+            Attachment(
+                mime_type="image/png",
+                data=PNG_B64,
+                filename="shot.png",
+                url=SESSION_FILE_URL,
+            )
+        )
+
+        for _interrupt in range(3):
+            # Each interrupt writes a checkpoint and resumes on a new connection, so
+            # nothing is cached between them.
+            persisted = dumps_checkpoint([message])
+            reloaded = json.loads(persisted, object_hook=checkpoint_decoder)[0]
+            message = await reinline(reloaded, gitlab_client)
+
+            assert PNG_B64 not in persisted
+            assert message.content[-1]["base64"] == PNG_B64
+
+        assert gitlab_client.aget.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_each_record_gets_its_own_image_back(self, gitlab_client):
+        second_url = "/api/v4/ai/duo_workflows/workflows/1234/session_files/6"
+        message = user_message(
+            Attachment(mime_type="image/png", data=PNG_B64, filename="inline.png"),
+            Attachment(
+                mime_type="image/png",
+                data=PNG_B64,
+                filename="a.png",
+                url=SESSION_FILE_URL,
+            ),
+            Attachment(
+                mime_type="image/png", data=PNG_B64, filename="a.png", url=second_url
+            ),
+            # Reads like the first file's label, but it is the user's text.
+            text="[attachment 2: a.png]",
+        )
+        stripped = message.model_copy(
+            update={"content": strip_image_payloads(message.content)}
+        )
+
+        reinlined = await reinline(stripped, gitlab_client)
+
+        fetched = [call.kwargs["path"] for call in gitlab_client.aget.await_args_list]
+        assert fetched == [SESSION_FILE_URL, second_url]
+        texts = [block.get("text") for block in reinlined.content]
+        assert texts == [
+            "[attachment 2: a.png]",
+            "[attachment 1: inline.png]",
+            "[image/png omitted from history]",
+            "[attachment 2: a.png]",
+            None,
+            "[attachment 3: a.png]",
+            None,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_fetches_the_files_of_one_message_together(self, gitlab_client):
+        second_url = "/api/v4/ai/duo_workflows/workflows/1234/session_files/6"
+        message = user_message(
+            Attachment(
+                mime_type="image/png",
+                data=PNG_B64,
+                filename="a.png",
+                url=SESSION_FILE_URL,
+            ),
+            Attachment(
+                mime_type="image/png", data=PNG_B64, filename="b.png", url=second_url
+            ),
+        )
+        stripped = message.model_copy(
+            update={"content": strip_image_payloads(message.content)}
+        )
+        response = gitlab_client.aget.return_value
+        started: list[str] = []
+        both_started = asyncio.Event()
+
+        # Each fetch waits for the other to start, so fetching one at a time times
+        # out and keeps the first placeholder.
+        async def fetch(path, parse_json):
+            started.append(path)
+            if len(started) == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=1)
+            return response
+
+        gitlab_client.aget.side_effect = fetch
+
+        reinlined = await reinline(stripped, gitlab_client)
+
+        images = [block for block in reinlined.content if block.get("type") == "image"]
+        assert [image["base64"] for image in images] == [PNG_B64, PNG_B64]
+
+    @pytest.mark.asyncio
+    async def test_fetches_each_file_once_per_cache(self, gitlab_client):
+        cache: dict = {}
+
+        await reinline(checkpointed_message(), gitlab_client, cache)
+        await reinline(checkpointed_message(), gitlab_client, cache)
+
+        gitlab_client.aget.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "message",
+        [
+            checkpointed_message(url=None),
+            HumanMessage(content="what is this?"),
+            user_message(
+                Attachment(
+                    mime_type="image/png",
+                    data=PNG_B64,
+                    filename="shot.png",
+                    url=SESSION_FILE_URL,
+                )
+            ),
+            user_message(
+                Attachment(mime_type="image/png", data=PNG_B64, url=SESSION_FILE_URL)
+            ).model_copy(
+                update={
+                    "content": [
+                        {"type": "text", "text": "[image/png omitted from history]"}
+                    ]
+                }
+            ),
+        ],
+        ids=["inline attachment", "text only", "image not stripped", "unnamed"],
+    )
+    async def test_leaves_a_message_with_nothing_to_fetch_alone(
+        self, message, gitlab_client
+    ):
+        assert await reinline(message, gitlab_client) is message
+        gitlab_client.aget.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("response", "reason"),
+        [
+            (GitLabHttpResponse(status_code=404, body={}), "GitLab returned HTTP 404"),
+            (
+                GitLabHttpResponse(
+                    status_code=200,
+                    body={"content_type": "image/png", "data": b64_for("image/jpeg")},
+                ),
+                "does not look like image/png",
+            ),
+        ],
+        ids=["fetch failed", "type mismatch"],
+    )
+    async def test_keeps_the_placeholder_for_a_file_it_cannot_read(
+        self, response, reason, gitlab_client
+    ):
+        gitlab_client.aget.return_value = response
+        message = checkpointed_message()
+        cache: dict = {}
+
+        with capture_logs() as cap_logs:
+            assert await reinline(message, gitlab_client, cache) is message
+        assert await reinline(message, gitlab_client, cache) is message
+
+        gitlab_client.aget.assert_awaited_once()
+        (warning,) = [
+            entry
+            for entry in cap_logs
+            if entry["event"] == "Could not reinline a session file"
+        ]
+        assert reason in warning["reason"]

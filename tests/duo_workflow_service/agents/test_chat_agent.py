@@ -38,6 +38,7 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     ApprovalSource,
+    ApprovalStateRejection,
     ChatWorkflowState,
     MessageTypeEnum,
     ToolStatus,
@@ -1686,6 +1687,39 @@ class TestAgentRetryWithPendingToolCalls:
         assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
         assert result["ui_chat_log"] == []
         mock_prompt_adapter.get_response.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("history", "approval", "expected"),
+        [
+            ([HumanMessage(content="hi"), AIMessage(content="Hello!")], None, True),
+            (
+                [HumanMessage(content="hi"), AIMessage(content="Hello!")],
+                ApprovalStateRejection(message="no"),
+                False,
+            ),
+            (
+                [
+                    HumanMessage(content="hi"),
+                    AIMessage(
+                        content="",
+                        tool_calls=[{"id": "call-1", "name": "read_file", "args": {}}],
+                    ),
+                ],
+                None,
+                False,
+            ),
+            ([HumanMessage(content="hi")], None, False),
+            ([], None, False),
+        ],
+        ids=["reply", "approval", "pending tool call", "user message", "empty"],
+    )
+    def test_awaits_user_input(self, chat_agent, history, approval, expected):
+        state = {
+            "conversation_history": {"Chat Agent": history},
+            "approval": approval,
+        }
+
+        assert chat_agent.awaits_user_input(state) is expected
 
 
 def _successful_compaction_result() -> CompactionResult:

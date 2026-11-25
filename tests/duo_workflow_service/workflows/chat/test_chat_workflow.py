@@ -2896,6 +2896,176 @@ class TestChatAttachments:
 
         workflow_with_session_file._http_client.aget.assert_not_awaited()
 
+    def _checkpointed_user_message(self, workflow_id) -> HumanMessage:
+        url = f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/session_files/5"
+        return HumanMessage(
+            content=[
+                {"type": "text", "text": "comment, then describe this"},
+                {"type": "text", "text": "[attachment 1: shot.png]"},
+                {"type": "text", "text": "[image/png omitted from history]"},
+            ],
+            additional_kwargs={
+                "additional_context": None,
+                "attachments": [
+                    {
+                        "id": "attachment-1",
+                        "url": url,
+                        "filename": "shot.png",
+                        "mime_type": "image/png",
+                    }
+                ],
+            },
+        )
+
+    def _resumed_state(self, *history) -> dict:
+        return {"conversation_history": {"test_prompt": list(history)}}
+
+    @pytest.fixture(name="agent_run")
+    def agent_run_fixture(self, workflow_with_project):
+        workflow_with_project._agent.name = "test_prompt"
+        workflow_with_project._agent.run = AsyncMock(return_value={})
+        workflow_with_project._http_client.aget = AsyncMock(
+            return_value=GitLabHttpResponse(
+                status_code=200, body={"content_type": "image/png", "data": PNG_B64}
+            )
+        )
+        return workflow_with_project._agent.run
+
+    @pytest.mark.asyncio
+    async def test_a_resumed_turn_gives_the_agent_its_session_file_back(
+        self, workflow_with_project, workflow_id, agent_run
+    ):
+        tool_call = {"id": "call-1", "name": "create_work_item_note", "args": {}}
+        state = self._resumed_state(
+            self._checkpointed_user_message(workflow_id),
+            AIMessage(content="", tool_calls=[tool_call]),
+            ToolMessage(content="done", tool_call_id="call-1"),
+        )
+
+        await workflow_with_project._run_agent_with_session_files(state)
+
+        (sent_state,) = agent_run.await_args.args
+        sent_message = sent_state["conversation_history"]["test_prompt"][0]
+        (image,) = image_blocks(sent_message)
+        assert image["base64"] == PNG_B64
+        assert not image_blocks(state["conversation_history"]["test_prompt"][0])
+
+    @pytest.mark.asyncio
+    async def test_a_rejection_resume_keeps_the_image_out_of_the_channel(
+        self, workflow_with_project, workflow_id
+    ):
+        workflow_with_project._http_client.aget = AsyncMock(
+            return_value=GitLabHttpResponse(
+                status_code=200, body={"content_type": "image/png", "data": PNG_B64}
+            )
+        )
+        stripped_message = self._checkpointed_user_message(workflow_id)
+        tool_call = {"id": "call-1", "name": "create_work_item_note", "args": {}}
+        state = ChatWorkflowState(
+            plan={"steps": []},
+            status=WorkflowStatusEnum.EXECUTION,
+            conversation_history={
+                "test_prompt": [
+                    stripped_message,
+                    AIMessage(content="", tool_calls=[tool_call]),
+                ]
+            },
+            ui_chat_log=[],
+            last_human_input=None,
+            project=None,
+            approval=ApprovalStateRejection(message="not that one"),
+        )
+        get_response = AsyncMock(return_value=AIMessage(content="Ok, I won't."))
+
+        with patch.object(
+            workflow_with_project._agent.prompt_adapter, "get_response", get_response
+        ):
+            result = await workflow_with_project._run_agent_with_session_files(state)
+
+        prompt_state = get_response.await_args.args[0]
+        (image,) = image_blocks(prompt_state["conversation_history"]["test_prompt"][0])
+        assert image["base64"] == PNG_B64
+
+        update = result["conversation_history"]
+        assert isinstance(update, Overwrite)
+        assert update.value["test_prompt"][0] is stripped_message
+        assert not any(image_blocks(message) for message in update.value["test_prompt"])
+
+    @pytest.mark.asyncio
+    async def test_an_appended_reply_is_returned_unchanged(
+        self, workflow_with_project, workflow_id, agent_run
+    ):
+        state = self._resumed_state(self._checkpointed_user_message(workflow_id))
+        agent_result = {
+            "conversation_history": {"test_prompt": [AIMessage(content="A chart.")]}
+        }
+        agent_run.return_value = agent_result
+
+        result = await workflow_with_project._run_agent_with_session_files(state)
+
+        assert result is agent_result
+
+    @pytest.mark.asyncio
+    async def test_an_earlier_turn_is_not_fetched_again(
+        self, workflow_with_project, workflow_id, agent_run
+    ):
+        state = self._resumed_state(
+            self._checkpointed_user_message(workflow_id),
+            AIMessage(content="It shows a chart."),
+            HumanMessage(content="thanks"),
+        )
+
+        await workflow_with_project._run_agent_with_session_files(state)
+
+        agent_run.assert_awaited_once_with(state)
+        workflow_with_project._http_client.aget.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_finished_turn_is_not_fetched_again(
+        self, workflow_with_project, workflow_id, agent_run
+    ):
+        # A retry after the reply was written: the agent returns without calling the
+        # model, so the image would go unused.
+        state = self._resumed_state(
+            self._checkpointed_user_message(workflow_id),
+            AIMessage(content="It shows a chart."),
+        )
+
+        await workflow_with_project._run_agent_with_session_files(state)
+
+        agent_run.assert_awaited_once_with(state)
+        workflow_with_project._http_client.aget.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_history_without_a_user_message_is_passed_on_unchanged(
+        self, workflow_with_project, agent_run
+    ):
+        tool_call = {"id": "call-1", "name": "create_work_item_note", "args": {}}
+        state = self._resumed_state(
+            AIMessage(content="", tool_calls=[tool_call]),
+            ToolMessage(content="done", tool_call_id="call-1"),
+        )
+
+        await workflow_with_project._run_agent_with_session_files(state)
+
+        agent_run.assert_awaited_once_with(state)
+        workflow_with_project._http_client.aget.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_fetched_when_attachments_are_not_allowed(
+        self, workflow_with_project, workflow_id, agent_run
+    ):
+        workflow_with_project._workflow_config = {
+            **workflow_with_project._workflow_config,
+            "file_attachments_allowed": False,
+        }
+        state = self._resumed_state(self._checkpointed_user_message(workflow_id))
+
+        await workflow_with_project._run_agent_with_session_files(state)
+
+        agent_run.assert_awaited_once_with(state)
+        workflow_with_project._http_client.aget.assert_not_awaited()
+
     def test_every_attachment_becomes_its_own_block(self, workflow_with_project):
         workflow_with_project._additional_context = [
             attachment_envelope(filename="a.png"),

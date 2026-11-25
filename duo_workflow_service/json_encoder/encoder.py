@@ -42,11 +42,10 @@ class CustomEncoder(json.JSONEncoder):
                 # persisted (and re-read) on every checkpoint for the rest of
                 # the session.
                 #
-                # Note this fires on *every* write, so an image does not survive
-                # its own turn: any interrupt checkpoints here and then resumes
-                # by reloading the stripped history. A mid-turn tool approval is
-                # enough. Known v1 limitation -- see the `image_blocks` module
-                # docstring for the reasoning and the durable fix.
+                # Note this fires on *every* write, so any interrupt resumes
+                # from stripped history, even mid-turn. Session files are
+                # fetched again on resume -- see the `image_blocks` module
+                # docstring.
                 data["content"] = strip_image_payloads(data["content"])
             data.update({"type": o.__class__.__name__})
             return data
