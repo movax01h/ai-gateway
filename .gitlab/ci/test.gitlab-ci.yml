@@ -4,6 +4,9 @@ include:
 tests:unit:
   extends: .poetry
   stage: test
+  rules:
+    - !reference [.skip-on-docs-only-mr, rules]
+    - when: on_success
   tags:
     - saas-linux-large-amd64
   # `install` produces no artifacts, only the dependency cache. On a warm cache
@@ -45,6 +48,9 @@ tests:unit:
 tests:integration:
   extends: .poetry
   stage: test
+  rules:
+    - !reference [.skip-on-docs-only-mr, rules]
+    - when: on_success
   # Test the amd64 image directly. The manifest only lists this image and the
   # arm64 image, so the job tests the same image without a wait for the arm64
   # build and the manifest job.

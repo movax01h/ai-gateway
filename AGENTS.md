@@ -609,6 +609,10 @@ Pipelines defined in `.gitlab-ci.yml` and `.gitlab/ci/*.gitlab-ci.yml`:
 - **Build**: Docker images for AI Gateway and Duo Workflow Service
 - **Deploy**: Automatic deployment to staging/production via Runway
 
+Merge requests that change only files under `docs/` and `.gitlab/duo/` run a short pipeline without the image builds,
+the code tests and the scans. The exception is a doc that a test reads, such as `docs/flow_registry/experimental.md`,
+which keeps the full pipeline. See `workflow:rules` in `.gitlab-ci.yml` for the exact paths.
+
 Waiting for a pipeline: `glab ci get` is a point-in-time read — prefer
 `glab ci status --wait --branch <branch>` (or poll the API with backoff) over
 tight `sleep && glab ci get` loops. A parent pipeline stays `running` while a

@@ -15,9 +15,24 @@ workflow:
       variables:
         GITLAB_DEPENDENCY_PROXY_ADDRESS: ""
 
+    # Merge requests that change a file outside docs/ and .gitlab/duo/ get the
+    # full pipeline. docs/flow_registry/experimental.md also counts as code,
+    # because tests:unit reads it. Add a doc here when a test starts to read it.
+    # Any other path counts as code.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        regexp: '\A(?!docs/|\.gitlab/duo/)|\Adocs/flow_registry/experimental\.md\z'
+      auto_cancel:
+        on_new_commit: conservative
+    # Merge requests that change only docs paths skip the image builds, the
+    # code tests and the scans. See .skip-on-docs-only-mr.
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       auto_cancel:
         on_new_commit: conservative
+      variables:
+        DOCS_ONLY_MR: "true"
+        SAST_DISABLED: "true"
+        CONTAINER_SCANNING_DISABLED: "true"
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_BRANCH =~ /^stable-\d+-\d+-ee$/
@@ -116,6 +131,14 @@ variables:
   - <<: *if-not-canonical-nor-security-project
     when: never
   - when: always
+
+# Put this block first in the rules of the jobs that only build or test the
+# code. This file is always included, so the expedited pipelines that skip the
+# lint and test includes can still reference it.
+.skip-on-docs-only-mr:
+  rules:
+    - if: $DOCS_ONLY_MR == "true"
+      when: never
 
 include:
   - local: .gitlab/ci/build.gitlab-ci.yml

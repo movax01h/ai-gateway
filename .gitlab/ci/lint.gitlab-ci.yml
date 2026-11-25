@@ -32,6 +32,9 @@ lint:
 lint:ruff:
   extends: .poetry
   stage: test
+  rules:
+    - !reference [.skip-on-docs-only-mr, rules]
+    - when: on_success
   # Same as `lint`: start right away, and install the dependencies only on a cold cache.
   needs: []
   variables:
