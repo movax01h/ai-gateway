@@ -271,6 +271,37 @@ instructions:
         fields) without both checks — even if the read content is not echoed verbatim in the output,
         the read itself crosses the security boundary.
 
+  - name: Duo Workflow Tools — Input Schema Validation
+    fileFilters:
+      - "duo_workflow_service/tools/**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      For new or changed tool parameters, verify:
+      1. Length, emptiness and character constraints (`min_length`, `max_length`, `ge`/`le`, a
+        `field_validator`) live on the Pydantic `args_schema` field, not only in `_execute`.
+        Why: `format_display_message` and other callers are built from the parsed schema, so a check
+        that exists only in `_execute` leaves them handling unvalidated model-written text.
+      1. If `_execute` repeats a constraint as defence in depth, a test should assert that the schema
+        rejects the same values (e.g. `pytest.raises(ValidationError)` on the input model).
+
+  - name: Duo Workflow Tools — Git History on Shallow Clones
+    fileFilters:
+      - "duo_workflow_service/tools/git_history.py"
+      - "duo_workflow_service/tools/read_only_git.py"
+      - "!tests/**/*"
+    instructions: |
+      CI flows commonly run on depth-limited (shallow) clones, so a git-history tool has to be useful
+      there, not only correct on a full clone. Verify:
+      1. Behaviour at the graft (boundary) commit is considered. Git diffs a graft against an empty
+        tree, so it can match a content search for any string in its tree and list every file in the
+        repository. Prefer turning the root diff off for shallow clones (e.g. `log.showRoot=false`)
+        over only labelling the commit. Why: on a large repository the graft entry alone can exceed the
+        executor's output limit, and a fail-closed truncation then discards the real hits with it.
+      1. Any output-size or truncation handling is tested against a real shallow clone whose graft
+        commit holds a large tree, not only against hand-built fake `git log` output.
+      1. A per-call `-c` setting cannot override a key already pinned in `GIT_GLOBAL_FLAGS`
+        (compare case-insensitively, since git honours the last spelling).
+
   - name: Duo Workflow Tools — untrusted git and prose output
     fileFilters:
       - "duo_workflow_service/tools/**/*.py"
