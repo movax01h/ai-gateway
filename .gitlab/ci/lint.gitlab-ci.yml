@@ -49,8 +49,8 @@ lint:ruff:
 lint:model_config_files:
   stage: test
   extends: .poetry
-  needs:
-    - install
+  # Same as `lint`: start right away, and install the dependencies only on a cold cache.
+  needs: []
   rules:
     - changes:
         - "ai_gateway/model_selection/*.{yml}"
@@ -60,8 +60,8 @@ lint:model_config_files:
 lint:pricing_multipliers:
   stage: test
   extends: .poetry
-  needs:
-    - install
+  # Same as `lint`: start right away, and install the dependencies only on a cold cache.
+  needs: []
   rules:
     - if: $CI_PROJECT_PATH == "gitlab-org/modelops/applied-ml/code-suggestions/ai-assist" && $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_EVENT_TYPE != "merge_train" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH
       changes:
@@ -75,8 +75,8 @@ lint:pricing_multipliers:
 lint:duo_workflow_flow_schema:
   stage: test
   extends: .poetry
-  needs:
-    - install
+  # Same as `lint`: start right away, and install the dependencies only on a cold cache.
+  needs: []
   rules:
     - changes:
         - "duo_workflow_service/agent_platform/v1/flows/flow_config.py"
@@ -90,8 +90,8 @@ lint:duo_workflow_flow_schema:
 lint:legacy_roots:
   stage: test
   extends: .poetry
-  needs:
-    - install
+  # Same as `lint`: start right away, and install the dependencies only on a cold cache.
+  needs: []
   rules:
     - changes:
         - "ai_gateway/prompts/definitions/**/*"
@@ -99,6 +99,7 @@ lint:legacy_roots:
         - "scripts/check_legacy_roots.py"
         - "scripts/legacy_roots_allowlist.txt"
   script:
+    - make install-lint-deps
     - BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
     - if [ -n "$BASE" ]; then git fetch origin "$BASE" --depth=1; fi
     - make check-legacy-roots LEGACY_ROOTS_BASE="$BASE"
@@ -106,8 +107,8 @@ lint:legacy_roots:
 lint:include_names:
   stage: test
   extends: .poetry
-  needs:
-    - install
+  # Same as `lint`: start right away, and install the dependencies only on a cold cache.
+  needs: []
   rules:
     - changes:
         - "ai_gateway/prompts/definitions/**/*"
@@ -117,6 +118,7 @@ lint:include_names:
         - "lib/subprompts_index.py"
         - "scripts/check_include_names.py"
   script:
+    - make install-lint-deps
     - BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
     - if [ -n "$BASE" ]; then git fetch origin "$BASE" --depth=1; fi
     - make check-include-names INCLUDE_NAMES_BASE="$BASE"
@@ -163,8 +165,8 @@ lint:prompt_diff_comment:
   # MR diff only shows the new file. Informational only: never blocks the MR.
   extends: .poetry
   stage: test
-  needs:
-    - install
+  # Same as `lint`: start right away, and install the dependencies only on a cold cache.
+  needs: []
   allow_failure: true
   variables:
     # The project-level GITLAB_TOKEN is protected (unavailable in MR pipelines);
@@ -186,4 +188,5 @@ lint:prompt_diff_comment:
         - "duo_workflow_service/agent_platform/v1/flows/configs/**/*.yml"
         - "duo_workflow_service/agent_platform/experimental/flows/configs/**/*.yml"
   script:
+    - make install-lint-deps
     - poetry run python scripts/prompt_diff_comment.py
