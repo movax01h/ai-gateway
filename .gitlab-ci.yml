@@ -378,8 +378,6 @@ merge-train-trigger:
   needs: []
   resource_group: merge-train-$CI_PROJECT_PATH
   rules:
-    - <<: *if-not-security-project
-      when: never
     - *if-security-sync-schedule
   trigger:
     project: gitlab-org/merge-train
