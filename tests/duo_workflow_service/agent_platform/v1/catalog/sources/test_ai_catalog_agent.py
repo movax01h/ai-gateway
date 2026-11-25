@@ -147,6 +147,28 @@ class TestBindWithAMatch:
         assert synthesized["description"] == "Runs tests."
         assert synthesized["toolset"] == ["run_tests"]
 
+    @pytest.mark.parametrize(
+        "declared,expected",
+        [
+            ({}, None),
+            ({"require_tool_approval": True}, True),
+            ({"require_tool_approval": False}, False),
+        ],
+        ids=["silent", "required", "waived"],
+    )
+    def test_the_agent_inherits_the_coordinators_tool_approval(
+        self, declared, expected
+    ):
+        claimant = {
+            "name": "coordinator",
+            "subagents": [dict(REFERENCE)],
+            **declared,
+        }
+
+        bound = _bind(_items(_agent()), claimant)
+
+        assert bound[1].get("require_tool_approval") is expected
+
     def test_the_item_prompt_travels_as_a_literal_input(self):
         bound = _bind(_items(_agent()))
 

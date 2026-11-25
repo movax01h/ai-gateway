@@ -134,7 +134,8 @@ def synthesized_agent_config(
     Args:
         template: The template the item is built from.
         item: The item to build.
-        claimant_config: The claiming component's config, read for flags a subagent inherits.
+        claimant_config: The claiming component's config, read for flags a subagent inherits
+            (``strict_validation``, ``require_tool_approval`` and ``pre_approved_tools``).
 
     Returns:
         The template with what the item owns filled in.
@@ -148,6 +149,13 @@ def synthesized_agent_config(
     ]
     if claimant_config.get("strict_validation"):
         config["strict_validation"] = True
+    # A declared value is inherited, `false` included; a silent claimant leaves the `AgentComponent` default.
+    if "require_tool_approval" in claimant_config:
+        config["require_tool_approval"] = claimant_config["require_tool_approval"]
+    # Copied so the coordinator's pre-approvals apply to its subagents too; the list is only a set of tool names
+    # checked at call time, so a name outside the subagent's toolset does nothing.
+    if "pre_approved_tools" in claimant_config:
+        config["pre_approved_tools"] = list(claimant_config["pre_approved_tools"])
 
     return config
 
