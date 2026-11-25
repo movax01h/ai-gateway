@@ -60,7 +60,9 @@ build-docker-model-gateway-arch:
   extends:
     - .docker-build-arch
   needs: []  # Do not wait for .pre. See the comment above install.
-  rules: *skip-on-version-tag-rules
+  rules:
+    - !reference [.skip-on-docs-only-mr, rules]
+    - *skip-on-version-tag-rules
   variables:
     BUILD_TAG: "${TARGET_IMAGE}"
     BUILD_EXTRA_ARGS: "--secret id=gitlab_api_token,env=GITLAB_API_TOKEN"
@@ -69,7 +71,9 @@ build-docker-model-gateway:
   stage: build
   extends:
     - .docker-manifest
-  rules: *skip-on-version-tag-rules
+  rules:
+    - !reference [.skip-on-docs-only-mr, rules]
+    - *skip-on-version-tag-rules
   variables:
     MANIFEST_TAG: "${TARGET_IMAGE}"
   needs:
