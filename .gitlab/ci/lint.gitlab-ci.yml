@@ -137,7 +137,14 @@ lint:commit:
   image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}node:alpine
   needs: []
   variables:
+    # commitlint reads only commit messages. The job needs the full commit
+    # history to find the merge base, so the depth stays 0. The filter leaves
+    # out the file contents of old commits (a blobless partial clone). The
+    # checkout fetches the files of the checked-out commit. The runner default
+    # flags are "--prune --quiet". This variable replaces them, so the value
+    # keeps them.
     GIT_DEPTH: 0
+    GIT_FETCH_EXTRA_FLAGS: "--prune --quiet --filter=blob:none"
   before_script:
     - apk add --no-cache git
     - npm install
