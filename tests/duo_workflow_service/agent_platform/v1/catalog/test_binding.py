@@ -528,6 +528,32 @@ class TestBindCatalogItems:
         assert subagent["description"] == "Runs tests."
         assert subagent["toolset"] == ["grep"]
 
+    @pytest.mark.parametrize(
+        "declared,expected",
+        [
+            ({}, None),
+            ({"require_tool_approval": True}, True),
+            ({"require_tool_approval": False}, False),
+        ],
+        ids=["silent", "required", "waived"],
+    )
+    def test_the_subagent_inherits_the_coordinators_tool_approval(
+        self, declared, expected, expand
+    ):
+        """A declared value is copied, so a subagent answers to the approval gate its coordinator does.
+
+        A silent coordinator leaves the subagent silent too, so the subagent keeps the ``AgentComponent``
+        default.
+        """
+        components = _components()
+        components[1].update(declared)
+
+        subagent = _by_name(expand(components, _include(), _items({"name": "tester"})))[
+            _catalog_name("tester")
+        ]
+
+        assert subagent.get("require_tool_approval") is expected
+
     def test_the_item_prompt_is_appended_to_the_template_inputs(self, expand):
         """A subagent gets the delegated goal and its own prompt, and nothing else."""
         expanded = expand(_components(), _include(), _items({"name": "tester"}))

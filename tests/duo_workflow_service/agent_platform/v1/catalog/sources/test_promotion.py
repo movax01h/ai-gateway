@@ -41,6 +41,16 @@ class TestTheDefaultTemplate:
             {"from": "context:goal", "as": "goal"}
         ]
 
+    def test_it_leaves_tool_approval_to_the_claimant(self):
+        """Declared by neither the template nor the item, so the subagent can mirror its coordinator.
+
+        A value here would win over the claimant's in ``synthesized_agent_config``, and the component's default
+        (``true`` under ``chat-partial``) would no longer apply.
+        """
+        assert "require_tool_approval" not in AgentComponentTemplate.default(
+            _PROMPT_ID
+        ).model_dump(exclude_unset=True)
+
     def test_ui_log_events_are_forwarded_rather_than_declared(self):
         """``ui_log_events`` is the component's field, so the template only carries it."""
         assert AgentComponentTemplate.default(_PROMPT_ID).model_dump(
@@ -159,6 +169,43 @@ class TestSynthesizedAgentConfig:
         assert config["toolset"] == ["run_tests"]
         assert config["prompt_id"] == _PROMPT_ID
         assert config["inputs"][-1] == literal_input("Be terse.", ITEM_PROMPT_VARIABLE)
+
+    @pytest.mark.parametrize("approval", [True, False], ids=["required", "waived"])
+    def test_tool_approval_is_inherited_from_the_claimant(self, approval):
+        """A declared value is copied whichever way it points, so subagents answer to the same gate."""
+        config = synthesized_agent_config(
+            AgentComponentTemplate.default(_PROMPT_ID),
+            _Item(),
+            {"require_tool_approval": approval},
+        )
+
+        assert config["require_tool_approval"] is approval
+
+    def test_pre_approved_tools_are_copied_from_the_claimant(self):
+        """The list is copied, not shared, so a later edit to one config cannot reach the other."""
+        claimant = {"pre_approved_tools": ["read_file"]}
+
+        config = synthesized_agent_config(
+            AgentComponentTemplate.default(_PROMPT_ID), _Item(), claimant
+        )
+
+        assert config["pre_approved_tools"] == ["read_file"]
+        assert config["pre_approved_tools"] is not claimant["pre_approved_tools"]
+
+    def test_pre_approved_tools_are_left_unset_when_the_claimant_is_silent(self):
+        config = synthesized_agent_config(
+            AgentComponentTemplate.default(_PROMPT_ID), _Item(), {}
+        )
+
+        assert "pre_approved_tools" not in config
+
+    def test_tool_approval_is_left_to_the_component_when_the_claimant_is_silent(self):
+        """Left unset rather than defaulted, so the component's own default applies to both claimant and subagent."""
+        config = synthesized_agent_config(
+            AgentComponentTemplate.default(_PROMPT_ID), _Item(), {}
+        )
+
+        assert "require_tool_approval" not in config
 
     @pytest.mark.parametrize(
         "field,template_value",
