@@ -73,10 +73,11 @@ Instead, you should do:
       max_tokens: int = 0
    ```
 
-1. Declare dependencies for the feature:
+1. Declare dependencies for the feature in the container of the app that uses it.
+   Use `ai/platform/container.py` when both apps use the feature.
 
    ```python
-   # ai_gateway/container.py
+   # ai/apps/aigw/container.py
    class ContainerAwesomeFeature(containers.DeclarativeContainer):
       config = providers.Configuration(strict=True)
 
