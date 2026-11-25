@@ -35,7 +35,7 @@ They can be used to get the content needed to re-create the files.
             image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
             runway_version: v4.18.6 # Update this to the same as other runway services. Or check the runwayctl releases for the latest version
         - local: .gitlab/ci/dws-loadtest.gitlab-ci.yml
-          rules: *skip-if-not-security # This is different from the initial setup
+          rules: *skip-if-not-security-or-sync-schedule # This is different from the initial setup
         ```
 
    - Create [`.gitlab/ci/dws-loadtest.gitlab-ci.yml`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/0caedbb7d8463b5480cf52eadc93fb56b3051d3a/.gitlab/ci/dws-loadtest.gitlab-ci.yml#L134) with:
