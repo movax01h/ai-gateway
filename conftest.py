@@ -3,8 +3,12 @@
 Feature tests live under ai/features/<domain>/<feature>/tests/ and cannot see tests/conftest.py, so the genuinely global
 fixtures are promoted here. Promote a fixture only when it is useful to both trees; everything tests/-tree-specific
 stays in tests/conftest.py.
+
+The file also holds one hook that makes each pytest process exit faster.
 """
 
+import atexit
+import gc
 from unittest.mock import AsyncMock
 
 import pytest
@@ -15,6 +19,23 @@ from ai_gateway.prompts.base import (
 )
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure() -> None:
+    """Skip the garbage collector passes when the pytest process exits.
+
+    A test run leaves about 2 million objects on the heap of each pytest process, also in each xdist worker. When
+    Python exits, the garbage collector scans the whole heap several times, and that takes seconds. ``gc.freeze()``
+    moves all objects to a permanent generation that those scans skip.
+
+    ``gc.freeze`` runs only when Python exits, so pytest's collection for unraisable exceptions runs before it. This
+    hook runs after the other ``pytest_unconfigure`` hooks and registers the handler last. Thus the handler runs before
+    the other exit handlers, and the other exit handlers still run.
+
+    If this hook causes a problem, remove it. Nothing else depends on it.
+    """
+    atexit.register(gc.freeze)
 
 
 @pytest.fixture(autouse=True)
