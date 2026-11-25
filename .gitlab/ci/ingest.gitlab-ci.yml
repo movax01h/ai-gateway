@@ -93,15 +93,8 @@ ingest:dry-run:
   script:
     - cd /app && make ingest INGEST_DRY_RUN=true
     - ./scripts/ingest/gitlab-docs/test.sh
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - scripts/ingest/**/*
-        - Makefile
-        - poetry.lock
-        - pyproject.toml
-        - .tool-versions
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  # Same rules as build:ingest-image, which this job needs.
+  rules: !reference [.ingest-rules, rules]
   artifacts:
     # can only pack files inside $CI_PROJECT_DIR
     # https://docs.gitlab.com/ee/ci/yaml/index.html#artifactspaths
