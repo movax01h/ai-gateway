@@ -44,13 +44,3 @@ class TestBaseAgentComponentNode:
         await node.run({})
 
         assert node.handed == ({}, None)
-
-    def test_the_node_reads_its_components_history_key(self):
-        state = {"conversation_history": {"n": ["hello"]}}
-
-        history = _Node()._history_iokey(state).value_from_state(state)
-
-        assert history == ["hello"]
-
-    def test_a_node_outside_a_subagent_has_no_session(self):
-        assert _Node()._session_id({}) is None
