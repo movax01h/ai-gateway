@@ -21,7 +21,10 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
-from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
+from duo_workflow_service.agent_platform.constants import (
+    INTERACTIVE_ENVIRONMENTS,
+    NODE_ROLE_SEPARATOR,
+)
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
     DEFAULT_SESSION_ID_KEY,
     AgentNode,
@@ -686,6 +689,7 @@ class AgentComponent(AgentComponentBase):
             ),
             tracker=tracker,
             session_id_key=self._session_id_key,
+            halt_on_denied_tool=self.environment not in INTERACTIVE_ENVIRONMENTS,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",
@@ -740,6 +744,7 @@ class AgentComponent(AgentComponentBase):
                 tracker=tracker,
                 approval_requests_key=approval_requests_key,
                 approval_skip_sources_key=approval_skip_sources_key,
+                halt_on_denied_tool=self.environment not in INTERACTIVE_ENVIRONMENTS,
             )
 
             node_tool_approval_fetch = ToolApprovalFetchNode(

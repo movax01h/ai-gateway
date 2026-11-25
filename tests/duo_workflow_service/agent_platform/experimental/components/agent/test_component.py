@@ -1554,6 +1554,35 @@ class TestAgentComponentToolApprovalRouter:
             fetch_kwargs["pre_approved_tools"] == request_kwargs["pre_approved_tools"]
         )
 
+    @pytest.mark.usefixtures(
+        "mock_agent_node_cls",
+        "mock_final_response_node_cls",
+        "mock_tool_approval_fetch_node_cls",
+    )
+    @pytest.mark.parametrize(
+        ("environment", "halts"),
+        [("chat", False), ("chat-partial", False), ("ambient", True), (None, True)],
+    )
+    def test_attach_halts_on_a_denied_tool_only_without_a_user(
+        self,
+        environment,
+        halts,
+        make_agent_component,
+        mock_tool_node_cls,
+        mock_tool_approval_request_node_cls,
+        mock_state_graph,
+        mock_router,
+    ):
+        make_agent_component(
+            environment=environment, require_tool_approval=True, pre_approved_tools=[]
+        ).attach(mock_state_graph, mock_router)
+
+        assert mock_tool_node_cls.call_args[1]["halt_on_denied_tool"] is halts
+        assert (
+            mock_tool_approval_request_node_cls.call_args[1]["halt_on_denied_tool"]
+            is halts
+        )
+
     def test_tool_approval_fetch_router_with_tool_message_routes_to_agent(
         self,
         agent_component_with_tool_approval,

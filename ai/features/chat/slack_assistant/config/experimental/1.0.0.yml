@@ -1,0 +1,94 @@
+name: "Slack Assistant"
+description: |
+  API-only agent for Duo in Slack. Answers questions, searches and reads
+  GitLab data, and creates issues and comments. Delegates coding requests
+  to a specialist agent instead of handling them itself. Runs without a
+  repository, shell, or local files.
+product_group: agent_foundations
+version: "experimental"
+environment: chat
+
+components:
+  - name: "slack_agent"
+    type: AgentComponent
+    prompt_id: "slack_agent_prompt"
+    require_tool_approval: true
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: true
+      - from: "context:inputs.agent_platform_client_context.content"
+        as: "client_context"
+        optional: true
+    tools:
+      # Slack's own tool names start with slack_, so the server prefix doubles it: the tool named
+      # slack_slack_read_thread is selected by server slack and name slack_read_thread.
+      - server: slack
+        name:
+          - "slack_search_public"
+          - "slack_search_channels"
+          - "slack_read_channel"
+          - "slack_read_thread"
+      - server: orbit
+        name:
+          - "list_commands"
+          - "invoke_command"
+      # Every tool GitLab provides, native or from the GitLab MCP server, sits under gitlab. A name picks the
+      # native tool first and then the MCP tool.
+      - server: gitlab
+        name:
+          - "gitlab_api_get"
+          - "gitlab_graphql"
+          - "create_work_item"
+          - "create_work_item_note"
+          - "create_merge_request_note"
+          - "update_work_item"
+          - "update_merge_request"
+          - "todo_write"
+          - "start_flow"
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+routers:
+  - from: "slack_agent"
+    to: "end"
+
+flow:
+  entry_point: "slack_agent"
+  inputs:
+    - category: agent_platform_client_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        content:
+          type: string
+          description: Instructions and context written by the client that started the session, for example Slack reply style and mention rules
+
+prompts:
+  - name: "slack_agent_prompt"
+    prompt_id: "slack_agent_prompt"
+    params:
+      timeout: 120
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'slack_assistant/common/api_assistant/system/1.0.0.jinja' %}
+      user: |
+        {% if client_context -%}
+        <client_context>
+        {{ client_context }}
+        </client_context>
+
+        {% endif -%}
+        <runtime_context>
+        <current_date>{{ today }}</current_date>
+        </runtime_context>
+
+        {{ goal }}
