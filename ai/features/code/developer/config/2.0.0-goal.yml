@@ -5,6 +5,7 @@ components:
   - name: "developer_agent"
     type: AgentComponent
     prompt_id: "developer_agent_prompt"
+    max_cycles: 2800
     subagents:
       - name: "verifier"
     inputs:

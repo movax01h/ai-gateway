@@ -262,13 +262,13 @@ def _reviewer_data(
         ([], []),
     ],
 )
-def test_user_template_3_0_0_dev_renders_like_2_1_0_without_the_new_fields(
+def test_user_template_3_0_0_renders_like_2_1_0_without_the_new_fields(
     current_reviewer_ids: list[int], approval_rules: list[dict] | None
 ) -> None:
     """Rails sends the new fields and signals behind flags, so without them nothing changes."""
     reviewer_data = _reviewer_data(current_reviewer_ids, approval_rules)
 
-    assert _render_user_template("3.0.0-dev", reviewer_data) == _render_user_template(
+    assert _render_user_template("3.0.0", reviewer_data) == _render_user_template(
         "2.1.0", reviewer_data
     )
 
@@ -277,14 +277,14 @@ def _with(approver_id: int, **fields) -> dict:
     return {**_APPROVERS[approver_id], **fields}
 
 
-def test_user_template_3_0_0_dev_lists_cost_sorted_by_cost() -> None:
+def test_user_template_3_0_0_lists_cost_sorted_by_cost() -> None:
     """A candidate with fewer pending reviews can cost more, so candidates are listed by cost when Rails sends it."""
     rule = {
         **_rule(10, 1, []),
         "eligible_approvers": [_with(2, cost=10.0), _with(4, cost=6.0)],
     }
 
-    rendered = _render_user_template("3.0.0-dev", _reviewer_data([], [rule]))
+    rendered = _render_user_template("3.0.0", _reviewer_data([], [rule]))
 
     assert (
         "Candidates (id|pending_reviews|cost|local_time|last_activity_on|status):\n"
@@ -293,7 +293,7 @@ def test_user_template_3_0_0_dev_lists_cost_sorted_by_cost() -> None:
     ) in rendered
 
 
-def test_user_template_3_0_0_dev_sorts_by_pending_reviews_when_some_candidates_have_no_cost() -> (
+def test_user_template_3_0_0_sorts_by_pending_reviews_when_some_candidates_have_no_cost() -> (
     None
 ):
     """Sorting by a cost that some candidates lack would fail the render, so they are listed by workload."""
@@ -302,7 +302,7 @@ def test_user_template_3_0_0_dev_sorts_by_pending_reviews_when_some_candidates_h
         "eligible_approvers": [_with(2, cost=10.0), _APPROVERS[4], _with(1, cost=4.0)],
     }
 
-    rendered = _render_user_template("3.0.0-dev", _reviewer_data([], [rule]))
+    rendered = _render_user_template("3.0.0", _reviewer_data([], [rule]))
 
     assert (
         "Candidates (id|pending_reviews|cost|local_time|last_activity_on|status):\n"
@@ -321,7 +321,7 @@ _SIGNALS = [
 ]
 
 
-def test_user_template_3_0_0_dev_lists_declared_signals_in_declared_order() -> None:
+def test_user_template_3_0_0_lists_declared_signals_in_declared_order() -> None:
     """Rails declares signals once and sends values per candidate, so a new signal needs no gateway change."""
     rule = {
         **_rule(10, 1, []),
@@ -335,7 +335,7 @@ def test_user_template_3_0_0_dev_lists_declared_signals_in_declared_order() -> N
     }
 
     rendered = _render_user_template(
-        "3.0.0-dev", {**_reviewer_data([], [rule]), "signals": _SIGNALS}
+        "3.0.0", {**_reviewer_data([], [rule]), "signals": _SIGNALS}
     )
 
     assert (
@@ -351,7 +351,7 @@ def test_user_template_3_0_0_dev_lists_declared_signals_in_declared_order() -> N
     assert "undeclared" not in rendered
 
 
-def test_user_template_3_0_0_dev_renders_signal_values_safely() -> None:
+def test_user_template_3_0_0_renders_signal_values_safely() -> None:
     """Booleans read like can_merge, and a value cannot add a column or a line."""
     signals = [{"name": "flag"}, {"name": "note|x"}, {"name": "empty"}]
     rule = {
@@ -363,7 +363,7 @@ def test_user_template_3_0_0_dev_renders_signal_values_safely() -> None:
     }
 
     rendered = _render_user_template(
-        "3.0.0-dev", {**_reviewer_data([], [rule]), "signals": signals}
+        "3.0.0", {**_reviewer_data([], [rule]), "signals": signals}
     )
 
     assert "Candidates (id|pending_reviews|flag|note/x|empty|local_time|" in rendered
@@ -372,18 +372,16 @@ def test_user_template_3_0_0_dev_renders_signal_values_safely() -> None:
     assert "\n4|1|no|||12:00|" in rendered
 
 
-def test_user_template_3_0_0_dev_lists_no_signals_when_nothing_needs_reviewers() -> (
-    None
-):
+def test_user_template_3_0_0_lists_no_signals_when_nothing_needs_reviewers() -> None:
     rendered = _render_user_template(
-        "3.0.0-dev", {**_reviewer_data([], []), "signals": _SIGNALS}
+        "3.0.0", {**_reviewer_data([], []), "signals": _SIGNALS}
     )
 
     assert "empty suggestions list" in rendered
     assert "Signals" not in rendered
 
 
-def test_user_template_3_0_0_dev_lists_can_merge() -> None:
+def test_user_template_3_0_0_lists_can_merge() -> None:
     """can_merge is yes, no, or empty when Rails did not check the candidate."""
     rule = {
         **_rule(10, 1, []),
@@ -394,7 +392,7 @@ def test_user_template_3_0_0_dev_lists_can_merge() -> None:
         ],
     }
 
-    rendered = _render_user_template("3.0.0-dev", _reviewer_data([], [rule]))
+    rendered = _render_user_template("3.0.0", _reviewer_data([], [rule]))
 
     assert (
         "Candidates (id|pending_reviews|can_merge|local_time|last_activity_on|status):\n"
@@ -414,10 +412,10 @@ def test_user_template_3_0_0_dev_lists_can_merge() -> None:
         ({"suggested_set": [4, 2]}, "Suggested set (ids): 4,2"),
     ],
 )
-def test_user_template_3_0_0_dev_adds_the_merger_and_suggested_set_lines(
+def test_user_template_3_0_0_adds_the_merger_and_suggested_set_lines(
     extra: dict, expected_line: str
 ) -> None:
-    rendered = _render_user_template("3.0.0-dev", {**_reviewer_data([]), **extra})
+    rendered = _render_user_template("3.0.0", {**_reviewer_data([]), **extra})
 
     assert expected_line in rendered
     assert rendered.index("Approval rules that need reviewers") < rendered.index(
@@ -428,9 +426,9 @@ def test_user_template_3_0_0_dev_adds_the_merger_and_suggested_set_lines(
 @pytest.mark.parametrize(
     "extra", [{"merger_required": False}, {"suggested_set": []}, {"signals": []}]
 )
-def test_user_template_3_0_0_dev_skips_lines_for_empty_values(extra: dict) -> None:
+def test_user_template_3_0_0_skips_lines_for_empty_values(extra: dict) -> None:
     reviewer_data = {**_reviewer_data([]), **extra}
 
-    assert _render_user_template("3.0.0-dev", reviewer_data) == _render_user_template(
+    assert _render_user_template("3.0.0", reviewer_data) == _render_user_template(
         "2.1.0", _reviewer_data([])
     )

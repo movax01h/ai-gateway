@@ -74,6 +74,7 @@ class ToolMetadata(TypedDict):
     # write superset, so a tool checks one name. Absent only when ListTools builds
     # tools without a registry.
     granted_privileges: NotRequired[frozenset[str]]
+    web_search_blocked_domains: NotRequired[list[str]]
 
 
 # This tools agent uses to interact with its internal state, they are required for
@@ -684,6 +685,9 @@ class ToolsRegistry:
             project=project,
             features=workflow_config.get("features", {}),
             boto_session=web_search_boto_session(),
+            web_search_blocked_domains=workflow_config.get(
+                "web_search_denied_domains", []
+            ),
         )
 
         return cls(

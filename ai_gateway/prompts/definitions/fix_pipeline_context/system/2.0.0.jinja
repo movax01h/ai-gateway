@@ -100,32 +100,7 @@ Except when `agents_rule_match` applies because every blocking failing job was f
 
 {% include 'common/fix_pipeline_failure_categories/1.0.0.jinja' %}
 
-<fix_types>
-  <fix_type>
-    <suggested_fix_type>code_fix</suggested_fix_type>
-    <description>The failure can be resolved by changing application source code. Includes fixing broken tests, correcting logic errors, updating imports, or resolving type errors.</description>
-  </fix_type>
-  <fix_type>
-    <suggested_fix_type>update_ci_config</suggested_fix_type>
-    <description>The failure can be resolved by modifying .gitlab-ci.yml or related CI/CD configuration. Includes fixing job definitions, stage ordering, variable references, or rules/only/except clauses.</description>
-  </fix_type>
-  <fix_type>
-    <suggested_fix_type>update_dependencies</suggested_fix_type>
-    <description>The failure can be resolved by updating dependencies. Includes adding missing packages, fixing version constraints, regenerating lockfiles, or resolving version conflicts.</description>
-  </fix_type>
-  <fix_type>
-    <suggested_fix_type>retry_job</suggested_fix_type>
-    <description>The failure is transient and retrying the job will likely resolve it. Includes runner crashes, network blips, environment provisioning errors, resource contention{% if merge_request_url %}, flaky tests, and pre-existing failures on the target branch{% endif %}.</description>
-  </fix_type>
-  <fix_type>
-    <suggested_fix_type>comment_only</suggested_fix_type>
-    <description>The failure requires human attention but no automated code fix is possible. Includes persistent permission errors, security findings, or failures where the root cause is clear but the fix requires decisions beyond the agent's scope.</description>
-  </fix_type>
-  <fix_type>
-    <suggested_fix_type>no_action</suggested_fix_type>
-    <description>The failure does not fit any of the above fix types. Use as a last resort when no appropriate action can be determined.</description>
-  </fix_type>
-</fix_types>
+{% include 'fix_pipeline_fix_types/1.0.0.jinja' %}
 
 Choose the most specific failure_category that fits. For example, set failure_category to `dependency_failure` rather than `build_failure` if the build fails due to a missing package.
 

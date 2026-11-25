@@ -66,6 +66,7 @@ query(
             fileAttachmentsAllowed @gl_introduced(version: "19.6.0")
             webSearchEnabled
             webSearchAllowed @gl_introduced(version: "19.6.0")
+            webSearchDeniedDomains @gl_introduced(version: "19.7.0")
             latestCheckpoint {
                 threadTs
                 parentTs

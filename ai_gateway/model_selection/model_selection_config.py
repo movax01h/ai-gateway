@@ -1,23 +1,30 @@
 import functools
 import random
 import re
+import threading
 from itertools import chain
 from pathlib import Path
-from typing import Annotated, Any, Iterable, Literal, Optional
+from typing import Annotated, Any, Callable, Iterable, Literal, Optional, TypeVar, cast
 
 import structlog
-import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictStr,
     TypeAdapter,
     ValidationError,
     field_validator,
     model_validator,
 )
 
+from ai_gateway.catalog import (
+    CatalogDocuments,
+    CatalogProvider,
+    FileCatalogProvider,
+    catalog_provider_from_config,
+)
 from ai_gateway.config import (
     ModelReleaseFeatureAttachment,
     ModelReleasesPayload,
@@ -143,7 +150,7 @@ class BaseLLMDefinition(BaseModel):
         description="Semantic tags for this model (e.g. 'small', 'large', 'reasoning'). Used as metadata; resolution is driven by models_for_tags in unit_primitives.yml.",
     )
     deprecation: Optional[DeprecationInfo] = None
-    proxy_provider: Optional[str] = None
+    proxy_provider: str | Annotated[list[StrictStr], Field(strict=True)] | None = None
     # Claude 4.6+ rejects requests ending with an assistant turn (prefill).
     # Opt in by setting to true for models that still accept prefill.
     supports_assistant_prefill: bool = False
@@ -177,6 +184,13 @@ class BaseLLMDefinition(BaseModel):
                 f"effort_levels must be unique and ascending, in the order {list(EFFORT_LEVELS)}"
             )
         return levels
+
+    def supports_proxy_provider(self, provider: str) -> bool:
+        """Return whether this definition is available through a proxy protocol."""
+        if isinstance(self.proxy_provider, list):
+            return provider in self.proxy_provider
+
+        return self.proxy_provider == provider
 
 
 class ChatLiteLLMDefinition(BaseLLMDefinition):
@@ -397,6 +411,59 @@ class UnitPrimitiveConfig(BaseModel):
         )
 
 
+def shipped_catalog_provider() -> FileCatalogProvider:
+    """Return the provider for the catalog files shipped in the image."""
+    return FileCatalogProvider(
+        models_path=MODELS_CONFIG_PATH,
+        unit_primitives_path=UNIT_PRIMITIVE_CONFIG_PATH,
+        model_restrictions_path=MODEL_RESTRICTIONS_CONFIG_PATH,
+    )
+
+
+class _CatalogSnapshot:
+    """Everything ModelSelectionConfig derives from one catalog version.
+
+    A snapshot is built in full before it is published and is not changed afterwards: a new catalog version replaces
+    the whole snapshot. Only the match indexes are filled in lazily; building one twice in a race gives the same
+    result.
+    """
+
+    def __init__(
+        self,
+        version: str,
+        llm_definitions: dict[str, LLMDefinition],
+        unit_primitive_configs: dict[str, UnitPrimitiveConfig],
+        flow_features: dict[str, tuple[str, ...]],
+        model_restrictions: list[ModelRestriction],
+    ) -> None:
+        self.version = version
+        self.llm_definitions = llm_definitions
+        self.unit_primitive_configs = unit_primitive_configs
+        self.flow_features = flow_features
+        self.model_restrictions = model_restrictions
+        self.match_index: Optional[dict[MatchKey, LLMDefinition]] = None
+        self.resolved_match_index: Optional[dict[MatchKey, LLMDefinition]] = None
+
+
+_Method = TypeVar("_Method", bound=Callable[..., Any])
+
+
+def _one_snapshot(method: _Method) -> _Method:
+    """Run a method that reads the catalog several times against one snapshot.
+
+    Without this, a catalog swapped in halfway through could give it, for example, the feature lists of one version and
+    the model definitions of the next.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: "ModelSelectionConfig", *args: Any, **kwargs: Any) -> Any:
+        if self._pinned:
+            return method(self, *args, **kwargs)
+        return method(self._pinned_to(self._current()), *args, **kwargs)
+
+    return cast(_Method, wrapper)
+
+
 class ModelSelectionConfig:
     _instance: Optional["ModelSelectionConfig"] = None
 
@@ -407,12 +474,16 @@ class ModelSelectionConfig:
         prompt_params_override: dict[str, dict] | None = None,
         model_releases: Optional[str] = None,
         models_for_tags_override: dict[str, dict[str, str]] | None = None,
+        catalog_provider: Optional[CatalogProvider] = None,
     ) -> None:
-        self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
-        self._unit_primitives_file: Optional[dict[str, Any]] = None
-        self._unit_primitive_configs: Optional[dict[str, UnitPrimitiveConfig]] = None
-        self._flow_features: Optional[dict[str, tuple[str, ...]]] = None
-        self._model_restrictions: Optional[list[ModelRestriction]] = None
+        self._catalog_provider: CatalogProvider = (
+            catalog_provider or shipped_catalog_provider()
+        )
+        # Replaced as a whole, never changed in place; see _CatalogSnapshot.
+        self._snapshot: Optional[_CatalogSnapshot] = None
+        self._snapshot_lock = threading.Lock()
+        # True on a view from _pinned_to, which always reads the same snapshot.
+        self._pinned = False
         self._default_models_override: dict[str, list[str]] = default_models_override
         self._models_for_tags_override: dict[str, dict[str, str]] = (
             models_for_tags_override or {}
@@ -421,8 +492,6 @@ class ModelSelectionConfig:
         self._prompt_params_override: dict[str, dict] = prompt_params_override or {}
         self._env_llm_definitions: dict[str, LLMDefinition] = {}
         self._env_feature_attachments: dict[str, ModelReleaseFeatureAttachment] = {}
-        self._match_index: Optional[dict[MatchKey, LLMDefinition]] = None
-        self._resolved_match_index: Optional[dict[MatchKey, LLMDefinition]] = None
         if model_releases:
             self._load_env_releases(model_releases)
 
@@ -444,37 +513,113 @@ class ModelSelectionConfig:
                     model_releases.get_secret_value() if model_releases else None
                 ),
                 models_for_tags_override=cfg.model_selection.models_for_tags,
+                catalog_provider=catalog_provider_from_config(
+                    cfg.model_selection.catalog, shipped_catalog_provider()
+                ),
             )
         return cls._instance
 
+    @property
+    def catalog_storage(self) -> str:
+        """The storage the catalog is read from (``file`` or ``repo``)."""
+        return self._catalog_provider.storage
+
+    @property
+    def catalog_version(self) -> str:
+        """The version of the catalog in use, loading it first if needed."""
+        return self._current().version
+
+    def _current(self) -> _CatalogSnapshot:
+        """Return the current snapshot, loading the catalog on first use."""
+        snapshot = self._snapshot
+        if snapshot is not None:
+            return snapshot
+        with self._snapshot_lock:
+            if self._snapshot is None:
+                self._snapshot = self._build_snapshot(self._catalog_provider.load())
+            return self._snapshot
+
+    def _build_snapshot(self, documents: CatalogDocuments) -> _CatalogSnapshot:
+        """Validate one catalog version and apply the env overrides to it.
+
+        Raises:
+            ValidationError: If an entry does not match its model.
+            KeyError: If a required key is missing.
+        """
+        llm_definitions: dict[str, LLMDefinition] = {}
+        for model_data in documents.models["models"]:
+            identifier = model_data["gitlab_identifier"]
+            if identifier in self._model_params_override:
+                params_override = self._model_params_override[identifier]
+                model_data = {
+                    **model_data,
+                    "params": {**model_data.get("params", {}), **params_override},
+                }
+            if identifier in self._prompt_params_override:
+                prompt_params_override = self._prompt_params_override[identifier]
+                model_data = {
+                    **model_data,
+                    "prompt_params": {
+                        **model_data.get("prompt_params", {}),
+                        **prompt_params_override,
+                    },
+                }
+            llm_definitions[identifier] = TypeAdapter(LLMDefinition).validate_python(
+                model_data
+            )
+
+        unit_primitive_configs = {
+            data["feature_setting"]: UnitPrimitiveConfig(**data)
+            for data in documents.unit_primitives["configurable_unit_primitives"]
+        }
+        for feature_setting, models in self._default_models_override.items():
+            if feature_setting in unit_primitive_configs:
+                unit_primitive_configs[feature_setting].default_models = [
+                    DefaultModelEntry(identifier=m) for m in models
+                ]
+
+        wildcard_tags = self._models_for_tags_override.get("*")
+        if wildcard_tags is not None:
+            for config in unit_primitive_configs.values():
+                config.models_for_tags = self._build_tag_entries(wildcard_tags)
+
+        for feature_setting, tags in self._models_for_tags_override.items():
+            if feature_setting in unit_primitive_configs:
+                unit_primitive_configs[
+                    feature_setting
+                ].models_for_tags = self._build_tag_entries(tags)
+
+        flows = _FLOW_FEATURES_ADAPTER.validate_python(
+            documents.unit_primitives.get("flows") or {}
+        )
+
+        model_restrictions = [
+            ModelRestriction(**data)
+            for data in documents.model_restrictions.get("restricted_models") or []
+        ]
+
+        return _CatalogSnapshot(
+            version=documents.version,
+            llm_definitions=llm_definitions,
+            unit_primitive_configs=unit_primitive_configs,
+            flow_features={flow: tuple(features) for flow, features in flows.items()},
+            model_restrictions=model_restrictions,
+        )
+
+    def _pinned_to(self, snapshot: _CatalogSnapshot) -> "ModelSelectionConfig":
+        """Return a view of this config that reads only ``snapshot``.
+
+        The view shares everything else with this config: the overrides, the env-injected releases and any method
+        replaced on the instance.
+        """
+        view = object.__new__(type(self))
+        view.__dict__.update(self.__dict__)
+        view._snapshot = snapshot
+        view._pinned = True
+        return view
+
     def get_llm_definitions(self) -> dict[str, LLMDefinition]:
-        if not self._llm_definitions:
-            with open(MODELS_CONFIG_PATH, "r") as f:
-                config_data = yaml.safe_load(f)
-
-            self._llm_definitions = {}
-            for model_data in config_data["models"]:
-                identifier = model_data["gitlab_identifier"]
-                if identifier in self._model_params_override:
-                    params_override = self._model_params_override[identifier]
-                    model_data = {
-                        **model_data,
-                        "params": {**model_data.get("params", {}), **params_override},
-                    }
-                if identifier in self._prompt_params_override:
-                    prompt_params_override = self._prompt_params_override[identifier]
-                    model_data = {
-                        **model_data,
-                        "prompt_params": {
-                            **model_data.get("prompt_params", {}),
-                            **prompt_params_override,
-                        },
-                    }
-                self._llm_definitions[identifier] = TypeAdapter(
-                    LLMDefinition
-                ).validate_python(model_data)
-
-        return self._llm_definitions
+        return self._current().llm_definitions
 
     def _load_env_releases(self, model_releases: str) -> None:
         try:
@@ -522,41 +667,8 @@ class ModelSelectionConfig:
             return base
         return {**base, **self._env_llm_definitions}
 
-    def _get_unit_primitives_file(self) -> dict[str, Any]:
-        """Parse ``unit_primitives.yml`` once for its feature settings and its ``flows`` map."""
-        if self._unit_primitives_file is None:
-            with open(UNIT_PRIMITIVE_CONFIG_PATH, "r") as f:
-                self._unit_primitives_file = yaml.safe_load(f)
-
-        return self._unit_primitives_file
-
     def get_unit_primitive_config_map(self) -> dict[str, UnitPrimitiveConfig]:
-        if not self._unit_primitive_configs:
-            config_data = self._get_unit_primitives_file()
-
-            self._unit_primitive_configs = {
-                data["feature_setting"]: UnitPrimitiveConfig(**data)
-                for data in config_data["configurable_unit_primitives"]
-            }
-
-            for feature_setting, models in self._default_models_override.items():
-                if feature_setting in self._unit_primitive_configs:
-                    self._unit_primitive_configs[feature_setting].default_models = [
-                        DefaultModelEntry(identifier=m) for m in models
-                    ]
-
-            wildcard_tags = self._models_for_tags_override.get("*")
-            if wildcard_tags is not None:
-                for config in self._unit_primitive_configs.values():
-                    config.models_for_tags = self._build_tag_entries(wildcard_tags)
-
-            for feature_setting, tags in self._models_for_tags_override.items():
-                if feature_setting in self._unit_primitive_configs:
-                    self._unit_primitive_configs[
-                        feature_setting
-                    ].models_for_tags = self._build_tag_entries(tags)
-
-        return self._unit_primitive_configs
+        return self._current().unit_primitive_configs
 
     @staticmethod
     def _build_tag_entries(tags: dict[str, str]) -> dict[str, ModelTagEntry]:
@@ -575,27 +687,10 @@ class ModelSelectionConfig:
         Returns:
             Mapping of flow name to its features, main feature first. Empty when the file has no ``flows`` map.
         """
-        if self._flow_features is None:
-            flows = _FLOW_FEATURES_ADAPTER.validate_python(
-                self._get_unit_primitives_file().get("flows") or {}
-            )
-            self._flow_features = {
-                flow: tuple(features) for flow, features in flows.items()
-            }
-
-        return self._flow_features
+        return self._current().flow_features
 
     def get_model_restrictions(self) -> list[ModelRestriction]:
-        if self._model_restrictions is None:
-            with open(MODEL_RESTRICTIONS_CONFIG_PATH, "r") as f:
-                config_data = yaml.safe_load(f) or {}
-
-            self._model_restrictions = [
-                ModelRestriction(**data)
-                for data in config_data.get("restricted_models") or []
-            ]
-
-        return self._model_restrictions
+        return self._current().model_restrictions
 
     def _restricted_flows_by_identifier(self) -> dict[str, frozenset[str]]:
         # validate() rejects duplicate identifiers; should one slip through, only the
@@ -611,6 +706,7 @@ class ModelSelectionConfig:
     def get_unit_primitive_config(self) -> Iterable[UnitPrimitiveConfig]:
         return self.get_unit_primitive_config_map().values()
 
+    @_one_snapshot
     def get_resolved_unit_primitive_config_map(self) -> dict[str, UnitPrimitiveConfig]:
         """Get unit primitive configs, merged with env-injected attachments when enabled.
 
@@ -941,6 +1037,7 @@ class ModelSelectionConfig:
         )
         return errors
 
+    @_one_snapshot
     def validate(self) -> None:
         unit_primitive_configs = list(self.get_unit_primitive_config())
         models = self.get_llm_definitions()
@@ -964,16 +1061,28 @@ class ModelSelectionConfig:
         if error_messages:
             raise ValueError("\n".join(error_messages))
 
-    def refresh(self):
-        """Refresh the configuration by reloading from source files."""
-        self._llm_definitions = None
-        self._unit_primitives_file = None
-        self._unit_primitive_configs = None
-        self._flow_features = None
-        self._match_index = None
-        self._resolved_match_index = None
-        self._model_restrictions = None
+    def refresh(self, validate: bool = False) -> None:
+        """Reload the catalog from its storage and swap it in as one step.
 
+        The new snapshot is built in full, and checked with validate() when ``validate`` is true, before it replaces
+        the current one. A call already running keeps reading the snapshot it started with. If loading or checking
+        fails, the current snapshot stays in place and the error is raised.
+
+        Args:
+            validate: Also run validate() on the new catalog before swapping it in.
+        """
+        snapshot = self._build_snapshot(self._catalog_provider.load())
+        if validate:
+            self._pinned_to(snapshot).validate()
+        with self._snapshot_lock:
+            self._snapshot = snapshot
+        log.info(
+            "Model catalog loaded",
+            catalog_storage=self.catalog_storage,
+            catalog_version=snapshot.version,
+        )
+
+    @_one_snapshot
     def get_proxy_models_for_provider(self, provider: str) -> list[str]:
         """Get list of allowed model names for a provider's proxy endpoint.
 
@@ -989,7 +1098,7 @@ class ModelSelectionConfig:
         return [
             llm_def.params.model or ""
             for llm_def in llm_definitions.values()
-            if llm_def.proxy_provider == provider
+            if llm_def.supports_proxy_provider(provider)
             and llm_def.params.model
             and self.restricted_flows_for(models=[llm_def.params.model]) is None
         ]
@@ -1007,6 +1116,7 @@ class ModelSelectionConfig:
             if llm_def.gitlab_identifier in flows_by_identifier
         ]
 
+    @_one_snapshot
     def restricted_flows_for(
         self,
         identifiers: Iterable[Optional[str]] = (),
@@ -1040,6 +1150,7 @@ class ModelSelectionConfig:
                 allowed = flows if allowed is None else allowed & flows
         return allowed
 
+    @_one_snapshot
     def paid_credit_models_for(
         self,
         identifiers: Iterable[Optional[str]] = (),
@@ -1070,6 +1181,7 @@ class ModelSelectionConfig:
             if llm_def.requires_paid_credits
         ]
 
+    @_one_snapshot
     def all_restricted_flows(self) -> frozenset[str]:
         """Return every flow id that some restricted model is restricted to."""
         return frozenset(
@@ -1084,6 +1196,7 @@ class ModelSelectionConfig:
             return model
         raise ValueError(f"Invalid model identifier: {model_id}")
 
+    @_one_snapshot
     def find_by_identifier(self, identifier: str) -> Optional[LLMDefinition]:
         """Find the definition whose model matches a self-hosted identifier.
 
@@ -1099,19 +1212,23 @@ class ModelSelectionConfig:
 
         # Env-injected definitions apply per request, so keep a separate index that
         # includes them, the same way `get_resolved_llm_definitions` does.
+        snapshot = self._current()
         if self._env_llm_definitions and is_feature_enabled(
             FeatureFlag.AI_MODEL_RELEASE
         ):
-            if self._resolved_match_index is None:
-                self._resolved_match_index = _build_match_index(
+            if snapshot.resolved_match_index is None:
+                snapshot.resolved_match_index = _build_match_index(
                     self.get_resolved_llm_definitions().values()
                 )
-            return self._resolved_match_index.get(key)
+            return snapshot.resolved_match_index.get(key)
 
-        if self._match_index is None:
-            self._match_index = _build_match_index(self.get_llm_definitions().values())
-        return self._match_index.get(key)
+        if snapshot.match_index is None:
+            snapshot.match_index = _build_match_index(
+                self.get_llm_definitions().values()
+            )
+        return snapshot.match_index.get(key)
 
+    @_one_snapshot
     def get_model_for_feature(self, feature_setting_name: str) -> LLMDefinition:
         if feature_setting := self.get_resolved_unit_primitive_config_map().get(
             feature_setting_name, None
@@ -1122,6 +1239,7 @@ class ModelSelectionConfig:
             return self.get_model(chosen)
         raise ValueError(f"Invalid feature setting: {feature_setting_name}")
 
+    @_one_snapshot
     def allowed_models_for_feature(self, feature_setting_name: str) -> frozenset[str]:
         """Return every model identifier a feature may serve.
 
@@ -1136,6 +1254,7 @@ class ModelSelectionConfig:
             raise ValueError(f"Invalid feature setting: {feature_setting_name}")
         return config.allowed_model_identifiers
 
+    @_one_snapshot
     def resolve_tag_for_goal(
         self, feature_setting_name: str, goal: str
     ) -> Optional[tuple[str, list[str]]]:

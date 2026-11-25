@@ -140,7 +140,9 @@ include:
   - local: .gitlab/ci/ingest.gitlab-ci.yml
     rules: *skip-when-expedited-or-version-tag-include
   - template: Jobs/Container-Scanning.latest.gitlab-ci.yml
-  - template: Jobs/Dependency-Scanning.latest.gitlab-ci.yml
+  # Do not include Jobs/Dependency-Scanning.latest.gitlab-ci.yml. GitLab security
+  # settings outside this file add the dependency-scanning-profile-0 job, which
+  # scans all the lock files. The template only adds duplicate Gemnasium jobs.
   - template: Jobs/SAST.latest.gitlab-ci.yml
   - template: Jobs/Secret-Detection.latest.gitlab-ci.yml
 
@@ -200,11 +202,15 @@ include:
     rules: *skip-if-not-canonical
 
   - component: ${CI_SERVER_FQDN}/gitlab-org/components/danger-review/danger-review@2.1.0
-    rules:
+    rules: &danger-review-include-rules
       # The security mirror's job token allowlist rejects the component's cross-project git fetch (#3731)
       - if: $CI_PROJECT_ID == "39903947" && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == "61869127"
         when: never
       - if: $CI_SERVER_HOST == "gitlab.com"
+  # Adds a gem cache to the danger-review job. Same rules as the component,
+  # because without the component the job would have no script.
+  - local: .gitlab/ci/danger-review.gitlab-ci.yml
+    rules: *danger-review-include-rules
   - component: $CI_SERVER_FQDN/gitlab-org/analytics-section/analytics-instrumentation/ci-components/internal_events_validation@v1.1.0
     rules:
       - if: $CI_SERVER_HOST == "gitlab.com"
@@ -223,21 +229,19 @@ Internal event definitions validation:
 # Cache taint-signature analysis results between pipeline runs so unchanged
 # files are not re-analyzed on every scan.
 # https://docs.gitlab.com/user/application_security/sast/gitlab_advanced_sast/#incremental-scanning
+# The analyzer uses one core less than MAX_UNVERIFIED_CORES (default 4).
+# A value of 8 gives 7 workers on the 8-core runner, with about 4 GB of memory each.
+# https://docs.gitlab.com/user/application_security/sast/gitlab_advanced_sast/#tune-runner-resources
 gitlab-advanced-sast:
   needs: []
   tags:
     - saas-linux-large-amd64
   variables:
     GITLAB_ADV_SAST_INCR_SCAN: "true"
+    MAX_UNVERIFIED_CORES: "8"
 
 # secret_detection only needs the source, not the build.
 secret_detection:
-  needs: []
-
-gemnasium-dependency_scanning:
-  needs: []
-
-gemnasium-python-dependency_scanning:
   needs: []
 
 .poetry:
@@ -251,15 +255,12 @@ gemnasium-python-dependency_scanning:
       - $PIP_CACHE_DIR
       - $POETRY_CACHE_DIR
       - .venv/
-      - requirements.txt
       - scripts/lib/
       - scripts/vendor/
   before_script:
     - pip install poetry==${POETRY_VERSION}
     - poetry config virtualenvs.in-project true
     - poetry config cache-dir ${POETRY_CACHE_DIR}
-    - poetry self add poetry-plugin-export
-    - poetry export -f requirements.txt --output requirements.txt --without-hashes
     - poetry config --list
 
 .docker:
@@ -276,6 +277,9 @@ gemnasium-python-dependency_scanning:
 
 pages:
   stage: deploy_pages
+  # The script reads only files in the repository, so the job does not wait for
+  # other jobs or download their artifacts.
+  needs: []
   script:
     - mkdir -p public
     - python -m scripts.prompt_directory_json_builder

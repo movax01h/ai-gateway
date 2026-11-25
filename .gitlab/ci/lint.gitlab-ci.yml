@@ -1,11 +1,20 @@
 lint:
   extends: .poetry
   stage: test
-  needs:
-    - install
+  # `install` produces no artifacts, only the dependency cache. On a warm cache
+  # `make lint-code` skips the install; on a cold cache (e.g. a poetry.lock
+  # change) it installs for itself, so don't wait on the build stage.
+  needs: []
   script:
     - BUF_VERSION=$(grep '^buf ' .tool-versions | awk '{print $2}') && curl -sSL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-$(uname -s)-$(uname -m)" -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf && sha256sum /usr/local/bin/buf
     - make lint-code
+    # Check that .gitlab/ci/dws-dependencies.yml is up to date. The script uses
+    # only the standard library, so it runs here and not in a separate job.
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        make duo-workflow-service-dependencies
+        git diff --exit-code .gitlab/ci/dws-dependencies.yml || (echo "ERROR: The dependencies at .gitlab/ci/dws-dependencies.yml are out of date. Run 'make duo-workflow-service-dependencies' locally to update the file." && exit 1)
+      fi
     - poetry lock --no-cache
     - git diff --exit-code
   after_script:
@@ -23,11 +32,12 @@ lint:
 lint:ruff:
   extends: .poetry
   stage: test
-  needs:
-    - install
+  # Same as `lint`: start right away, and install the dependencies only on a cold cache.
+  needs: []
   variables:
     RUFF_PATHS: "ai_gateway duo_workflow_service lib lints scripts tests integration_tests"
   script:
+    - make install-lint-deps
     - poetry run ruff check --output-format=gitlab --output-file=gl-code-quality-report.json ${RUFF_PATHS} || true
     - poetry run ruff check ${RUFF_PATHS}
     - poetry run ruff format --check ${RUFF_PATHS}

@@ -4,6 +4,8 @@ description: |
   A single autonomous agent investigates the failing CI pipeline, decides how to act, and
   delivers the result (inline code suggestions, a new merge request, a comment, or no action).
   When a merge request URL is provided it works on that MR's branch; otherwise it opens a new MR.
+  It covers the v1 fix_pipeline delivery contract (inline suggestions, new MR with comments on the new
+  and original MR, advisory comment, AGENTS.md label rules keyed on the run's source) with one agent.
   The agent records failure_category / suggested_fix_type / decision / confidence / summary as its
   final answer purely for observability.
 product_group: agent_foundations
@@ -58,6 +60,9 @@ components:
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
         optional: true
+      - from: "context:inputs.merge_request.author_id"
+        as: "merge_request_author_id"
+        optional: true
       - from: "context:inputs.pipeline.source_branch"
         as: "source_branch"
         optional: true
@@ -67,7 +72,7 @@ components:
       - from: "context:project_http_url_to_repo"
         as: "project_url"
         optional: true
-      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+      - from: "context:project_default_branch"
         as: "primary_branch"
         optional: true
       - from: "context:inputs.agent_platform_standard_context.session_owner_id"
@@ -88,12 +93,17 @@ components:
       - from: "context:inputs.agent_user_environment"
         as: "agent_user_environment"
         optional: true
+      - from: "context:inputs.os_information"
+        as: "os_information"
+        optional: true
     toolset:
       # Structured trace retrieval (kept bespoke: scalable, filtered, downstream-aware)
       - get_pipeline_failing_jobs:
           exclude_allow_failure: true
       - get_failing_bridge_jobs
-      - get_job_logs
+      - get_job_logs:
+          byte_offset: null
+          byte_limit: null
       # Inline code suggestions on an existing MR (glab cannot post inline diff notes)
       - build_review_merge_request_context
       - create_merge_request_diff_note
@@ -133,6 +143,10 @@ flow:
           type: string
           format: uri
           description: The URL for the GitLab Merge Request
+        author_id:
+          type: string
+          description: ID of the Merge Request author
+          optional: true
     - category: pipeline
       version_constraint: "^1.0.0"
       input_schema:

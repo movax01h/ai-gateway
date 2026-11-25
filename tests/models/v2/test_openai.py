@@ -27,6 +27,23 @@ _UNRELATED_INCLUDE = "reasoning.encrypted_content"
             ],
         ),
         (
+            {"web_search_options": {"blocked_domains": ["evil.com"]}},
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_issue",
+                        "parameters": [],
+                        "strict": False,
+                    },
+                },
+                {
+                    "type": "web_search",
+                    "filters": {"blocked_domains": ["evil.com"]},
+                },
+            ],
+        ),
+        (
             {},
             [
                 {

@@ -24,6 +24,16 @@ from lib.unified_events.context import DeploymentType, EventConstructContext, Re
 __all__ = ["UnifiedEventService"]
 
 
+# Used when the X-Gitlab-Deployment-Type header is missing (GitLab < 18.6).
+_DEPLOYMENT_TYPE_BY_REALM: Dict[str, DeploymentType] = {
+    "self-managed": "self-managed",
+    "saas": ".com",
+    # GitLab sends realm only as saas or self-managed, so Dedicated < 18.6 maps to
+    # self-managed. This row only covers a dedicated realm, should one be sent.
+    "dedicated": "dedicated",
+}
+
+
 class UnifiedEventService:
     """Sends events with the unified event construct to the events sidecar."""
 
@@ -209,7 +219,14 @@ class UnifiedEventService:
                 user_id=context.user_id,
                 user_type=context.user_type,
                 is_gitlab_team_member=context.is_gitlab_team_member,
-                deployment_type=cast(Optional[DeploymentType], context.deployment_type),
+                # GitLab sends X-Gitlab-Deployment-Type only from 18.6, so older
+                # instances fall back to realm. Events with instance_version < 18.6
+                # carry a realm-derived deployment_type.
+                deployment_type=cast(
+                    Optional[DeploymentType],
+                    context.deployment_type
+                    or _DEPLOYMENT_TYPE_BY_REALM.get(context.realm or ""),
+                ),
                 realm=cast(Optional[Realm], context.realm),
                 instance_id=context.instance_id,
                 unique_instance_id=context.unique_instance_id

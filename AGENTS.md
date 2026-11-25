@@ -15,7 +15,7 @@ This repository contains two main services:
 
 **Clean Architecture**: The project follows [The Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) paradigm with clear layer separation and dependencies flowing inward.
 
-**Dependency Injection**: Uses [Dependency Injector](https://python-dependency-injector.ets-labs.org/) framework extensively. Container definitions are in `**/container.py` files. The main application container is `ai_gateway/container.py` with nested containers for different domains (models, prompts, chat, code suggestions, etc.).
+**Dependency Injection**: Uses [Dependency Injector](https://python-dependency-injector.ets-labs.org/) framework extensively. Container definitions are in `**/container.py` files. `ai/platform/container.py` holds the providers that both apps use, and `ai/apps/{aigw,dws}/container.py` add the providers of one app. `ai_gateway/container.py` is the union of both app containers, and the entrypoints still use it.
 
 **LangGraph Abstraction Layers** (Duo Workflow Service):
 
@@ -612,7 +612,7 @@ Pipelines defined in `.gitlab-ci.yml` and `.gitlab/ci/*.gitlab-ci.yml`:
 Waiting for a pipeline: `glab ci get` is a point-in-time read — prefer
 `glab ci status --wait --branch <branch>` (or poll the API with backoff) over
 tight `sleep && glab ci get` loops. A parent pipeline stays `running` while a
-`strategy: depend` downstream bridge (e.g. `tests:performance`) runs even when
+`strategy: depend` downstream bridge (e.g. `feature-tests`) runs even when
 all its own jobs have finished; check the bridge status before concluding the
 pipeline is stuck.
 

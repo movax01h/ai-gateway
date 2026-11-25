@@ -21,7 +21,10 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
-from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
+from duo_workflow_service.agent_platform.constants import (
+    INTERACTIVE_ENVIRONMENTS,
+    NODE_ROLE_SEPARATOR,
+)
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
     DEFAULT_SESSION_ID_KEY,
     AgentNode,
@@ -155,6 +158,8 @@ class AgentComponentBase(BaseComponent):
     # by the dependency_bump_web_search flag, the client's "web_search"
     # capability, and a model cleared to search natively.
     enable_web_search: bool = False
+    # Group web-search denylist, set by the flow from the workflow config.
+    web_search_blocked_domains: list[str] = Field(default_factory=list)
 
     @field_validator("max_cycles")
     @classmethod
@@ -326,7 +331,12 @@ class AgentComponentBase(BaseComponent):
         """Build the agent prompt with the given tool list and tool choice."""
         extra_params: dict[str, Any] = {}
         if self._web_search_enabled():
-            extra_params["bind_tools_params"] = {"web_search_options": {}}
+            options = (
+                {"blocked_domains": self.web_search_blocked_domains}
+                if self.web_search_blocked_domains
+                else {}
+            )
+            extra_params["bind_tools_params"] = {"web_search_options": options}
         return self.prompt_registry.get_on_behalf(
             self.user,
             self.prompt_id,
@@ -686,6 +696,7 @@ class AgentComponent(AgentComponentBase):
             ),
             tracker=tracker,
             session_id_key=self._session_id_key,
+            halt_on_denied_tool=self.environment not in INTERACTIVE_ENVIRONMENTS,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",
@@ -740,6 +751,7 @@ class AgentComponent(AgentComponentBase):
                 tracker=tracker,
                 approval_requests_key=approval_requests_key,
                 approval_skip_sources_key=approval_skip_sources_key,
+                halt_on_denied_tool=self.environment not in INTERACTIVE_ENVIRONMENTS,
             )
 
             node_tool_approval_fetch = ToolApprovalFetchNode(

@@ -7,6 +7,7 @@ import httpx
 import litellm
 import pytest
 from fastapi.responses import JSONResponse
+from starlette.datastructures import Headers
 
 from ai_gateway.config import get_config
 from ai_gateway.instrumentators.model_requests import (
@@ -428,3 +429,53 @@ def test_provider_variants_have_a_base_model():
             base = identifier.removesuffix(suffix)
             if base != identifier and base in definitions:
                 assert definitions[base].name == llm_def.name, identifier
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_proxy_async_client")
+@pytest.mark.parametrize(
+    ("request_headers", "expected_context"),
+    [
+        (
+            {"user-agent": "opencode/1.2.3 gitlab-ai-provider/6.0.1 (darwin; arm64)"},
+            {
+                "client_name": "opencode",
+                "client_version": "1.2.3",
+                "client_type": "cli",
+            },
+        ),
+        (
+            {"user-agent": "unknown-tool/1.0"},
+            {"client_name": "other", "client_type": "other"},
+        ),
+        (
+            {
+                "user-agent": "opencode/1.2.3",
+                "x-gitlab-client-name": "gitlab-ai-provider",
+                "x-gitlab-client-version": "6.1.0",
+            },
+            {"client_name": "gitlab-ai-provider", "client_version": "6.1.0"},
+        ),
+        ({}, {}),
+    ],
+)
+async def test_proxy_token_usage_event_records_caller(
+    proxy_client,
+    internal_event_client,
+    request_factory,
+    test_proxy_model,
+    request_headers,
+    expected_context,
+):
+    await proxy_client.proxy(
+        request_factory(request_headers=Headers(request_headers)), test_proxy_model
+    )
+
+    proxy_client.watcher.register_token_usage(
+        "test-model", {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}
+    )
+
+    internal_event_client.track_event.assert_called_once()
+    kwargs = internal_event_client.track_event.call_args.kwargs
+    for field in ("client_name", "client_version", "client_type"):
+        assert kwargs.get(field) == expected_context.get(field)

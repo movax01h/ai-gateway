@@ -10,15 +10,22 @@ from duo_workflow_service.agent_platform.v1.catalog.sources.reference import (
     CatalogItemRef,
     looks_like_ref,
 )
-from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
+from duo_workflow_service.agent_platform.v1.flows.flow_config import load_config
 
-DEVELOPER_VERSIONS = ["2.0.0", "2.0.0-interactive", "2.1.0-interactive", "3.0.0"]
+DEVELOPER_VERSIONS = [
+    "2.0.0",
+    "2.0.0-interactive",
+    "2.1.0-interactive",
+    "3.0.0",
+    "4.0.0",
+]
 
 
 @pytest.mark.parametrize("version", DEVELOPER_VERSIONS)
 def test_developer_agent_claims_every_workspace_agent_the_flow_includes(version):
     """A claim that drifts from the declaration fails the build; a missing one silently drops the items."""
-    config = FlowConfig.from_yaml_config("developer", version)
+    # Loaded as the registry loads it: 4.0.0 is chat-partial, which only its partial class accepts.
+    config = load_config("developer", version)
     developer_agent = next(
         c for c in config.components if c["name"] == "developer_agent"
     )

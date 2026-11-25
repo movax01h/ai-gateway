@@ -17,6 +17,7 @@ from scripts.check_glql_schema_fake import (
 
 
 def test_fake_glql_schema_has_the_structure_of_the_live_one():
+    # pylint: disable=direct-environment-variable-reference
     gitlab_url = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/")
     live = fetch_schema(gitlab_url)
     fake = load_json(FAKE_PATH)

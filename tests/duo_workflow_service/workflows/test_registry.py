@@ -1016,9 +1016,10 @@ def shipped_chat_partial_configs():
         for config_file in config_dir.glob("*.yml")
     )
     for config_id, config_file in chain(legacy, features):
-        environment = yaml.safe_load(config_file.read_text()).get("environment")
-        if environment == CHAT_PARTIAL_ENVIRONMENT:
-            yield config_id, config_file.stem
+        data = yaml.safe_load(config_file.read_text())
+        if data.get("environment") == CHAT_PARTIAL_ENVIRONMENT:
+            uses_template = any("template" in p for p in data.get("prompts") or [])
+            yield config_id, config_file.stem, uses_template
 
 
 def _as_registry_config(config_cls, data):
@@ -1120,17 +1121,19 @@ def test_a_known_registry_file_loads_as_its_environment_class_with_its_identity(
     assert (config.config_id, config.config_version) == ("assistant", "1.0.0")
 
 
-def test_every_shipped_chat_partial_config_stays_on_legacy_chat():
+def test_every_shipped_chat_partial_config_runs_on_the_engine_its_prompt_format_picks():
+    # Only a `template` prompt opts a config into the chat engine; every other one stays on legacy chat.
     with patch.dict(flow_config._FEATURE_FLOW_ROOTS):
         flow_config.discover_feature_flow_configs()
         configs = list(shipped_chat_partial_configs())
 
-        assert ("duo_permissions_assistant", "2.0.0") in configs
+        assert ("duo_permissions_assistant", "2.0.0", False) in configs
 
-        for config_id, version in configs:
+        for config_id, version, uses_template in configs:
             factory = _load_flow_from_registry(config_id, "v1", version).factory
 
-            assert factory.func is chat.Workflow, f"{config_id}/{version}"
+            expected = ChatFlow if uses_template else chat.Workflow
+            assert factory.func is expected, f"{config_id}/{version}"
 
 
 def test_an_inline_template_flow_never_reaches_the_engine():
@@ -1376,3 +1379,87 @@ def test_prompts_pass_the_security_check():
             flow_config_from_fetched_definition(_fetched_definition())
 
     validate.assert_called_once()
+
+
+def _chat_partial_config(config_cls, version, **component):
+    return config_cls(
+        version=version,
+        environment=CHAT_PARTIAL_ENVIRONMENT,
+        components=[
+            {"name": "agent", "type": "AgentComponent", "prompt_id": "p", **component}
+        ],
+    )
+
+
+class TestChatPartialToolsKey:
+    def test_selectors_travel_to_the_chat_workflow(self):
+        config = _chat_partial_config(
+            ExperimentalPartialFlowConfig,
+            "experimental",
+            tools=[
+                {"server": "orbit", "name": ["list_commands"]},
+                {"server": "gitlab", "name": ["read_file", "get_merge_request"]},
+            ],
+        )
+
+        factory = flow_factory(chat.Workflow, config)
+
+        assert [
+            (selector.server, selector.names)
+            for selector in factory.keywords["tool_selectors_override"]
+        ] == [
+            ("orbit", ["list_commands"]),
+            ("gitlab", ["read_file", "get_merge_request"]),
+        ]
+        assert "tools_override" not in factory.keywords
+
+    def test_an_empty_list_still_turns_the_automatic_tools_off(self):
+        config = _chat_partial_config(
+            ExperimentalPartialFlowConfig, "experimental", tools=[]
+        )
+
+        factory = flow_factory(chat.Workflow, config)
+
+        assert factory.keywords["tool_selectors_override"] == []
+
+    def test_toolset_keeps_the_automatic_tools(self):
+        config = _chat_partial_config(
+            ExperimentalPartialFlowConfig, "experimental", toolset=["read_file"]
+        )
+
+        factory = flow_factory(chat.Workflow, config)
+
+        assert factory.keywords["tools_override"] == ["read_file"]
+        assert "tool_selectors_override" not in factory.keywords
+
+    @pytest.mark.parametrize(
+        "entry",
+        ["read_file", {"get_pipeline_failing_jobs": {"exclude_allow_failure": True}}],
+    )
+    def test_an_entry_that_is_not_a_selector_is_a_config_error(self, entry):
+        with pytest.raises(ValueError, match="must be a selector"):
+            flow_factory(
+                chat.Workflow,
+                _chat_partial_config(
+                    ExperimentalPartialFlowConfig, "experimental", tools=[entry]
+                ),
+            )
+
+    def test_both_keys_are_a_config_error(self):
+        with pytest.raises(ValueError, match='"tools" or "toolset"'):
+            flow_factory(
+                chat.Workflow,
+                _chat_partial_config(
+                    ExperimentalPartialFlowConfig, "experimental", tools=[], toolset=[]
+                ),
+            )
+
+    def test_a_v1_config_ignores_the_tools_key(self):
+        config = _chat_partial_config(
+            PartialFlowConfig, "v1", tools=["read_file"], toolset=["grep"]
+        )
+
+        factory = flow_factory(chat.Workflow, config)
+
+        assert factory.keywords["tools_override"] == ["grep"]
+        assert "tool_selectors_override" not in factory.keywords

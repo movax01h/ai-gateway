@@ -1,4 +1,5 @@
 import json
+import time
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import httpx
@@ -183,7 +184,9 @@ class TestProxyVertexAI:
             request=Mock(),
         )
 
-        with patch("ai_gateway.proxy.clients.vertex_ai.access_token"):
+        # LiteLLM logs a finished stream after the response ends. Keep one event loop open, as the server does, so
+        # that work is not cancelled with the request.
+        with patch("ai_gateway.proxy.clients.vertex_ai.access_token"), mock_client:
             response = mock_client.post(
                 "/proxy/vertex-ai/v1/projects/PROJECT/locations/LOCATION/"
                 f"publishers/google/models/gemini-4-argon:{action}",
@@ -198,6 +201,9 @@ class TestProxyVertexAI:
                 },
                 json={"contents": [{"role": "user", "parts": [{"text": "Hi"}]}]},
             )
+            deadline = time.monotonic() + 5
+            while not mock_send_billing_event.called and time.monotonic() < deadline:
+                time.sleep(0.01)
 
         assert response.status_code == 200
         assert json.dumps(upstream_response) in response.text

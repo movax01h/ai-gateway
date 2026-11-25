@@ -47,6 +47,7 @@ log = structlog.stdlib.get_logger("model_scope")
 # The feature setting of each flow in BILL_ONCE_PER_WORKFLOW_FEATURES. It is the `ai_feature` of the foundational flow
 # definition in GitLab Rails (`ee/app/models/ai/catalog/foundational_flow/<flow>/definition.rb`).
 FLAT_RATE_FLOW_FEATURE_SETTINGS: dict[str, str] = {
+    "business_context_security_guidelines": "vulnerability_context_flow",
     "code_review": "review_merge_request_dap",
     "resolve_dependency_bump": "resolve_dependency_bump",
     "resolve_sast_vulnerability": "sast_vulnerability_resolution",

@@ -106,7 +106,10 @@ def _drop_unsupported_web_search(kwargs: Dict[str, Any]) -> None:
     model = kwargs.get("model")
     custom_llm_provider = kwargs.get("custom_llm_provider")
 
-    if custom_llm_provider not in _WEB_SEARCH_CAPABLE_PROVIDERS:
+    # LiteLLM drops `blocked_domains`, so the search would run unfiltered.
+    if (kwargs["web_search_options"] or {}).get("blocked_domains"):
+        reason = "litellm drops the web search denylist"
+    elif custom_llm_provider not in _WEB_SEARCH_CAPABLE_PROVIDERS:
         reason = "provider does not run a hosted web search"
     elif not _litellm_maps_web_search(model, custom_llm_provider):
         reason = "litellm does not map web_search_options for this model"

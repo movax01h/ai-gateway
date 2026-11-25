@@ -1554,6 +1554,35 @@ class TestAgentComponentToolApprovalRouter:
             fetch_kwargs["pre_approved_tools"] == request_kwargs["pre_approved_tools"]
         )
 
+    @pytest.mark.usefixtures(
+        "mock_agent_node_cls",
+        "mock_final_response_node_cls",
+        "mock_tool_approval_fetch_node_cls",
+    )
+    @pytest.mark.parametrize(
+        ("environment", "halts"),
+        [("chat", False), ("chat-partial", False), ("ambient", True), (None, True)],
+    )
+    def test_attach_halts_on_a_denied_tool_only_without_a_user(
+        self,
+        environment,
+        halts,
+        make_agent_component,
+        mock_tool_node_cls,
+        mock_tool_approval_request_node_cls,
+        mock_state_graph,
+        mock_router,
+    ):
+        make_agent_component(
+            environment=environment, require_tool_approval=True, pre_approved_tools=[]
+        ).attach(mock_state_graph, mock_router)
+
+        assert mock_tool_node_cls.call_args[1]["halt_on_denied_tool"] is halts
+        assert (
+            mock_tool_approval_request_node_cls.call_args[1]["halt_on_denied_tool"]
+            is halts
+        )
+
     def test_tool_approval_fetch_router_with_tool_message_routes_to_agent(
         self,
         agent_component_with_tool_approval,
@@ -2026,6 +2055,24 @@ class TestWebSearchBinding:
             assert call_kwargs["bind_tools_params"] == {"web_search_options": {}}
         else:
             assert "bind_tools_params" not in call_kwargs
+
+    def test_web_search_binding_carries_the_denylist(
+        self, make_agent_component, mock_prompt_registry
+    ):
+        component = make_agent_component(
+            enable_web_search=True, web_search_blocked_domains=["evil.com"]
+        )
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=True),
+            patch(f"{self._MODULE}.is_client_capable", return_value=True),
+        ):
+            component._build_prompt(tools=[], tool_choice="auto")
+
+        call_kwargs = mock_prompt_registry.get_on_behalf.call_args.kwargs
+        assert call_kwargs["bind_tools_params"] == {
+            "web_search_options": {"blocked_domains": ["evil.com"]}
+        }
 
     @pytest.mark.parametrize("binds_web_search", [True, False])
     def test_tools_enabled_web_search_follows_the_binding(

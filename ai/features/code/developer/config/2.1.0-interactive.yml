@@ -21,6 +21,7 @@ components:
     prompt_id: "developer_agent_prompt"
     prompt_version: "^1.0.0"
     require_tool_approval: true
+    max_cycles: 2800
     subagents:
       - name: "review_agent"
       - source: workspace

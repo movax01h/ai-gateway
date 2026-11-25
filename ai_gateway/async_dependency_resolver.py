@@ -17,14 +17,18 @@ See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist
 information.
 """
 
+from typing import TYPE_CHECKING
+
 from dependency_injector.wiring import Provide, inject
 
-from ai_gateway.container import ContainerApplication
+if TYPE_CHECKING:
+    # A runtime import makes `import ai_gateway` load the container (import cycle).
+    from ai_gateway.container import ContainerApplication
 
 
 @inject
 def get_container_application(
-    container: ContainerApplication = Provide[ContainerApplication],
+    container: "ContainerApplication" = Provide["<container>"],
 ):
     return container
 
@@ -67,34 +71,28 @@ async def get_code_suggestions_generations_agent_factory_provider():
 
 @inject
 async def get_anthropic_proxy_model_factory(
-    anthropic_proxy_model_factory=Provide[
-        ContainerApplication.pkg_models.anthropic_proxy_model_factory
-    ],
+    anthropic_proxy_model_factory=Provide["pkg_models.anthropic_proxy_model_factory"],
 ):
     return anthropic_proxy_model_factory
 
 
 @inject
 async def get_vertexai_proxy_model_factory(
-    vertexai_proxy_model_factory=Provide[
-        ContainerApplication.pkg_models.vertexai_proxy_model_factory
-    ],
+    vertexai_proxy_model_factory=Provide["pkg_models.vertexai_proxy_model_factory"],
 ):
     return vertexai_proxy_model_factory
 
 
 @inject
 async def get_openai_proxy_model_factory(
-    openai_proxy_model_factory=Provide[
-        ContainerApplication.pkg_models.openai_proxy_model_factory
-    ],
+    openai_proxy_model_factory=Provide["pkg_models.openai_proxy_model_factory"],
 ):
     return openai_proxy_model_factory
 
 
 @inject
 async def get_proxy_client(
-    proxy_client=Provide[ContainerApplication.pkg_models.proxy_client],
+    proxy_client=Provide["pkg_models.proxy_client"],
 ):
     return proxy_client
 
@@ -113,23 +111,21 @@ async def get_billing_event_client():
 
 @inject
 async def get_token_authority(
-    token_authority=Provide[ContainerApplication.self_signed_jwt.token_authority],
+    token_authority=Provide["self_signed_jwt.token_authority"],
 ):
     return token_authority
 
 
 @inject
 async def get_glgo_authority(
-    glgo_authority=Provide[ContainerApplication.self_signed_jwt.glgo_authority],
+    glgo_authority=Provide["self_signed_jwt.glgo_authority"],
 ):
     return glgo_authority
 
 
 @inject
 async def get_amazon_q_client_factory(
-    amazon_q_client_factory=Provide[
-        ContainerApplication.integrations.amazon_q_client_factory
-    ],
+    amazon_q_client_factory=Provide["integrations.amazon_q_client_factory"],
 ):
     return amazon_q_client_factory
 

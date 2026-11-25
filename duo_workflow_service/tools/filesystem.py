@@ -10,6 +10,7 @@ import gitmatch
 import structlog
 from langchain_core.tools.base import ToolException
 from pydantic import BaseModel, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from ai_gateway.models.v2._model_compat import current_model_supports_vision
 from contract import contract_pb2
@@ -204,6 +205,65 @@ def validate_duo_context_exclusions(
             file_path.lower(), allow_trusted_absolute=allow_trusted_absolute
         )
         return
+
+
+def _is_within_allowed_directories(
+    file_path: str, allowed_directories: List[str]
+) -> bool:
+    """Return whether *file_path* lives under one of *allowed_directories*.
+
+    A path matches a directory when it equals that directory or sits beneath it.
+    Comparison is done on normalized, forward-slash paths with any leading
+    ``./`` or ``/`` stripped. An empty directory entry (``""`` or ``"."``) means
+    the repository root and therefore matches every path.
+    """
+
+    def _normalize(path: str) -> str:
+        path = path.replace("\\", "/")
+        while path.startswith("./"):
+            path = path[2:]
+        return path.strip("/")
+
+    normalized_file = _normalize(file_path)
+    for directory in allowed_directories:
+        normalized_dir = _normalize(directory)
+        if normalized_dir in ("", "."):
+            return True
+        if normalized_file == normalized_dir or normalized_file.startswith(
+            f"{normalized_dir}/"
+        ):
+            return True
+    return False
+
+
+def _log_write_denied_outside_allowlist(
+    project: Optional[Project], request_path: str
+) -> None:
+    """Emit a security event when a file create is denied by the flow allowlist.
+
+    Mirrors ``_log_upload_read``: the service's own trail of a control firing, so
+    SIRT can see an agent repeatedly trying to write outside its allowed scope.
+    Only the requested path is logged, never the file contents. The ``event_type``
+    is provisional, pending a taxonomy agreed with Security Logging.
+    """
+    web_url = project.get("web_url") if project else None
+    _security_log.info(
+        "Tool write denied: path outside flow allowed_directories",
+        id=str(uuid.uuid4()),
+        event_type="security.policy_violation.write_file_directory",
+        author_id=_author_id(),
+        entity_type="Project",
+        entity_id=project.get("id") if project else None,
+        entity_path=urlparse(web_url).path.strip("/") if web_url else None,
+        target_type="file",
+        target_details=request_path,
+        details={
+            "outcome": "failure",
+            "reason": "outside_allowed_directories",
+            "provider": "duo_workflow_service",
+        },
+        gitlab={"control_name": "allowed_directories", "control_type": "policy"},
+    )
 
 
 # Descriptions and conversion flip together on two switches, both required
@@ -936,6 +996,11 @@ class WriteFileInput(BaseModel):
     contents: str = Field(
         description="The full contents to write into the newly created file. Must be non-empty."
     )
+    # Flow-controlled allowlist, set via tool_options in the flow config. SkipJsonSchema keeps it out of the
+    # model-facing tool definition, so the model never sees the policy (including the deny-all empty-list semantics)
+    # and cannot set it on a flow that leaves it unset. When unset (None) creation is unrestricted; an empty list
+    # denies all file creation.
+    allowed_directories: SkipJsonSchema[Optional[List[str]]] = None
 
 
 class WriteFile(DuoBaseTool):
@@ -954,7 +1019,12 @@ class WriteFile(DuoBaseTool):
     handle_tool_error: bool = True
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
-    async def _execute(self, file_path: str, contents: str) -> str:
+    async def _execute(
+        self,
+        file_path: str,
+        contents: str,
+        allowed_directories: Optional[List[str]] = None,
+    ) -> str:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
@@ -972,6 +1042,22 @@ class WriteFile(DuoBaseTool):
                 "To copy or move a file, use cp or mv instead of rewriting its content. "
                 "To change an existing file, use edit_file on lines that hold no "
                 f"{REDACTED_PLACEHOLDER}."
+            )
+
+        # `None` means the option is unset: no directory restriction. An empty
+        # list is an explicit, deny-all allowlist (nothing may be created), so it
+        # must be distinguished from `None` rather than treated as falsy.
+        if allowed_directories is not None and not _is_within_allowed_directories(
+            file_path, allowed_directories
+        ):
+            _log_write_denied_outside_allowlist(self.project, file_path)
+            # Do not enumerate the configured allowlist in the message: it is a
+            # flow-level security policy the model otherwise never sees, so echoing
+            # it would let the model reason about the restriction and craft a path
+            # that slips past it. State only that the requested path is out of scope.
+            return (
+                f"Access denied: Cannot create '{file_path}': it is outside the "
+                "directories this flow allows writes to."
             )
 
         return await _execute_action(

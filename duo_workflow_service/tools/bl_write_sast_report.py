@@ -105,7 +105,7 @@ def _has_substantive_line(lines) -> bool:
 def _collapse_contained_excerpts(findings: List[Finding]) -> List[Finding]:
     """Collapse re-reports that quote a LONGER OR SHORTER SPAN of one site, keeping the fuller quote.
 
-    The exact key in :func:`dedup_key` demands a byte-identical normalized excerpt, so three
+    The exact key in :meth:`Finding.dedup_key` demands a byte-identical normalized excerpt, so three
     re-reports of one defect that quote the statement, the statement plus its trailing ``end``, and
     just the inner line respectively keep three distinct keys and all survive.
 
@@ -605,6 +605,11 @@ def _audit_record(finding: Finding) -> dict:
 # tool. This layer words them and decides the level: what a stage covered is
 # `info`, a cap that actually bound is `warn`. When no stage reported at all,
 # the report says THAT rather than stay silent and read as complete.
+#
+# WHAT WAS LOOKED AT. Every scan whose reviewed set is known lists it in
+# `scan.reviewed_files`, an extra array the 15.2.x schema permits (`[]` when
+# nothing was reviewed; omitted when unknown). Only `target_files` scans also set
+# `partial_scan`. GitLab honors the list for the BLSA scanner only.
 # --------------------------------------------------------------------------- #
 
 _COVERAGE_UNAVAILABLE = (
@@ -715,8 +720,16 @@ class BlWriteSastReportInput(BaseModel):
         description="The scoped-scan file list the flow gave discovery (on MR pipelines, "
         "the MR's changed files). When it names any file, only those files were "
         "reviewed and the report sets `scan.partial_scan` (mode `differential`), "
-        "like diff-based GitLab Advanced SAST, so GitLab does not resolve "
-        "vulnerabilities in files the scan never looked at.",
+        "like diff-based GitLab Advanced SAST; GitLab uses that only when "
+        "comparing MR results. Only this sets `partial_scan`; every scan with a "
+        "known reviewed set also lists it in `scan.reviewed_files`.",
+    )
+    reviewed_units: Optional[Any] = Field(
+        default=None,
+        description="The review units the fan-out was given "
+        "(context:<prep>.tool_responses.units). Their `files` become "
+        "`scan.reviewed_files`: repo-relative paths with '/' separators; an empty "
+        "list means nothing was reviewed. Omitted when unknown.",
     )
     review_coverage: Optional[Any] = Field(
         default=None,
@@ -737,6 +750,98 @@ class BlWriteSastReportInput(BaseModel):
 
 # Path-repair lookups per report; each is one findFiles call.
 _MAX_PATH_LOOKUPS = 20
+
+
+class _AnchorVerifier:
+    """One anchor-verification pass: the files read, the paths listed, and the outcome counts.
+
+    The caller holds the verifier, so the files read so far outlive a pass that raises.
+    """
+
+    def __init__(self, tool: "BlWriteSastReport") -> None:
+        self.tool = tool
+        self.cache: dict = {}
+        self.counts = dict.fromkeys(_ANCHOR_STATES, 0)
+        self.listed: dict = {}
+        self.policy = FileExclusionPolicy(tool.project)
+
+    def record(
+        self,
+        finding: Finding,
+        status: str,
+        reason: str = "",
+        claimed: Optional[int] = None,
+    ) -> Finding:
+        marked = _mark_anchor(finding, status, reason, claimed)
+        self.counts[status] += 1
+        return marked
+
+    def allowed(self, path: str) -> bool:
+        # The file comes from model output: apply the project's rules AND the
+        # always-on denylist and traversal guard, as ReadFile does.
+        try:
+            validate_duo_context_exclusions(path)
+        except ToolException:
+            return False
+        return self.policy.is_allowed(path)
+
+    async def read(self, path: str) -> Optional[str]:
+        if path not in self.cache:
+            try:
+                # MUST follow read pagination: against a prefix, every
+                # quote below the cut is either a false "not present" or
+                # is matched to a lookalike inside the prefix and MOVED.
+                resp = await _read_file_fully(
+                    self.tool.metadata or {}, path, execute=_execute_action
+                )
+                self.cache[path] = resp if isinstance(resp, str) else None
+            except Exception as exc_err:
+                _log.info("bl_anchor read failed", file=path, err=str(exc_err))
+                self.cache[path] = None
+        return self.cache.get(path)
+
+    def reject_reason(self, f: Finding) -> str:
+        """Why the finding's anchor cannot be checked at all, or ``""`` when it can."""
+        if not f.file:
+            return _ANCHOR_NO_FILE
+        if not f.excerpt.strip():
+            # No quote was ever emitted, so this anchor is uncheckable
+            # by construction, not merely unchecked.
+            return _ANCHOR_NO_EXCERPT
+        if not self.allowed(f.file):
+            return _ANCHOR_EXCLUDED
+        return ""
+
+    async def check(self, f: Finding) -> Finding:
+        """The finding annotated with its anchor outcome, relocated or repaired where the check could."""
+        try:
+            if reason := self.reject_reason(f):
+                return self.record(f, _ANCHOR_UNVERIFIED, reason)
+            file = f.file
+            content = await self.read(file)
+            repaired = (
+                "" if content else await self.tool._repair_path(file, self.listed)
+            )
+            if repaired and self.allowed(repaired) and await self.read(repaired):
+                f = f.with_changes(claimed_file=file, file=repaired)
+                content = self.cache[repaired]
+            if not content:
+                return self.record(f, _ANCHOR_UNVERIFIED, _ANCHOR_UNREADABLE)
+            claimed = f.line
+            ln = _find_excerpt_line(content, f.excerpt, hint=claimed)
+            if not ln:
+                return self.record(f, _ANCHOR_UNVERIFIED, _ANCHOR_NOT_PRESENT)
+            if ln == claimed:
+                return self.record(f, _ANCHOR_VERIFIED)
+            return self.record(
+                f.with_changes(new_line=ln),
+                _ANCHOR_CORRECTED,
+                "" if claimed else _ANCHOR_NO_CLAIM,
+                claimed,
+            )
+        except Exception as loop_err:
+            _log.info("bl_anchor finding skipped", err=str(loop_err))
+            return self.record(f, _ANCHOR_UNVERIFIED, _ANCHOR_RAISED)
 
 
 class BlWriteSastReport(DuoBaseTool):
@@ -764,7 +869,7 @@ class BlWriteSastReport(DuoBaseTool):
         return f"Writing SAST report for {count} findings"
 
     async def _verify_anchors(
-        self, findings: List[Finding], cache: Optional[dict] = None
+        self, findings: List[Finding], verifier: Optional[_AnchorVerifier] = None
     ) -> dict:
         """Check every finding's line against the file, and RECORD WHICH of the three outcomes it was.
 
@@ -783,87 +888,13 @@ class BlWriteSastReport(DuoBaseTool):
         check the first page only and it would relocate quotes onto lookalikes in that prefix. Best-effort: it MUST
         NEVER fail report generation, so every step is defensively guarded - but a guard that fires yields
         ``unverified`` rather than silence. Replaces each finding in the list with its annotated copy; returns the
-        per-outcome counts. The file contents it read are left in ``cache``.
+        per-outcome counts. The file contents it read are left in ``verifier.cache``; ``_execute`` passes its own
+        verifier, so they survive a raise and it still hands them to ``_collapse_after_reanchor``.
         """
-        cache = {} if cache is None else cache
-        counts = dict.fromkeys(_ANCHOR_STATES, 0)
-
-        def _record(
-            i: int, status: str, reason: str = "", claimed: Optional[int] = None
-        ) -> None:
-            findings[i] = _mark_anchor(findings[i], status, reason, claimed)
-            counts[status] += 1
-
-        listed: dict = {}
-        policy = FileExclusionPolicy(self.project)
-
-        def _allowed(path: str) -> bool:
-            # The file comes from model output: apply the project's rules AND the
-            # always-on denylist and traversal guard, as ReadFile does.
-            try:
-                validate_duo_context_exclusions(path)
-            except ToolException:
-                return False
-            return policy.is_allowed(path)
-
-        async def _read(path: str) -> Optional[str]:
-            if path not in cache:
-                try:
-                    # MUST follow read pagination: against a prefix, every
-                    # quote below the cut is either a false "not present" or
-                    # is matched to a lookalike inside the prefix and MOVED.
-                    resp = await _read_file_fully(
-                        self.metadata or {}, path, execute=_execute_action
-                    )
-                    cache[path] = resp if isinstance(resp, str) else None
-                except Exception as exc_err:
-                    _log.info("bl_anchor read failed", file=path, err=str(exc_err))
-                    cache[path] = None
-            return cache.get(path)
-
+        verifier = verifier or _AnchorVerifier(self)
         for i, f in enumerate(findings):
-            try:
-                exc = f.excerpt
-                file = f.file
-                if not file:
-                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_NO_FILE)
-                    continue
-                if not exc.strip():
-                    # No quote was ever emitted, so this anchor is uncheckable
-                    # by construction, not merely unchecked.
-                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_NO_EXCERPT)
-                    continue
-                if not _allowed(file):
-                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_EXCLUDED)
-                    continue
-                content = await _read(file)
-                repaired = "" if content else await self._repair_path(file, listed)
-                if repaired and _allowed(repaired) and await _read(repaired):
-                    f = findings[i] = f.with_changes(claimed_file=file, file=repaired)
-                    file = repaired
-                    content = cache[file]
-                if not content:
-                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_UNREADABLE)
-                    continue
-                claimed = f.line
-                ln = _find_excerpt_line(content, exc, hint=claimed)
-                if not ln:
-                    _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_NOT_PRESENT)
-                elif ln == claimed:
-                    _record(i, _ANCHOR_VERIFIED)
-                else:
-                    findings[i] = f.with_changes(new_line=ln)
-                    _record(
-                        i,
-                        _ANCHOR_CORRECTED,
-                        "" if claimed else _ANCHOR_NO_CLAIM,
-                        claimed,
-                    )
-            except Exception as loop_err:
-                _log.info("bl_anchor finding skipped", err=str(loop_err))
-                _record(i, _ANCHOR_UNVERIFIED, _ANCHOR_RAISED)
-                continue
-        return counts
+            findings[i] = await verifier.check(f)
+        return verifier.counts
 
     async def _repair_path(self, file: str, listed: dict) -> str:
         """The one repository path ending in ``/<file>``, or ``""``: a model sometimes drops a leading directory.
@@ -898,11 +929,13 @@ class BlWriteSastReport(DuoBaseTool):
         coverage: Optional[List[Any]] = None,
         partial: bool = False,
         sources: Optional[dict] = None,
+        reviewed_files: Optional[List[str]] = None,
     ) -> dict:
         """Build the report; `partial` sets `scan.partial_scan` to `{"mode": "differential"}`.
 
-        Only a `target_files` scan is partial, as with diff-based GitLab Advanced SAST. A capped run, or one that lost
-        some units or findings, still ran over the whole repository and stays a full scan.
+        Only a `target_files` scan is partial, as with diff-based GitLab Advanced SAST. Any scan with a known
+        reviewed set lists it in `scan.reviewed_files` (GitLab honors it for BLSA only); `[]` means nothing was
+        reviewed and the field is omitted when the set is unknown.
         """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         identity = {
@@ -1016,6 +1049,8 @@ class BlWriteSastReport(DuoBaseTool):
         }
         if partial:
             scan["partial_scan"] = {"mode": "differential"}
+        if reviewed_files is not None:
+            scan["reviewed_files"] = reviewed_files
         return {
             "version": _REPORT_SCHEMA_VERSION,
             "scan": scan,
@@ -1029,6 +1064,7 @@ class BlWriteSastReport(DuoBaseTool):
         sibling_coverage: Optional[Any] = None,
         triage_coverage: Optional[Any] = None,
         target_files: Optional[Any] = None,
+        reviewed_units: Optional[Any] = None,
     ) -> str:
         parsed = [
             Finding.from_dict(f)
@@ -1037,7 +1073,10 @@ class BlWriteSastReport(DuoBaseTool):
         ]
         sources: dict = {}
         try:
-            anchors = await self._verify_anchors(parsed, sources)
+            # Built inside the guard: its policy compiles the project's rules.
+            verifier = _AnchorVerifier(self)
+            sources = verifier.cache
+            anchors = await self._verify_anchors(parsed, verifier)
         except Exception as e:  # pylint: disable=exception-swallowing-in-tool
             # The pass must never fail report generation - but a report built
             # from findings it never annotated is not a clean one, and
@@ -1066,10 +1105,31 @@ class BlWriteSastReport(DuoBaseTool):
         )
         # Pipeline order: primary review, sibling pass, then triage. Each
         # stage's coverage record is disclosed in scan.messages. Only a
-        # target_files scan is partial; caps and losses leave it a full scan.
+        # target_files scan is partial; any known reviewed set is listed. Units that
+        # failed or were unreadable are left out; an unknown set stays None.
         coverage = [review_coverage, sibling_coverage, triage_coverage]
         partial = bool(resolve_target_files(target_files))
-        report = self._build_report(parsed, coverage, partial=partial, sources=sources)
+        units = None if reviewed_units is None else coerce_to_list(reviewed_units)
+        read = (_coverage_record(review_coverage) or {}).get("reviewed_indexes")
+        read_idx = set(read) if isinstance(read, list) else set()
+        reviewed = None
+        # An empty list is a known scan of nothing, listed as []; None is unknown.
+        if units is not None and (not units or isinstance(read, list)):
+            reviewed = sorted(
+                {
+                    str(f).removeprefix("./").lstrip("/")
+                    for i, u in enumerate(units)
+                    if i in read_idx and isinstance(u, dict)
+                    for f in u.get("files") or []
+                }
+            )
+        report = self._build_report(
+            parsed,
+            coverage,
+            partial=partial,
+            sources=sources,
+            reviewed_files=reviewed,
+        )
         contents = json.dumps(report, ensure_ascii=False, indent=2)
 
         # One file action, the same runWriteFile `create_file_with_contents`

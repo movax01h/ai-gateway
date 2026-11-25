@@ -5,16 +5,9 @@ from langchain_core.tools import ToolException
 
 from duo_workflow_service.bl_security.findings import (
     Finding,
-    audit_clause_of,
     coerce_to_list,
-    cwe_digits,
-    dedup_key,
-    excerpt_of,
     findings_input,
     json_or_none,
-    line_of,
-    norm_excerpt,
-    verdict_of,
 )
 
 
@@ -28,7 +21,7 @@ from duo_workflow_service.bl_security.findings import (
     ],
 )
 def test_line_of(finding, expected):
-    assert line_of(finding) == expected
+    assert Finding.from_dict(finding).line == expected
 
 
 @pytest.mark.parametrize(
@@ -61,7 +54,7 @@ def test_coerce_to_list_reads_strict_json_only(text):
     ],
 )
 def test_cwe_digits(finding, expected):
-    assert cwe_digits(finding) == expected
+    assert Finding.from_dict(finding).cwe == expected
 
 
 @pytest.mark.parametrize(
@@ -73,22 +66,19 @@ def test_cwe_digits(finding, expected):
     ],
 )
 def test_excerpt_of(finding, expected):
-    assert excerpt_of(finding) == expected
+    assert Finding.from_dict(finding).excerpt == expected
 
 
 def test_norm_excerpt_collapses_whitespace_and_case():
-    assert norm_excerpt({"code_excerpt": "  Foo(\n\t X )  "}) == "foo( x )"
+    finding = Finding.from_dict({"code_excerpt": "  Foo(\n\t X )  "})
+    assert finding.norm_excerpt == "foo( x )"
 
 
 _KEYED = {"cwe": "CWE-639", "path": "a.py", "line": 9, "excerpt": "Get(Id)"}
 
 
 def test_dedup_key_is_cwe_file_line_bucket_and_normalized_excerpt():
-    assert dedup_key(_KEYED) == ("639", "a.py", 2, "get(id)")
-
-
-def test_dedup_key_uses_a_precomputed_cwe():
-    assert dedup_key(_KEYED, cwe="862")[0] == "862"
+    assert Finding.from_dict(_KEYED).dedup_key() == ("639", "a.py", 2, "get(id)")
 
 
 @pytest.mark.parametrize(
@@ -100,7 +90,8 @@ def test_dedup_key_uses_a_precomputed_cwe():
     ],
 )
 def test_dedup_key_buckets_lines_and_keeps_the_excerpt(change, same_key):
-    assert (dedup_key({**_KEYED, **change}) == dedup_key(_KEYED)) is same_key
+    changed = Finding.from_dict({**_KEYED, **change})
+    assert (changed.dedup_key() == Finding.from_dict(_KEYED).dedup_key()) is same_key
 
 
 @pytest.mark.parametrize(
@@ -141,7 +132,7 @@ def test_findings_input_redacts_secrets_in_the_error():
     ],
 )
 def test_verdict_of(finding, expected):
-    assert verdict_of(finding) == expected
+    assert Finding.from_dict(finding).verdict == expected
 
 
 @pytest.mark.parametrize(
@@ -152,7 +143,7 @@ def test_verdict_of(finding, expected):
     ],
 )
 def test_audit_clause_of(finding, expected):
-    assert audit_clause_of(finding) == expected
+    assert Finding.from_dict(finding).clause == expected
 
 
 class TestFinding:
@@ -193,11 +184,6 @@ class TestFinding:
         assert "added_by_caller" not in f.raw
         assert f.raw["tier"] == 1
         assert f.to_dict() == self.MODEL_DICT
-
-    def test_dedup_key_matches_the_dict_helper(self):
-        assert Finding.from_dict(self.MODEL_DICT).dedup_key() == dedup_key(
-            self.MODEL_DICT
-        )
 
     def test_body_wins_over_description(self):
         f = Finding.from_dict({"body": "b", "description": "d"})

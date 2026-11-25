@@ -17,7 +17,9 @@ additional_properties:
   ephemeral_1h_input_tokens:
     description: Number of input tokens written to the 1-hour TTL prompt cache
   input_characters:
-    description: Number of input characters (Unicode code points, excluding whitespace) submitted to the embedding model; used to cost models billed per input characters, such as Vertex AI text-embedding-005
+    description: Computed in AI Gateway. Number of input characters (Unicode code points, excluding whitespace) submitted to the embedding model; used to cost models billed per input characters when the provider does not report billable_characters
+  billable_characters:
+    description: Reported by model provider. Number of input characters billed, such as Vertex AI billableCharacterCount for text-embedding-005; absent when the provider does not report it
   embeddings_operation:
     description: Code embeddings operation that made the request, either index or search
 milestone: '19.5'

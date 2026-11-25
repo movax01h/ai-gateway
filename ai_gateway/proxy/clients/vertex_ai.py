@@ -104,7 +104,7 @@ def _load_upstream_locations() -> dict[str, str]:
     return {
         llm_def.params.model: llm_def.prompt_params.vertex_location
         for llm_def in ModelSelectionConfig.instance().get_llm_definitions().values()
-        if llm_def.proxy_provider == _UPSTREAM_SERVICE
+        if llm_def.supports_proxy_provider(_UPSTREAM_SERVICE)
         and llm_def.params.model
         and llm_def.prompt_params.vertex_location
     }

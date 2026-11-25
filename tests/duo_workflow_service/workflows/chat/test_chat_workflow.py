@@ -29,7 +29,10 @@ from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.checkpointer.notifier import UserInterface
-from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.components.tools_registry import (
+    ToolSelector,
+    ToolsRegistry,
+)
 from duo_workflow_service.entities import (
     MessageTypeEnum,
     ToolStatus,
@@ -78,7 +81,7 @@ from lib.context.approval_sources import (
     record_approval_source,
 )
 from lib.events import GLReportingEventContext
-from lib.feature_flags import current_feature_flag_context
+from lib.feature_flags import FeatureFlag, current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
 
@@ -1745,6 +1748,58 @@ async def test_compile_with_tools_override_and_flow_config(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.chat.workflow.StateGraph")
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+@pytest.mark.parametrize(
+    "selectors, selected",
+    [
+        # A tools: agent gets only the tools its selectors name.
+        (
+            [ToolSelector("gitlab", ["read_file", "get_merge_request"])],
+            ["read_file", "gitlab_get_merge_request"],
+        ),
+        # `tools: []` must not fall back to the default chat tools.
+        ([], []),
+    ],
+)
+async def test_compile_with_selectors_adds_no_default_or_automatic_tools(
+    mock_state_graph,
+    selectors,
+    selected,
+    flow_type: GLReportingEventContext,
+    mock_checkpointer,
+):
+    tools_registry = MagicMock()
+    tools_registry.toolset.return_value = MagicMock(bindable=[])
+    tools_registry.mcp_tool_names.return_value = ["gitlab_get_issue"]
+    tools_registry.select_tools.return_value = selected
+    mock_state_graph.return_value = MagicMock()
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=["duo_chat", "duo_agent_platform"],
+            issuer="gitlab-duo-workflow-service",
+        ),
+    )
+
+    workflow = Workflow(
+        workflow_id="test-id",
+        workflow_metadata={},
+        workflow_type=flow_type,
+        user=user,
+        tool_selectors_override=selectors,
+    )
+    with patch.object(Workflow, "_get_tools") as mock_get_tools:
+        workflow._compile("Test goal", tools_registry, mock_checkpointer)
+
+    mock_get_tools.assert_not_called()
+    tools_registry.mcp_tool_names.assert_not_called()
+    tools_registry.select_tools.assert_called_once_with(selectors)
+    tools_registry.toolset.assert_called_once_with(selected)
+
+
+@pytest.mark.asyncio
 @patch.object(Workflow, "_get_tools")
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
 async def test_compile_without_overrides(
@@ -2702,6 +2757,93 @@ class TestChatAttachments:
         (image,) = image_blocks(message)
         assert image["base64"] == PNG_B64
         assert image["mime_type"] == "image/png"
+
+    async def _user_entry(self, workflow, turn):
+        """The user message and its chat log entry, for the first turn of a chat or a later one."""
+        if turn == "first":
+            state = await workflow.get_graph_input(
+                "what is in this screenshot?", WorkflowStatusEventEnum.START, None
+            )
+        else:
+            state = (await self._later_turn(workflow)).update
+        return state["conversation_history"]["test_prompt"][0], state["ui_chat_log"][0]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("turn", ["first", "later"])
+    async def test_a_session_file_gets_a_chat_log_reference_built_by_the_server(
+        self, workflow_with_project, workflow_id, turn
+    ):
+        url = f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/session_files/5"
+        # The web client's shape: no id and empty metadata.
+        workflow_with_project._additional_context = [
+            AdditionalContext(
+                category="attachments",
+                content=json.dumps({"url": url, "filename": "screenshot.png"}),
+                metadata={},
+            )
+        ]
+        workflow_with_project._http_client.aget = AsyncMock(
+            return_value=GitLabHttpResponse(
+                status_code=200, body={"content_type": "image/png", "data": PNG_B64}
+            )
+        )
+
+        message, user_log = await self._user_entry(workflow_with_project, turn)
+
+        assert message.additional_kwargs["additional_context"] is None
+        assert message.additional_kwargs["attachments"] == [
+            {
+                "id": "attachment-1",
+                "url": url,
+                "filename": "screenshot.png",
+                "mime_type": "image/png",
+            }
+        ]
+        assert {"type": "text", "text": "[attachment 1: screenshot.png]"} in (
+            message.content
+        )
+        (reference,) = user_log["additional_context"]
+        assert reference.id == "attachment-1"
+        assert reference.metadata["title"] == "screenshot.png"
+        assert reference.metadata["secondaryText"] == "image/png"
+        assert json.loads(reference.content) == {
+            "url": url,
+            "filename": "screenshot.png",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_mixed_turn_gives_each_attachment_its_own_chat_log_reference(
+        self, workflow_with_project, workflow_id
+    ):
+        # The client sends either all references or all inline files, so a mixed turn
+        # is not expected. This pins what happens if one arrives anyway.
+        url = f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/session_files/5"
+        workflow_with_project._additional_context = [
+            AdditionalContext(
+                category="attachments",
+                content=json.dumps({"url": url, "filename": "screenshot.png"}),
+            ),
+            attachment_envelope(filename="inline.png"),
+        ]
+        workflow_with_project._http_client.aget = AsyncMock(
+            return_value=GitLabHttpResponse(
+                status_code=200, body={"content_type": "image/png", "data": PNG_B64}
+            )
+        )
+
+        result = await self._later_turn(workflow_with_project)
+
+        message = result.update["conversation_history"]["test_prompt"][0]
+        assert len(image_blocks(message)) == 2
+        references = result.update["ui_chat_log"][0]["additional_context"]
+        assert [reference.metadata["title"] for reference in references] == [
+            "screenshot.png",
+            "inline.png",
+        ]
+        assert [reference.content for reference in references] == [
+            json.dumps({"url": url, "filename": "screenshot.png"}),
+            "",
+        ]
 
     @pytest.fixture(name="workflow_with_session_file")
     def workflow_with_session_file_fixture(self, workflow_with_project, workflow_id):
@@ -4010,7 +4152,10 @@ async def test_run_tools_applies_the_limit_stored_for_the_response(
 
 
 @pytest.mark.parametrize(
-    ("tools_override", "expected_settings"),
+    "selects_with_tools_key", [False, True], ids=["toolset", "tools"]
+)
+@pytest.mark.parametrize(
+    ("tools", "expected_settings"),
     [
         (["tool1", "web_search"], (True, True)),
         # Not listed: no web search, so the prompt must not point the user at the toggle.
@@ -4021,21 +4166,29 @@ async def test_run_tools_applies_the_limit_stored_for_the_response(
 @patch("duo_workflow_service.workflows.chat.workflow.create_agent")
 @patch("duo_workflow_service.workflows.chat.workflow.StateGraph")
 def test_chat_partial_web_search_follows_its_toolset(
-    mock_state_graph, mock_create_agent, tools_override, expected_settings
+    mock_state_graph,
+    mock_create_agent,
+    tools,
+    expected_settings,
+    selects_with_tools_key,
 ):
+    tools_registry = MagicMock(spec=ToolsRegistry)
+    tools_registry.mcp_tool_names.return_value = []
+    if selects_with_tools_key:
+        tools_args = {"tool_selectors_override": [ToolSelector("gitlab", tools)]}
+    else:
+        tools_args = {"tools_override": tools}
     workflow = Workflow(
         workflow_id="test-id",
         workflow_metadata={},
         workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
         user=CloudConnectorUser(authenticated=True),
-        tools_override=tools_override,
+        **tools_args,
     )
     workflow._workflow_config = {
         "web_search_enabled": True,
         "web_search_allowed_for_group": True,
     }
-    tools_registry = MagicMock(spec=ToolsRegistry)
-    tools_registry.mcp_tool_names.return_value = []
 
     workflow._compile("Test goal", tools_registry, MagicMock())
 
@@ -4044,3 +4197,62 @@ def test_chat_partial_web_search_follows_its_toolset(
         kwargs["web_search_enabled"],
         kwargs["web_search_allowed_for_group"],
     ) == expected_settings
+
+
+@pytest.fixture(name="web_search_client")
+def web_search_client_fixture():
+    """A client that supports web search, with the web search feature flag on."""
+    with (
+        patch(
+            "duo_workflow_service.components.tools_registry.is_client_capable",
+            return_value=True,
+        ),
+        patch(
+            "duo_workflow_service.tools.web_search.is_client_capable",
+            return_value=True,
+        ),
+    ):
+        token = current_feature_flag_context.set({FeatureFlag.DAP_WEB_SEARCH.value})
+        yield
+        current_feature_flag_context.reset(token)
+
+
+@pytest.mark.usefixtures("web_search_client")
+@pytest.mark.parametrize(
+    "tools_args",
+    [
+        {"tools_override": ["web_search"]},
+        {"tool_selectors_override": [ToolSelector("gitlab", ["web_search"])]},
+    ],
+    ids=["toolset", "tools"],
+)
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.StateGraph")
+def test_chat_partial_web_search_toggle_off_still_reaches_the_prompt(
+    mock_state_graph, mock_create_agent, tools_args, tool_metadata
+):
+    # With the user's toggle off the registry doesn't enable web_search, so the tools that resolve exclude it.
+    # The agent still lists it, and the prompt must say it is off while the group allows it.
+    config = {"web_search_enabled": False, "web_search_allowed_for_group": True}
+    tools_registry = ToolsRegistry(
+        enabled_tools=[],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        workflow_config=config,
+    )
+    workflow = Workflow(
+        workflow_id="test-id",
+        workflow_metadata={},
+        workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
+        user=CloudConnectorUser(authenticated=True),
+        **tools_args,
+    )
+    workflow._workflow_config = config
+
+    workflow._compile("Test goal", tools_registry, MagicMock())
+
+    kwargs = mock_create_agent.call_args.kwargs
+    assert (
+        kwargs["web_search_enabled"],
+        kwargs["web_search_allowed_for_group"],
+    ) == (False, True)

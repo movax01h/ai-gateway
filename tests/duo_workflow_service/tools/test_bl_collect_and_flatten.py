@@ -48,11 +48,21 @@ class TestBlCollectAndFlatten:
             _failed("boom"),
         ]
         result = await _collect(results, emitted_count=3)
-        parsed = json.loads(result["final_answer"])
+        parsed = result["final_answer"]
         assert parsed == [{"id": "ok"}]
         assert result["coverage"]["completed"] == 1
         assert result["coverage"]["errored"] == 2
         assert result["coverage"]["unread"] == 0
+
+    async def test_reviewed_indexes_exclude_failed_and_unreadable_units(self):
+        results = [
+            {"final_answer": _unit({"id": "ok"})},
+            _failed("boom"),
+            {"final_answer": "not json"},
+            {"final_answer": _unit()},
+        ]
+        result = await _collect(results, emitted_count=4)
+        assert result["coverage"]["reviewed_indexes"] == [0, 3]
 
     async def test_the_counts_are_for_each_s_not_recounted_from_the_entries(self):
         # The counts disagree with the entries on purpose: one answered entry,
@@ -74,12 +84,12 @@ class TestBlCollectAndFlatten:
     async def test_final_answer_is_the_flattened_findings_not_the_unit_answers(self):
         results = [{"final_answer": _unit({"id": "x"})}]
         result = await _collect(results)
-        parsed = json.loads(result["final_answer"])
+        parsed = result["final_answer"]
         assert parsed == [{"id": "x"}]
 
     async def test_empty_results_yields_empty_aggregate(self):
         result = await _collect([])
-        assert json.loads(result["final_answer"]) == []
+        assert result["final_answer"] == []
         assert result["coverage"]["completed"] == 0
         assert result["coverage"]["dispatched"] == 0
 
@@ -112,7 +122,7 @@ class TestADictFinalAnswer:
 
         out = await _collect([{"final_answer": answer}])
 
-        assert json.loads(out["final_answer"]) == [{"id": "d1"}]
+        assert out["final_answer"] == [{"id": "d1"}]
         assert out["coverage"]["completed"] == 1
         assert out["coverage"]["unread"] == 0
 
@@ -133,6 +143,7 @@ async def test_coverage_is_the_stage_s_counts_and_unit_noun():
         "errored": 1,
         "unread": 1,
         "unit_noun": "findings",
+        "reviewed_indexes": [0],
     }
 
 
@@ -150,7 +161,7 @@ async def test_what_collect_publishes_is_what_dedup_reads():
     ]
 
     collected = await _collect(results)
-    published = json.loads(collected["final_answer"])
+    published = collected["final_answer"]
     deduped = await BlDedupFindings(metadata={})._execute(collected["final_answer"])
 
     assert [f.to_dict() for f in _flatten_findings(published)] == published
@@ -180,7 +191,7 @@ class TestTriageVerdictMerge:
     async def _merge(verdicts: list, items: list) -> list:
         results = [{"final_answer": json.dumps(v)} for v in verdicts]
         out = await _collect(results=results, verdict_items=items)
-        return json.loads(out["final_answer"])
+        return out["final_answer"]
 
     async def test_each_verdict_is_merged_onto_its_own_item(self):
         other = {**_FINDING, "file": "app/d.rb"}
@@ -259,7 +270,7 @@ class TestTriageVerdictMerge:
             verdict_items=[{"file": "first.rb"}, dict(_FINDING)],
         )
 
-        (merged,) = json.loads(out["final_answer"])
+        (merged,) = out["final_answer"]
         assert merged["file"] == "app/c.rb"
 
 
@@ -340,7 +351,7 @@ class TestFlatten:
 
         out = await _collect(results)
 
-        assert json.loads(out["final_answer"]) == [_ONE_FINDING, {"cwe": "CWE-862"}]
+        assert out["final_answer"] == [_ONE_FINDING, {"cwe": "CWE-862"}]
 
     async def test_unread_units_are_counted_beside_the_readable_ones(self):
         results = [
@@ -353,7 +364,7 @@ class TestFlatten:
 
         out = await _collect(results)
 
-        assert json.loads(out["final_answer"]) == [_ONE_FINDING]
+        assert out["final_answer"] == [_ONE_FINDING]
         assert out["coverage"]["completed"] == 5
         assert out["coverage"]["unread"] == 3
 
@@ -394,7 +405,7 @@ async def test_a_completed_unit_with_no_readable_answer_is_counted_unread(
     """What counts as unread: a unit that completed, but whose answer is not a findings list we can read."""
     out = await _collect([entry], verdict_items=verdict_items)
 
-    assert json.loads(out["final_answer"]) == []
+    assert out["final_answer"] == []
     assert out["coverage"] == {
         "emitted": None,
         "dispatched": 1,
@@ -402,4 +413,5 @@ async def test_a_completed_unit_with_no_readable_answer_is_counted_unread(
         "errored": 0,
         "unread": 1,
         "unit_noun": None,
+        "reviewed_indexes": [],
     }

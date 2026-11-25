@@ -29,10 +29,12 @@ from ai_gateway.config import (
     ConfigInstrumentator,
     ConfigLogging,
     ConfigMockUsageQuotaServer,
+    ConfigModelCatalog,
     ConfigModelLimits,
     ConfigModelSelection,
     ConfigMtls,
     ConfigPrompts,
+    ConfigProxyEndpoints,
     ConfigSnowplow,
     ConfigTLS,
     ConfigVertexSearch,
@@ -1046,6 +1048,80 @@ def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode(variab
             Config(_env_file=None)
 
 
+def test_config_model_catalog_defaults_to_the_shipped_files():
+    with mock.patch.dict(os.environ, {}, clear=True):
+        catalog = Config(_env_file=None).model_selection.catalog
+
+    assert catalog.storage == "file"
+    assert catalog.repo_ref == ""
+    assert catalog.repo_path == "catalog.yml"
+
+
+def test_config_model_catalog_reads_repo_settings():
+    env = {
+        "AIGW_MODEL_SELECTION__CATALOG__STORAGE": "repo",
+        "AIGW_MODEL_SELECTION__CATALOG__REPO_PROJECT": "group/catalog",
+        "AIGW_MODEL_SELECTION__CATALOG__REPO_TOKEN": "token",
+    }
+    with mock.patch.dict(os.environ, env, clear=True):
+        catalog = Config(_env_file=None).model_selection.catalog
+
+    assert catalog.storage == "repo"
+    assert catalog.repo_project == "group/catalog"
+    assert catalog.repo_token is not None
+    assert catalog.repo_token.get_secret_value() == "token"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://gitlab.com",
+        "https://gitlab.example.com:8443/",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000/",
+        "http://[::1]:3000",
+    ],
+)
+def test_config_model_catalog_accepts_https_and_local_gitlab_urls(url):
+    assert ConfigModelCatalog(repo_gitlab_url=url).repo_gitlab_url == url
+
+
+@pytest.mark.parametrize(
+    ("url", "message"),
+    [
+        ("http://gitlab.com", "must use https://"),
+        ("http://gdk.test:3000", "must use https://"),
+        ("ftp://gitlab.com", "must use https://"),
+        ("gitlab.com", "absolute URL with a host"),
+        ("https://", "absolute URL with a host"),
+        ("", "absolute URL with a host"),
+    ],
+)
+def test_config_model_catalog_rejects_unsafe_gitlab_urls(url, message):
+    env = {"AIGW_MODEL_SELECTION__CATALOG__REPO_GITLAB_URL": url}
+    with mock.patch.dict(os.environ, env, clear=True):
+        with pytest.raises(ValidationError, match=message):
+            Config(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    ("env", "missing"),
+    [
+        ({}, "repo_project, repo_token"),
+        (
+            {"AIGW_MODEL_SELECTION__CATALOG__REPO_PROJECT": "group/catalog"},
+            "repo_token",
+        ),
+        ({"AIGW_MODEL_SELECTION__CATALOG__REPO_TOKEN": "token"}, "repo_project"),
+    ],
+)
+def test_config_model_catalog_repo_storage_needs_project_and_token(env, missing):
+    env = {"AIGW_MODEL_SELECTION__CATALOG__STORAGE": "repo", **env}
+    with mock.patch.dict(os.environ, env, clear=True):
+        with pytest.raises(ValidationError, match=f"needs {missing}"):
+            Config(_env_file=None)
+
+
 @pytest.mark.parametrize(
     ("values", "field", "expected"),
     [
@@ -1110,6 +1186,44 @@ def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode(variab
             "prompts",
             ConfigPrompts(),
         ),
+        (
+            {},
+            "proxy_endpoints",
+            ConfigProxyEndpoints(
+                actor_limit_mode="off",
+                user_limit=5,
+                instance_limit=20,
+                instance_limit_per_seat=0.05,
+                namespace_limit=20,
+            ),
+        ),
+        (
+            {
+                "AIGW_PROXY_ENDPOINTS__ACTOR_LIMIT_MODE": "log",
+                "AIGW_PROXY_ENDPOINTS__USER_LIMIT": "7",
+                "AIGW_PROXY_ENDPOINTS__INSTANCE_LIMIT": "35",
+                "AIGW_PROXY_ENDPOINTS__INSTANCE_LIMIT_PER_SEAT": "0.3",
+                "AIGW_PROXY_ENDPOINTS__NAMESPACE_LIMIT": "45",
+                "AIGW_PROXY_ENDPOINTS__SAAS_ENABLED": "123",
+            },
+            "proxy_endpoints",
+            ConfigProxyEndpoints(
+                actor_limit_mode="log",
+                user_limit=7,
+                instance_limit=35,
+                instance_limit_per_seat=0.3,
+                namespace_limit=45,
+                saas_enabled="123",
+            ),
+        ),
+        (
+            {
+                "AIGW_CODE_SUGGESTIONS__USER_LIMIT": "3",
+                "AIGW_PROMPTS__ACTOR_LIMIT_MODE": "enforce",
+            },
+            "proxy_endpoints",
+            ConfigProxyEndpoints(),
+        ),
     ],
     ids=[
         "code suggestions defaults",
@@ -1117,6 +1231,9 @@ def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode(variab
         "prompts defaults",
         "prompts from env",
         "prompts do not read the code suggestions settings",
+        "proxy endpoints defaults",
+        "proxy endpoints from env",
+        "proxy endpoints do not read the other routes' settings",
     ],
 )
 def test_config_actor_limits(values: dict, field: str, expected: ConfigActorLimits):
@@ -1141,6 +1258,11 @@ def test_config_actor_limits(values: dict, field: str, expected: ConfigActorLimi
         {"AIGW_PROMPTS__INSTANCE_LIMIT": "0"},
         {"AIGW_PROMPTS__INSTANCE_LIMIT_PER_SEAT": "-1"},
         {"AIGW_PROMPTS__NAMESPACE_LIMIT": "0"},
+        {"AIGW_PROXY_ENDPOINTS__ACTOR_LIMIT_MODE": "strict"},
+        {"AIGW_PROXY_ENDPOINTS__USER_LIMIT": "0"},
+        {"AIGW_PROXY_ENDPOINTS__INSTANCE_LIMIT": "0"},
+        {"AIGW_PROXY_ENDPOINTS__INSTANCE_LIMIT_PER_SEAT": "-1"},
+        {"AIGW_PROXY_ENDPOINTS__NAMESPACE_LIMIT": "0"},
     ],
 )
 def test_config_actor_limits_reject_invalid_values(values: dict):

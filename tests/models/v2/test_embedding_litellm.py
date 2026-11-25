@@ -162,6 +162,30 @@ class TestEmbeddingLiteLLMAsyncInvoke:
         }
 
     @pytest.mark.asyncio
+    async def test_async_invoke_with_character_count(
+        self, mock_litellm_aembedding, mock_litellm_aembedding_response
+    ):
+        mock_litellm_aembedding_response.usage = Usage(
+            prompt_tokens=12,
+            completion_tokens=0,
+            total_tokens=12,
+            prompt_tokens_details=PromptTokensDetailsWrapper(character_count=24),
+        )
+
+        model = EmbeddingLiteLLM(
+            model="text-embedding-005", custom_llm_provider="vertex_ai"
+        )
+
+        result = await model.ainvoke(input={"contents": ["test text 1"]})
+
+        assert result.usage_metadata == {
+            "input_tokens": 12,
+            "output_tokens": 0,
+            "total_tokens": 12,
+            "input_token_details": {"billable_characters": 24},
+        }
+
+    @pytest.mark.asyncio
     async def test_async_invoke_no_prompt_tokens_details(
         self, mock_litellm_aembedding, mock_litellm_aembedding_response
     ):

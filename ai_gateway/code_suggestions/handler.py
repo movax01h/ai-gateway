@@ -29,7 +29,6 @@ from ai_gateway.code_suggestions.fallback import build_rate_limit_fallback
 from ai_gateway.code_suggestions.processing.post.completions import (
     create_post_processor_for_model_metadata,
 )
-from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     TypeModelMetadata,
@@ -132,7 +131,7 @@ class StreamHandler(Protocol):
 def _watch_code_suggestion_event(
     context: SnowplowEventContext,
     snowplow_instrumentator: SnowplowInstrumentator = Provide[
-        ContainerApplication.snowplow.instrumentator
+        "snowplow.instrumentator"
     ],
 ) -> None:
     try:
@@ -255,9 +254,7 @@ async def code_completion(
     completions_amazon_q_factory: Factory[CodeCompletions] = Provide[
         "code_suggestions.completions.amazon_q_factory.provider"
     ],
-    internal_event_client: InternalEventsClient = Provide[
-        ContainerApplication.internal_event.client
-    ],
+    internal_event_client: InternalEventsClient = Provide["internal_event.client"],
     code_context: Optional[List[Any]] = None,
     model_metadata: TypeModelMetadata | None = None,
     *,
@@ -436,9 +433,7 @@ async def code_generation(
     generations_amazon_q_factory: Factory[CodeGenerations] = Provide[
         "code_suggestions.generations.amazon_q_factory.provider"
     ],
-    internal_event_client: InternalEventsClient = Provide[
-        ContainerApplication.internal_event.client
-    ],
+    internal_event_client: InternalEventsClient = Provide["internal_event.client"],
     # pylint: disable=unused-argument
     code_context: Optional[List[Any]] = None,
     model_metadata: TypeModelMetadata | None = None,

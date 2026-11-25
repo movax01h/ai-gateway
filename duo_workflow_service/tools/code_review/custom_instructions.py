@@ -1,8 +1,8 @@
 """Parsing, matching and rendering of code review custom instructions.
 
-The instructions reach the service from the GitLab API for merge-request review. Everything downstream of that fetch is
-independent of how they were obtained and lives here, so a caller that reads `.gitlab/duo/mr-review-instructions.yaml`
-from a working tree instead shares the parsing and rendering unchanged.
+The instructions reach the service either from the GitLab API (merge-request surface) or from the working tree's
+`.gitlab/duo/mr-review-instructions.yaml` (checkout surface). Everything downstream of that fetch is shared and lives
+here.
 """
 
 import fnmatch

@@ -151,6 +151,7 @@ class ModelRequestInstrumentator:
             unit_primitive: Optional[GitLabUnitPrimitive] = None,
             internal_event_client: Optional[InternalEventsClient] = None,
             model_vendor: str = "",
+            event_context: Optional[dict[str, Any]] = None,
         ):
             self.model_provider = model_provider
             # The company serving the model (e.g. fireworks_ai), which model_provider
@@ -164,6 +165,8 @@ class ModelRequestInstrumentator:
             self.start_time: Optional[float] = None
             self.unit_primitive = unit_primitive
             self.internal_event_client = internal_event_client
+            # Standard context fields that override the request-scoped ones on the token-usage event
+            self.event_context = event_context or {}
             self.finish_reason = "unknown"
             self.duration_s: Optional[float] = None
             self.finished = False
@@ -390,10 +393,19 @@ class ModelRequestInstrumentator:
                 "ephemeral_1h_input_tokens": ephemeral_1h_input_tokens,
             }
 
+            # Only set when the provider reports it: 0 would read as "billed nothing", not "unknown"
+            billable_characters = input_token_details.get("billable_characters")
+            extra_token_usage_data = (
+                {"billable_characters": billable_characters}
+                if billable_characters is not None
+                else {}
+            )
+
             logger.info(
                 "LLM call finished with token usage",
                 **token_usage_data,
                 **token_cache_usage_data,
+                **extra_token_usage_data,
             )
 
             if self.internal_event_client and self.unit_primitive:
@@ -401,14 +413,17 @@ class ModelRequestInstrumentator:
                     label="cache_details",
                     model_vendor=self.model_vendor,
                     **token_cache_usage_data,
+                    **extra_token_usage_data,
                     **internal_event_extra,
                 )
+
                 self.internal_event_client.track_event(
                     f"token_usage_{self.unit_primitive}",
                     category=__name__,
                     additional_properties=additional_properties,
                     ai_context=None,
                     **token_usage_data,
+                    **self.event_context,
                 )
 
         def _update_llm_operations(
@@ -471,7 +486,13 @@ class ModelRequestInstrumentator:
         self.model_vendor = model_vendor
 
     @contextmanager
-    def watch(self, stream=False, unit_primitive=None, internal_event_client=None):
+    def watch(
+        self,
+        stream=False,
+        unit_primitive=None,
+        internal_event_client=None,
+        event_context: Optional[dict[str, Any]] = None,
+    ):
         watcher = ModelRequestInstrumentator.WatchContainer(
             model_provider=self.model_provider,
             labels=self.labels,
@@ -480,6 +501,7 @@ class ModelRequestInstrumentator:
             unit_primitive=unit_primitive,
             internal_event_client=internal_event_client,
             model_vendor=self.model_vendor,
+            event_context=event_context,
         )
         watcher.start()
         error: Optional[BaseException] = None

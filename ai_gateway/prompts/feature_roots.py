@@ -63,6 +63,10 @@ RETIRED_INCLUDE_NAMES: frozenset[str] = frozenset(
         "project_activity_fetch_merge_requests_updated/user/1.0.0.jinja",
         "project_activity_summarize_project_activity/system/1.0.0.jinja",
         "project_activity_summarize_project_activity/user/1.0.0.jinja",
+        "recommend_reviewers_assign/system/3.0.0-dev.jinja",
+        "recommend_reviewers_assign/user/3.0.0-dev.jinja",
+        "review/recommend_reviewers_assign/system/3.0.0-dev.jinja",
+        "review/recommend_reviewers_assign/user/3.0.0-dev.jinja",
     }
 )
 

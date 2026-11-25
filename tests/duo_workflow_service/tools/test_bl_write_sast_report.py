@@ -166,6 +166,17 @@ class TestBuildReport:
         assert v["identifiers"][0]["type"] == "bl_finding"
         assert not v["name"].startswith("CWE-")
 
+    def test_reviewed_files_listed_without_partial_scan(self):
+        report = _writer()._build_report(
+            _parsed([{"file": "a.py"}]), reviewed_files=["a.py", "b.py"]
+        )
+        assert report["scan"]["reviewed_files"] == ["a.py", "b.py"]
+        assert "partial_scan" not in report["scan"]
+
+    def test_reviewed_files_omitted_when_unknown(self):
+        scan = _writer()._build_report(_parsed([{"file": "a.py"}]))["scan"]
+        assert "reviewed_files" not in scan
+
     def test_empty_body_defaults_to_finding_name(self):
         report = _build_report([{"file": "a.py"}])
         assert report["vulnerabilities"][0]["name"] == "Business-logic finding in a.py"
@@ -415,7 +426,7 @@ class TestWriteExecute:
 
         monkeypatch.setattr(bl, "_execute_action", _fake)
 
-        async def _boom(self, findings):
+        async def _boom(self, findings, verifier=None):
             raise RuntimeError("reanchor exploded")
 
         monkeypatch.setattr(BlWriteSastReport, "_verify_anchors", _boom)
@@ -425,6 +436,97 @@ class TestWriteExecute:
         )
         assert "Wrote 1 vulnerabilities" in out
         assert "contents" in writes  # report still written despite reanchor failure
+
+    @pytest.fixture
+    def written_scan(self):
+        """Run `_execute` against a mocked executor; return the written `scan`."""
+        with patch.object(
+            bl, "_execute_action", new_callable=AsyncMock, return_value="ok"
+        ) as execute:
+
+            async def run(**kwargs):
+                await _writer()._execute([{"file": "a.py"}], **kwargs)
+                writes = [
+                    call.args[1].runWriteFile.contents
+                    for call in execute.call_args_list
+                    if call.args[1].HasField("runWriteFile")
+                ]
+                return json.loads(writes[-1])["scan"]
+
+            yield run
+
+    @pytest.mark.asyncio
+    async def test_reviewed_files_derived_from_units(self, written_scan):
+        scan = await written_scan(
+            reviewed_units=[{"files": ["b.py", "a.py"]}, {"files": ["a.py", "c.py"]}],
+            review_coverage={"reviewed_indexes": [0, 1]},
+        )
+        assert scan["reviewed_files"] == ["a.py", "b.py", "c.py"]
+        assert "partial_scan" not in scan
+
+    @pytest.mark.asyncio
+    async def test_reviewed_files_omitted_without_units(self, written_scan):
+        scan = await written_scan()
+        assert "reviewed_files" not in scan
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "read,expected",
+        [
+            ([0, 1, 2], ["a.py", "b.py", "c.py", "d.py"]),  # all succeeded
+            ([0, 2], ["a.py", "b.py", "c.py"]),  # unit 1 failed or garbled
+            ([2], ["a.py", "c.py"]),  # shared a.py stays via unit 2
+            ([], []),  # every unit failed: known-empty, listed as []
+        ],
+    )
+    async def test_reviewed_files_skip_failed_and_unreadable_units(
+        self, written_scan, read, expected
+    ):
+        scan = await written_scan(
+            reviewed_units=[
+                {"files": ["a.py", "b.py"]},
+                {"files": ["d.py"]},
+                {"files": ["a.py", "c.py"]},
+            ],
+            review_coverage={"reviewed_indexes": read},
+        )
+        assert scan["reviewed_files"] == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "coverage",
+        [None, {}, {"reviewed": 3}],  # no reviewed_indexes: unknown, not all-reviewed
+    )
+    async def test_reviewed_files_omitted_without_indexes(self, written_scan, coverage):
+        scan = await written_scan(
+            reviewed_units=[{"files": ["a.py"]}], review_coverage=coverage
+        )
+        assert "reviewed_files" not in scan
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "coverage", [None, {"reviewed_indexes": []}]
+    )  # zero units dispatched: known-empty whatever the coverage says
+    async def test_reviewed_files_empty_units_listed_as_empty(
+        self, written_scan, coverage
+    ):
+        scan = await written_scan(reviewed_units=[], review_coverage=coverage)
+        assert scan["reviewed_files"] == []
+
+    @pytest.mark.asyncio
+    async def test_reviewed_files_omitted_when_units_none(self, written_scan):
+        scan = await written_scan(
+            reviewed_units=None, review_coverage={"reviewed_indexes": [0]}
+        )
+        assert "reviewed_files" not in scan
+
+    @pytest.mark.asyncio
+    async def test_reviewed_files_paths_normalized(self, written_scan):
+        scan = await written_scan(
+            reviewed_units=[{"files": ["./a.py", "/b.py", "a.py", "d/./c.py"]}],
+            review_coverage={"reviewed_indexes": [0]},
+        )
+        assert scan["reviewed_files"] == ["a.py", "b.py", "d/./c.py"]
 
 
 class TestAFailedUpstreamStepFailsTheStep:
@@ -1913,9 +2015,10 @@ def cancel_order(order_id):
             }
             for start, end, cwe in spans
         ]
-        contents: dict = {}
-        asyncio.run(_verify_anchors(_writer(), findings, contents))
-        return [f["body"] for f in _collapse_after_reanchor(findings, contents)]
+        writer = _writer()
+        verifier = bl._AnchorVerifier(writer)
+        asyncio.run(_verify_anchors(writer, findings, verifier))
+        return [f["body"] for f in _collapse_after_reanchor(findings, verifier.cache)]
 
     @pytest.mark.parametrize(
         "first,second",
@@ -1975,9 +2078,10 @@ def other(request):
             {"cwe": "CWE-639", "file": "views.py", "new_line": 1, "code_excerpt": exc}
             for exc in excerpts
         ]
-        sources: dict = {}
-        asyncio.run(_verify_anchors(_writer(), findings, sources))
-        return findings, _collapse_after_reanchor(findings, sources)
+        writer = _writer()
+        verifier = bl._AnchorVerifier(writer)
+        asyncio.run(_verify_anchors(writer, findings, verifier))
+        return findings, _collapse_after_reanchor(findings, verifier.cache)
 
     def test_a_decorator_first_quote_does_not_reach_the_next_function(
         self, monkeypatch
@@ -2531,9 +2635,10 @@ class TestPathRepair:
             }
             for file in files
         ]
-        sources: dict = {}
-        asyncio.run(_verify_anchors(_writer(), findings, sources))
-        return findings, _collapse_after_reanchor(findings, sources), calls
+        writer = _writer()
+        verifier = bl._AnchorVerifier(writer)
+        asyncio.run(_verify_anchors(writer, findings, verifier))
+        return findings, _collapse_after_reanchor(findings, verifier.cache), calls
 
     def test_a_dropped_prefix_is_repaired_and_merges_with_its_twin(self, monkeypatch):
         findings, out, calls = self._run(
@@ -2569,7 +2674,7 @@ class TestPathRepair:
 
         monkeypatch.setattr(bl, "_execute_action", _fake)
         findings = [{"cwe": "CWE-639", "file": "vpn/x.py", "code_excerpt": "x()"}]
-        asyncio.run(_verify_anchors(_writer(), findings, {}))
+        asyncio.run(_verify_anchors(_writer(), findings))
         assert findings[0]["file"] == "vpn/x.py"
         assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
 
@@ -2627,3 +2732,66 @@ class TestPathRepair:
         assert audit[bl._ANCHOR_DETAIL_KEY] == bl._ANCHOR_CORRECTED
         assert audit[bl._ANCHOR_CLAIMED_DETAIL_KEY] == "1"
         assert audit[bl._ANCHOR_CLAIMED_FILE_DETAIL_KEY] == "vpn/graphql/schema.py"
+
+
+class TestExecuteOwnsTheAnchorCache:
+    @pytest.mark.asyncio
+    async def test_files_read_before_a_raise_still_reach_the_collapse(self):
+        """``_execute`` hands the files read before the pass raised to ``_collapse_after_reanchor``."""
+        writer = BlWriteSastReport(metadata={"outbox": object()})
+        findings = [
+            {"file": "a.rb", "new_line": 1, "code_excerpt": "Record.find"},
+            {"file": "b.rb", "new_line": 1, "code_excerpt": "Record.find"},
+        ]
+        real_mark = bl._mark_anchor
+        marks: list = []
+
+        def _mark_then_boom(f, *args):
+            # The first finding is marked; the second raises past ``check``'s guard.
+            marks.append(f.file)
+            if f.file == "b.rb":
+                raise RuntimeError("boom")
+            return real_mark(f, *args)
+
+        async def _fake(metadata, action):
+            if action.HasField("runReadFile"):
+                return "Record.find(params[:id])"
+            return "ok"
+
+        with (
+            patch.object(bl, "_execute_action", side_effect=_fake),
+            patch.object(bl, "_mark_anchor", side_effect=_mark_then_boom),
+            patch.object(
+                bl, "_collapse_after_reanchor", wraps=bl._collapse_after_reanchor
+            ) as collapse,
+        ):
+            out = await writer._execute(findings)
+        assert "Wrote 2 vulnerabilities" in out
+        assert marks[0] == "a.rb" and "b.rb" in marks
+        assert collapse.call_args.args[1] == {
+            "a.rb": "Record.find(params[:id])",
+            "b.rb": "Record.find(params[:id])",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_project_rule_does_not_fail_the_report(self):
+        """A bad exclusion rule fails the verifier's construction: the report is still written, anchors stay claims."""
+        writer = BlWriteSastReport(
+            metadata={"outbox": object(), "project": {"exclusion_rules": [None]}}
+        )
+        findings = [
+            {"file": "a.rb", "new_line": 1, "code_excerpt": "Record.find"},
+        ]
+
+        written: dict = {}
+
+        async def _fake(metadata, action):
+            if action.HasField("runWriteFile"):
+                written["contents"] = action.runWriteFile.contents
+            return "ok"
+
+        with patch.object(bl, "_execute_action", side_effect=_fake):
+            out = await writer._execute(findings)
+        assert "Wrote 1 vulnerabilities" in out
+        (vuln,) = json.loads(written["contents"])["vulnerabilities"]
+        assert vuln["description"].endswith(bl.UNVERIFIED_LINE_NOTE)

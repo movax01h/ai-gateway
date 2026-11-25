@@ -987,3 +987,39 @@ Each `predictions[].index` is the position of the corresponding entry in the req
 - `422: Unprocessable Entity` if the required attributes are missing, or `model_metadata` is invalid. For example, an unsupported `provider`, or a missing `name` or `endpoint` for the `litellm` provider.
 - `429: Too Many Requests` if the model provider rate-limits the request.
 - `504: Gateway Timeout` if the request to the model provider times out.
+
+## Model provider proxy
+
+The proxy routes forward a request to a model provider and stream the response back. The request names a unit primitive
+in the `X-Gitlab-Unit-Primitive` header, and the access token must have it.
+
+| Route                      | Provider  |
+|----------------------------|-----------|
+| `POST /v1/proxy/anthropic/` | Anthropic |
+| `POST /v1/proxy/openai/`    | OpenAI    |
+| `POST /v1/proxy/vertex_ai/` | Vertex AI |
+
+### Per-actor limit on in-flight requests
+
+The proxy routes use the same per-actor limit on in-flight requests as the code suggestion and prompt routes.
+The gateway counts the limit on each process, and the proxy routes have their own counters, so proxy requests do not
+use up the limit of the other route groups. Every request counts against its user. A request from a self-managed
+instance also counts against that instance, and a GitLab.com request counts against its root namespace.
+
+The limit is off by default, so a self-hosted AI Gateway never rejects a request unless you turn it on. Set the mode
+with `AIGW_PROXY_ENDPOINTS__ACTOR_LIMIT_MODE`:
+
+- `off` (default): no check.
+- `log`: serve every request, and log and count the requests that would be rejected.
+- `enforce`: answer `429: Too Many Requests` with an `x-gitlab-rate-limit: proxy_actor_limit` header when any counter
+  is at its limit.
+
+| Environment variable                            | Default | Description                                                                                             |
+|-------------------------------------------------|---------|---------------------------------------------------------------------------------------------------------|
+| `AIGW_PROXY_ENDPOINTS__ACTOR_LIMIT_MODE`        | `off`   | `off`, `log`, or `enforce`.                                                                             |
+| `AIGW_PROXY_ENDPOINTS__USER_LIMIT`              | `5`     | Maximum in-flight requests per user.                                                                    |
+| `AIGW_PROXY_ENDPOINTS__INSTANCE_LIMIT`          | `20`    | Maximum in-flight requests per self-managed instance.                                                   |
+| `AIGW_PROXY_ENDPOINTS__INSTANCE_LIMIT_PER_SEAT` | `0.05`  | In-flight requests per Duo seat of a self-managed instance, used when it exceeds the instance limit.    |
+| `AIGW_PROXY_ENDPOINTS__NAMESPACE_LIMIT`         | `20`    | Maximum in-flight requests per GitLab.com root namespace.                                               |
+
+The `429` response is not the same as a `429` from the model provider. The rejected request never reaches the provider.

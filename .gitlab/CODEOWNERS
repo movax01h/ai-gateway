@@ -25,7 +25,7 @@
 /ai/features/review/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Orbit-specific flows, prompts, and libs are co-owned by the Orbit team
-/duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
+/ai/features/orbit/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/orbit
 /lib/context/orbit.py @gitlab-org/orbit
 
 # Insights features under ai/features/ are co-owned by Platform Insights
@@ -108,6 +108,10 @@
 /ai/shared/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai/shared/code_review_summary/ @kinsingh @wanpol @iamphill @marc_shaw
 
+# Fix Pipeline shared definitions. Keep below any /ai/shared/ rule,
+# because the last matching rule in a section wins.
+/ai/shared/fix_pipeline_fix_types/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
+
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/duo-workflow-service
@@ -133,7 +137,7 @@
 /ai/features/review/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Orbit-specific flow configs
-/duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
+/ai/features/orbit/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/orbit
 
 # Insights features under ai/features/
 /ai/features/insights/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/analytics-section/platform-insights/engineers
@@ -215,6 +219,10 @@
 # because the last matching rule in a section wins.
 /ai/shared/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai/shared/code_review_summary/ @kinsingh @wanpol @iamphill @marc_shaw
+
+# Fix Pipeline shared definitions. Keep below any /ai/shared/ rule,
+# because the last matching rule in a section wins.
+/ai/shared/fix_pipeline_fix_types/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 
 ^[Model Configuration] @gitlab-org/maintainers/duo-workflow-service
 /ai_gateway/model_selection/models.yml @gitlab-org/fulfillment/utilization

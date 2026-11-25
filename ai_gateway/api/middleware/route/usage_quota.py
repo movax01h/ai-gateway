@@ -6,7 +6,6 @@ from dependency_injector.wiring import Provide, inject
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from ai_gateway.container import ContainerApplication
 from lib.context import StarletteUser
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.usage_quota import (
@@ -119,9 +118,7 @@ async def _usage_quota_wrapper(
     event: Optional[UsageQuotaEvent],
     event_type_resolver: Optional[Callable[[Any], Any]],
     model_name: Optional[str],
-    usage_quota_service: UsageQuotaService = Provide[
-        ContainerApplication.usage_quota.service
-    ],
+    usage_quota_service: UsageQuotaService = Provide["usage_quota.service"],
     **kwargs: Any,
 ) -> Any:
     current_user: StarletteUser = request.user

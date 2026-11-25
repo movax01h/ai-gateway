@@ -1,9 +1,42 @@
 # pylint: disable=file-naming-for-tests
+from itertools import pairwise
 from unittest.mock import patch
 
 import pytest
+from packaging.version import Version
 
-from duo_workflow_service.gitlab.queries import fetch_query_for_version
+from duo_workflow_service.gitlab.queries import _QUERIES, fetch_query_for_version
+
+_VERSIONS = sorted(version for version, _ in _QUERIES)
+
+# Lines a versioned query drops on purpose, keyed by the version that drops them.
+_REMOVED_ON_PURPOSE = {
+    "18.8.0": {"firstCheckpoint {"},
+    "19.0.0": {"checkpoint"},
+    "19.7.0": {
+        'toolAccessPolicies(projectId: $projectId) @gl_introduced(version: "19.6.0")'
+    },
+}
+
+
+def _query_lines(version: Version) -> set[tuple[str, ...]]:
+    """Each line with the blocks around it, so a field in two places counts twice."""
+    lines = [
+        line.strip() for line in dict(_QUERIES)[version].splitlines() if line.strip()
+    ]
+    start = next(i for i, line in enumerate(lines) if line.endswith("{")) + 1
+    paths: set[tuple[str, ...]] = {
+        (line,) for line in lines[:start] if not line.startswith("query")
+    }
+    parents: list[str] = []
+    for line in lines[start:]:
+        if line == "}":
+            parents = parents[:-1]
+            continue
+        paths.add((*parents, line))
+        if line.endswith("{"):
+            parents.append(line)
+    return paths
 
 
 class TestQueryVersionSelection:
@@ -167,6 +200,11 @@ class TestQueryVersionSelection:
                 'toolAccessPolicy(projectId: $projectId) @gl_introduced(version: "19.7.0")',
                 id="19.7_has_toolAccessPolicy",
             ),
+            pytest.param(
+                "19.7.0",
+                'webSearchDeniedDomains @gl_introduced(version: "19.7.0")',
+                id="19.7_has_webSearchDeniedDomains",
+            ),
         ],
     )
     def test_version_gate_features(self, version: str, expected_feature: str):
@@ -201,31 +239,23 @@ class TestQueryVersionSelection:
         """Older instances get no resolved grant, so DWS falls back to the group setting."""
         assert "webSearchAllowed" not in fetch_query_for_version("19.5.0")
 
-    def test_19_6_query_keeps_every_19_3_field(self):
-        """19.6 only adds fields, so newer instances lose nothing 19.3 asks for."""
-        older = fetch_query_for_version("19.5.0").splitlines()
-        newer = fetch_query_for_version("19.6.0")
+    @pytest.mark.parametrize(("older", "newer"), list(pairwise(_VERSIONS)), ids=str)
+    def test_query_keeps_every_line_of_the_previous_version(
+        self, older: Version, newer: Version
+    ):
+        """Each versioned query starts as a copy of the one before it.
 
-        missing = [
-            line.strip()
-            for line in older
-            if line.strip() and not line.lstrip().startswith("query")
-            if line.strip() not in newer
-        ]
+        A field added to an older file only would silently go missing on newer instances, and git reports no conflict.
+        """
+        removed_on_purpose = _REMOVED_ON_PURPOSE.get(str(newer), set())
 
-        assert not missing
+        missing = {
+            path
+            for path in _query_lines(older) - _query_lines(newer)
+            if not removed_on_purpose.intersection(path)
+        }
 
-    def test_19_7_query_keeps_every_19_6_field(self):
-        """19.7 only swaps the JSON policy for the typed one, so newer instances lose nothing else 19.6 asks for."""
-        older = fetch_query_for_version("19.6.0").splitlines()
-        newer = fetch_query_for_version("19.7.0")
-        replaced = 'toolAccessPolicies(projectId: $projectId) @gl_introduced(version: "19.6.0")'
-
-        missing = [
-            line.strip()
-            for line in older
-            if line.strip() and not line.lstrip().startswith("query")
-            if line.strip() not in newer and line.strip() != replaced
-        ]
-
-        assert not missing
+        assert not missing, (
+            f"{newer} drops lines that {older} asks for: {sorted(missing)}. "
+            f"If {newer} drops them on purpose, add them to _REMOVED_ON_PURPOSE."
+        )

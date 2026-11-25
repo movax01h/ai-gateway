@@ -6,9 +6,14 @@
     when: never
   - when: on_success
 
+# install, the model gateway image builds and the FIPS base image builds use
+# only the repository, so they set `needs: []` and do not wait for the .pre
+# stage. Security policies add a dependency resolution job there, which takes
+# about 30 seconds.
 install:
   extends: .poetry
   stage: build
+  needs: []
   rules: *skip-on-version-tag-rules
   cache:
     policy: push
@@ -47,6 +52,7 @@ build-docker-model-gateway-arch:
   stage: build
   extends:
     - .docker-build-arch
+  needs: []  # Do not wait for .pre. See the comment above install.
   rules: *skip-on-version-tag-rules
   variables:
     BUILD_TAG: "${TARGET_IMAGE}"
@@ -102,6 +108,29 @@ sign:model-gateway:
       when: never
     - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+# Files that can change the ingest image or the ingest jobs. This file is always
+# included, so the ingest jobs in ingest.gitlab-ci.yml can reference the list too.
+.ingest-changes:
+  changes:
+    - scripts/ingest/**/*
+    - Makefile
+    - poetry.lock
+    - pyproject.toml
+    - .tool-versions
+    - .gitlab/ci/build.gitlab-ci.yml
+    - .gitlab/ci/ingest.gitlab-ci.yml
+
+# On merge requests and pushes to the default branch, build only when an ingest
+# file changes. The daily ingest schedule and manual ingest pipelines always build.
+.ingest-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: !reference [.ingest-changes, changes]
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: !reference [.ingest-changes, changes]
+    - if: $CI_PIPELINE_SOURCE != "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TYPE == "ingest"
+
 build:ingest-image:
   stage: build
   extends:
@@ -112,16 +141,7 @@ build:ingest-image:
         --tag "${INGEST_IMAGE}"
         --push
         .
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - scripts/ingest/**/*
-        - Makefile
-        - poetry.lock
-        - pyproject.toml
-        - .tool-versions
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TYPE == "ingest"
+  rules: !reference [.ingest-rules, rules]
 
 build:self-hosted-ai-gateway-image-arch:
   stage: build
@@ -176,6 +196,7 @@ build:self-hosted-ai-gateway-latest-image:
   stage: build
   extends:
     - .docker-build-arch
+  needs: []  # Do not wait for .pre. See the comment above install.
   variables:
     BUILD_FILE: docker/fips/Dockerfile
     BUILD_TAG: "${FIPS_TARGET_IMAGE}"

@@ -2,7 +2,7 @@ import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, NoReturn, Optional, cast, override
+from typing import Any, Dict, NoReturn, Optional, Sequence, cast, override
 from uuid import uuid4
 
 import jsonschema
@@ -19,6 +19,7 @@ from ai_gateway.response_schemas import InlineResponseSchemaRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.core.inbox import RunInbox
+from duo_workflow_service.agent_platform.core.inbox.message import InboundMessage
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -390,10 +391,35 @@ class Flow(AbstractWorkflow):
             status_event=status_event,
             checkpoint_tuple=checkpoint_tuple,
         )
+        return self._with_inbox(invocation)
+
+    def _with_inbox(
+        self, invocation: GraphInvocation, messages: Sequence[InboundMessage] = ()
+    ) -> GraphInvocation:
+        """Hand `invocation` the run's inbox, for a run that delivers through one.
+
+        Every invocation a flow resolves goes through here, whichever class decided what the run streams from, so input
+        enters the inbox in one place.
+
+        Args:
+            invocation: What the run streams from.
+            messages: What the request brought for this run, in the order it arrived.
+
+        Raises:
+            ValueError: When `messages` are given to a run with no inbox, which would drop them.
+        """
         if not self._delivers_through_inbox():
+            if messages:
+                raise ValueError(
+                    "A run with no inbox can't take messages. Its flow renders the goal itself."
+                )
             return invocation
 
-        return replace(invocation, context=RunInbox())
+        inbox = RunInbox()
+        for message in messages:
+            inbox.put(message)
+
+        return replace(invocation, context=inbox)
 
     @override
     def _support_namespace_level_workflow(self) -> bool:
@@ -525,13 +551,7 @@ class Flow(AbstractWorkflow):
         self,
         discarded_ui_chat_log: Optional[list[UiChatLog]] = None,
     ) -> Optional[dict[str, Any]]:
-        """Resume seam: the ``context`` state update applied when a run resumes.
-
-        On the engine path a RESUME answers an interrupt and carries no message,
-        so a ``Flow`` variant is expected to suppress this refresh and let
-        ingestion own envelope refresh on a new turn. See
-        https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2780
-        """
+        """Resume seam: the ``context`` state update applied when a run resumes."""
         # `context.inputs` is populated once, at workflow START
         # (`get_workflow_state`). Re-process the additional context sent with
         # this turn so per-turn inputs (e.g. `plan_context.plan_enabled` from the
@@ -804,6 +824,9 @@ class Flow(AbstractWorkflow):
             catalog_items=self._catalog_items,
             allow_agent_to_request_user=self._workflow_config.get(
                 "allow_agent_to_request_user", False
+            ),
+            web_search_blocked_domains=self._workflow_config.get(
+                "web_search_denied_domains", []
             ),
         )
 

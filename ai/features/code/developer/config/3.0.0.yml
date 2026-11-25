@@ -40,6 +40,7 @@ components:
       - "run_command"
 
     identical_tool_call_limit: 3
+    max_cycles: 2800
 
     ui_log_events:
       - "on_agent_reasoning"

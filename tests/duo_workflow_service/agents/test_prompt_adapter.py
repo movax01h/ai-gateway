@@ -2,11 +2,9 @@
 # pylint: disable=too-many-lines
 import contextvars
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.prompt_values import ChatPromptValue
@@ -19,6 +17,7 @@ from duo_workflow_service.agents.prompt_adapter import (
     ChatAgentPromptTemplate,
     DefaultPromptAdapter,
 )
+from duo_workflow_service.entities.message_ingestion import assemble_user_message
 from duo_workflow_service.entities.state import (
     MAX_TOOL_CALLS_PER_MODEL_CALL,
     ChatWorkflowState,
@@ -36,15 +35,6 @@ from lib.context import gitlab_version
 from lib.feature_flags import current_feature_flag_context
 from lib.feature_flags.context import FeatureFlag
 from lib.session_owner import set_session_owner_username
-
-REPO_ROOT = Path(__file__).parents[3]
-ORBIT_AGENT_CONFIG = (
-    REPO_ROOT
-    / "duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/1.0.0.yml"
-)
-CLAUDE_CHAT_PROMPT = (
-    REPO_ROOT / "ai_gateway/prompts/definitions/chat/agent/claude/1.0.1.yml"
-)
 
 
 @pytest.fixture(name="mock_datetime")
@@ -270,6 +260,52 @@ def test_chat_agent_prompt_template_multimodal_content_bypasses_jinja(
     assert "What is in this image?" in text_block["text"]
     assert "abc123" not in text_block["text"]
     assert rest == [image_block]
+
+
+@patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+def test_chat_agent_prompt_template_keeps_session_file_records_from_the_provider(
+    mock_get_model_metadata,
+    project,
+    namespace,
+):
+    """The records a user message keeps for code reach neither the rendered text nor the request."""
+    mock_get_model_metadata.return_value = None
+    prompt_config = PromptConfig(
+        name="Chat Agent",
+        unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
+        prompt_template={
+            "system_static": "Base chat.",
+            "user": "{{ message.content }}",
+        },
+    )
+    template = ChatAgentPromptTemplate(ModelClassProvider.ANTHROPIC, prompt_config)
+    url = "/api/v4/ai/duo_workflows/workflows/1/session_files/5"
+    message = assemble_user_message(
+        "What is in this image?",
+        content_blocks=[
+            {"type": "image", "base64": "abc123", "mime_type": "image/png"}
+        ],
+        attachments=[{"id": "attachment-1", "url": url, "filename": "a.png"}],
+    )
+    state = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={"test_agent": [message]},
+        ui_chat_log=[],
+        last_human_input=None,
+        goal="Test goal",
+        project=project,
+        namespace=namespace,
+        approval=None,
+        preapproved_tools=None,
+        denied_tools=None,
+    )
+
+    result = template.invoke(state, agent_name="test_agent")
+
+    user_message = result.to_messages()[-1]
+    assert user_message.additional_kwargs == {}
+    assert url not in str(user_message.content)
 
 
 @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
@@ -1313,34 +1349,3 @@ class TestWebSearchStatus:
             if isinstance(msg, SystemMessage)
         )
         assert "<web_search_status>" not in content
-
-
-@pytest.mark.parametrize(
-    "prompt_template",
-    [yaml.safe_load(CLAUDE_CHAT_PROMPT.read_text())["prompt_template"]],
-)
-@patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
-def test_orbit_agent_prompt_renders_through_the_chat_template(
-    mock_get_model_metadata,
-    model_provider,
-    prompt_config,
-    sample_chat_workflow_state: ChatWorkflowState,
-):
-    mock_get_model_metadata.return_value = None
-    config = yaml.safe_load(ORBIT_AGENT_CONFIG.read_text())
-    override = config["prompts"][0]["prompt_template"]["system"]
-
-    template = ChatAgentPromptTemplate(model_provider, prompt_config)
-
-    with patch.object(
-        GitLabServiceContext, "get_current_instance_info", return_value=None
-    ):
-        result = template.invoke(
-            sample_chat_workflow_state,
-            agent_name="test_agent",
-            system_template_override=override,
-        )
-
-    content = str(result.to_messages()[0].content)
-    assert "<orbit>" in content
-    assert "<orbit_agent_rules>" in content

@@ -647,6 +647,25 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `developer 4.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> developer_agent;
+    developer_agent(developer_agent<br>#91;AgentComponent#93;);
+    developer_agent --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `duo_permissions_assistant 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -1069,46 +1088,6 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `readiness_score 1.0.0 (v1)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> fetch;
-    fetch(fetch<br>#91;DeterministicStepComponent#93;);
-    fetch_notes(fetch_notes<br>#91;DeterministicStepComponent#93;);
-    rubric(rubric<br>#91;AgentComponent#93;);
-    coverage(coverage<br>#91;AgentComponent#93;);
-    falsifier(falsifier<br>#91;AgentComponent#93;);
-    xexam_rubric(xexam_rubric<br>#91;AgentComponent#93;);
-    xexam_coverage(xexam_coverage<br>#91;AgentComponent#93;);
-    xexam_falsifier(xexam_falsifier<br>#91;AgentComponent#93;);
-    verdict(verdict<br>#91;AgentComponent#93;);
-    persist(persist<br>#91;DeterministicStepComponent#93;);
-    fetch -.->|"success"| fetch_notes;
-    fetch -.->|"default_route"| abort;
-    fetch_notes -.->|"success"| rubric;
-    fetch_notes -.->|"default_route"| abort;
-    rubric --> coverage;
-    coverage --> falsifier;
-    falsifier --> xexam_rubric;
-    xexam_rubric --> xexam_coverage;
-    xexam_coverage --> xexam_falsifier;
-    xexam_falsifier --> verdict;
-    verdict --> persist;
-    persist -.->|"success"| __end__;
-    persist -.->|"default_route"| abort;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
 ## Graph: `recommend_reviewers 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -1189,7 +1168,7 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `recommend_reviewers 4.0.0-dev (v1)` (Flow Registry)
+## Graph: `recommend_reviewers 4.0.0 (v1)` (Flow Registry)
 
 ```mermaid
 ---
@@ -1434,6 +1413,31 @@ graph TD;
     push_and_create_mr -.->|"default_route"| __end__;
     evaluate_merge_request --> link_vulnerability;
     link_vulnerability --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `risk_assessment 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> fetch_mr_diffs;
+    fetch_mr_diffs(fetch_mr_diffs<br>#91;DeterministicStepComponent#93;);
+    assess_risk(assess_risk<br>#91;AgentComponent#93;);
+    submit_risk_assessment(submit_risk_assessment<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_diffs -.->|"success"| assess_risk;
+    fetch_mr_diffs -.->|"default_route"| abort;
+    assess_risk --> submit_risk_assessment;
+    submit_risk_assessment -.->|"success"| __end__;
+    submit_risk_assessment -.->|"default_route"| abort;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;

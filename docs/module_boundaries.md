@@ -40,6 +40,9 @@ ai/
     response_schemas/         #   registry only
     tools/                    #   tool framework + base classes (NOT feature tools)
     hooks/                    #   declared extension points features plug into
+    models/                   #   model clients that both deployables use
+    security/                 #   prompt security; changes need AppSec approval
+    tracking/                 #   generic metrics, error tracking, monitoring context, token counting
 
   serving/                    # transport: gRPC + REST adapters for every feature
     grpc/
@@ -175,6 +178,24 @@ engine), so the same feature is reachable over either protocol with no logic
 duplicated in the controller. Business logic lives in the feature, not the
 controller; serving is a thin edge.
 
+The Duo Workflow Service runtime code goes to `ai/platform/`, because platform
+code imports it. `platform/flow_engine/` gets the executor stream, status
+updates, errors, client capabilities, the flow request, and the self-hosted
+billing decorator. `platform/tools/` gets the file and diff exclusion policies.
+`platform/tracking/` gets tracking, except the Sentry setup, and token counting.
+The current-user context variable goes to `lib/context/`. The response hash
+helpers in `duo_workflow_service/security/security_utils.py` go to `lib/`,
+because `lib/context/tool_loop.py` imports `compute_response_hash`.
+`serving/grpc/` keeps the gRPC server, the interceptors, the server
+capabilities, and the Sentry setup, because only the server imports them.
+
+`platform/tracking/` holds only generic tracking. Tracking that only the AI
+Gateway uses, such as the Snowplow events, stays with the AI Gateway. Platform
+code imports nothing from `ai_gateway/`. Before a module moves to
+`ai/platform/`, remove each of its `ai_gateway/` imports. Move the imported code
+to `ai/platform/` or `lib/`, cut the import, or invert it: the platform declares
+an interface and the AI Gateway implements it.
+
 Today `ai/serving/grpc/flows.py` registers the flows whose `serving.py` declares
 gRPC on the Duo Workflow Service. A flow fetched from the AI Catalog has no
 `serving.py` and is always registered. `ai/serving/rest/routes.py` mounts the AI
@@ -211,8 +232,12 @@ Ownership of providers follows the same feature-first rule as everything else:
   only** — no business logic — so it does not drift into the god object the per-app
   split exists to retire.
 
-This is the end-state shape; how the present shared `ContainerApplication` and
-`config.py` get carved into it is a migration concern, not a structural one.
+The container files have this shape: `ai/platform/container.py` holds the
+platform providers, and `ai/apps/aigw/container.py` and `ai/apps/dws/container.py`
+each add the providers of one app. At boot, both entrypoints still use the union of
+the two app containers in `ai_gateway/container.py`, so each deployable still has
+every provider until each entrypoint uses its own app container. How `config.py` gets carved into
+per-app slices is a migration concern, not a structural one.
 
 ## Ownership and CODEOWNERS
 
@@ -228,7 +253,8 @@ boundaries one-to-one:
 - **`ai/platform/`** is one scoped section owned by the platform team, because
   changes to the engine, registries, tool framework, and hooks need platform
   knowledge rather than feature knowledge. This is the section that previously had
-  no dedicated owners and was absorbed into the catch-all.
+  no dedicated owners and was absorbed into the catch-all. `ai/platform/security/`
+  also needs AppSec approval, the same as `duo_workflow_service/security/` today.
 - **`ai/serving/`** is owned by the team that owns the transport edge. That
   ownership extends to the deployment surface that exposes it: `.runway/`
   configuration and the container image packaging that publishes the gRPC and REST

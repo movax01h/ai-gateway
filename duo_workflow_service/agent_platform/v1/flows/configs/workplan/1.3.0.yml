@@ -20,7 +20,9 @@ environment: ambient
 # because GitLab accepts a link only when the item is created. The planner
 # gets the read-only `gitlab_graphql`, and never `create_work_item`: a child
 # that the planner creates has no track marker, so `publish_tracks` would
-# create that track again. The rest of 1.2.0 is unchanged.
+# create that track again. The Parallel work bullet of the plan describes
+# the returned tracks, not a split between sub-agents. The rest of 1.2.0 is
+# unchanged.
 
 components:
   - name: research
@@ -677,12 +679,14 @@ prompts:
         - **What** — an ordered, concrete list of steps. Each step should be
           actionable by an agent or engineer without further clarification,
           name the files it touches, and state what it depends on.
-        - **Parallel work** — which steps could be handed to a separate
-          sub-agent and run at the same time, and which have to stay in
-          sequence and why, by step number. For each independent track, say
-          what it must not touch, so two agents working at once don't collide.
-          Omit this section when the work genuinely is one sequential track -
-          don't invent parallelism to fill it.
+        - **Parallel work** — the split you return in `tracks` (see
+          "Tracks" below), for a human. With fewer than two tracks, write
+          one line: the plan stays one work item, and why it is not split.
+          With two or more tracks, write one line per track: its key, its
+          steps in **What**, and the keys of the tracks it waits for,
+          exactly as in its `depends_on`. Do not describe a split that you
+          do not return, such as steps that sub-agents could run at the
+          same time.
         - **Assumptions** — anything you decided yourself, stated as a decision,
           not a question. If a question was posted to the comments, say so here
           in one line. Omit this section only when nothing needed deciding.

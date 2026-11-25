@@ -285,6 +285,27 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         assert params["pre_approved_tools"] == ["notify_me_when"]
 
+    def test_prepare_component_params_passes_the_flow_environment(
+        self, flow_instance, mock_tools_registry
+    ):
+        params = flow_instance._prepare_component_params(
+            {"name": "agent", "type": "AgentComponent"}, mock_tools_registry
+        )
+
+        assert params["environment"] == "local"
+
+    def test_support_namespace_level_workflow(self, flow_instance):
+        assert flow_instance._support_namespace_level_workflow() is True
+
+    def test_get_workflow_state_without_a_project(self, flow_instance):
+        flow_instance._project = None
+
+        context = flow_instance.get_workflow_state("goal")["context"]
+
+        assert context["project_id"] is None
+        assert context["project_http_url_to_repo"] is None
+        assert context["project_default_branch"] is None
+
     def test_prepare_component_params_keeps_pre_approvals_without_ask_rules(
         self, flow_instance, mock_tools_registry
     ):
@@ -300,6 +321,27 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         )
 
         assert params["pre_approved_tools"] == ["notify_me_when"]
+
+    @pytest.mark.parametrize(
+        ("enable_web_search", "expected"),
+        [(True, ["evil.com"]), (False, None)],
+        ids=["web_search_on", "web_search_off"],
+    )
+    def test_prepare_component_params_passes_the_web_search_denylist(
+        self, flow_instance, mock_tools_registry, enable_web_search, expected
+    ):
+        flow_instance._workflow_config["web_search_denied_domains"] = ["evil.com"]
+
+        params = flow_instance._prepare_component_params(
+            {
+                "name": "agent",
+                "type": "AgentComponent",
+                "enable_web_search": enable_web_search,
+            },
+            mock_tools_registry,
+        )
+
+        assert params.get("web_search_blocked_domains") == expected
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

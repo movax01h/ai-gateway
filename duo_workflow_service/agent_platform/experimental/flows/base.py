@@ -168,6 +168,10 @@ class Flow(AbstractWorkflow):
         return self._config.config_id
 
     @override
+    def _support_namespace_level_workflow(self) -> bool:
+        return True
+
+    @override
     def get_workflow_state(self, goal: str) -> FlowState:  # type: ignore[override]
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
@@ -186,9 +190,13 @@ class Flow(AbstractWorkflow):
             conversation_history={},
             ui_chat_log=[initial_ui_chat_log],
             context={
-                "project_id": self._project.get("id"),  # type: ignore[union-attr]
-                "project_http_url_to_repo": self._project.get("http_url_to_repo"),  # type: ignore[union-attr]
-                "project_default_branch": self._project.get("default_branch"),  # type: ignore[union-attr]
+                "project_id": self._project.get("id") if self._project else None,
+                "project_http_url_to_repo": (
+                    self._project.get("http_url_to_repo") if self._project else None
+                ),
+                "project_default_branch": (
+                    self._project.get("default_branch") if self._project else None
+                ),
                 "goal": goal,
                 "current_date": datetime.now().strftime("%Y-%m-%d"),
                 "workflow_id": self._workflow_id,
@@ -351,8 +359,14 @@ class Flow(AbstractWorkflow):
                 "flow_id": self._workflow_id,
                 "flow_type": self._workflow_type,
                 "user": self._user,
+                "environment": self._config.environment,
             }
         )
+
+        if comp_params.get("enable_web_search"):
+            comp_params["web_search_blocked_domains"] = self._workflow_config.get(
+                "web_search_denied_domains", []
+            )
 
         if "pre_approved_tools" in comp_params:
             comp_params["pre_approved_tools"] = filter_pre_approvals_by_policy(
