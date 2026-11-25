@@ -28,6 +28,11 @@ from duo_workflow_service.tools.security import (
     VulnerabilitySeverity,
     VulnerabilityState,
 )
+from duo_workflow_service.tools.security_inputs import (
+    MAX_GITLAB_GLOBAL_ID_LENGTH,
+    MAX_PROJECT_FULL_PATH_LENGTH,
+    MAX_VULNERABILITY_IDS,
+)
 from duo_workflow_service.tools.tier_access_checker import (
     LICENSED_FEATURE_SECURITY_DASHBOARD,
 )
@@ -137,6 +142,7 @@ class TestListVulnerabilitiesInput:
             "namespace/project",
             "group/subgroup/project",
             "my-group_123/project.name",
+            "g/" + "p" * (MAX_PROJECT_FULL_PATH_LENGTH - 2),
         ]
         for path in valid_paths:
             input_data = ListVulnerabilitiesInput(project_full_path=path)
@@ -147,6 +153,7 @@ class TestListVulnerabilitiesInput:
             "/absolute/path",
             "path/to/project/",
             "ab",
+            "g/" + "p" * (MAX_PROJECT_FULL_PATH_LENGTH - 1),
         ]
         for path in invalid_paths:
             with pytest.raises(ValidationError):
@@ -2528,3 +2535,201 @@ async def test_link_vulnerability_to_merge_request_invalid_version_fails(
 
         # Verify that no API call was made
         gitlab_client_mock.apost.assert_not_called()
+
+
+_OVERSIZED_PROJECT_PATH = "g/" + "p" * MAX_PROJECT_FULL_PATH_LENGTH
+_OVERSIZED_ID = "9" * (MAX_GITLAB_GLOBAL_ID_LENGTH + 1)
+_TOO_MANY_VULNERABILITY_IDS = [str(i) for i in range(MAX_VULNERABILITY_IDS + 1)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_class,input_data,expected_error",
+    [
+        (
+            ListVulnerabilities,
+            {"project_full_path": _OVERSIZED_PROJECT_PATH},
+            "project_full_path",
+        ),
+        (
+            CreateVulnerabilityIssue,
+            {
+                "project_full_path": _OVERSIZED_PROJECT_PATH,
+                "vulnerability_ids": ["1"],
+            },
+            "project_full_path",
+        ),
+        (
+            CreateVulnerabilityIssue,
+            {"project_full_path": "group/../project", "vulnerability_ids": ["1"]},
+            "Invalid project path format",
+        ),
+        (
+            CreateVulnerabilityIssue,
+            {
+                "project_full_path": "namespace/project",
+                "vulnerability_ids": _TOO_MANY_VULNERABILITY_IDS,
+            },
+            "vulnerability_ids",
+        ),
+        (
+            CreateVulnerabilityIssue,
+            {
+                "project_full_path": "namespace/project",
+                "vulnerability_ids": json.dumps(_TOO_MANY_VULNERABILITY_IDS),
+            },
+            "vulnerability_ids",
+        ),
+        (
+            CreateVulnerabilityIssue,
+            {
+                "project_full_path": "namespace/project",
+                "vulnerability_ids": ["1", _OVERSIZED_ID],
+            },
+            "vulnerability_ids.1",
+        ),
+        (
+            LinkVulnerabilityToIssue,
+            {"issue_id": _OVERSIZED_ID, "vulnerability_ids": ["1"]},
+            "issue_id",
+        ),
+        (
+            LinkVulnerabilityToIssue,
+            {"issue_id": "1", "vulnerability_ids": _TOO_MANY_VULNERABILITY_IDS},
+            "vulnerability_ids",
+        ),
+        (
+            LinkVulnerabilityToIssue,
+            {"issue_id": "1", "vulnerability_ids": [_OVERSIZED_ID]},
+            "vulnerability_ids.0",
+        ),
+        (
+            LinkVulnerabilityToMergeRequest,
+            {"vulnerability_id": _OVERSIZED_ID, "merge_request_id": "1"},
+            "vulnerability_id",
+        ),
+        (
+            LinkVulnerabilityToMergeRequest,
+            {"vulnerability_id": "1", "merge_request_id": _OVERSIZED_ID},
+            "merge_request_id",
+        ),
+        (
+            LinkVulnerabilityToMergeRequest,
+            {"vulnerability_id": "1", "merge_request_id": int(_OVERSIZED_ID)},
+            "merge_request_id",
+        ),
+        (
+            DismissVulnerability,
+            {
+                "vulnerability_id": _OVERSIZED_ID,
+                "comment": "Not exploitable",
+                "dismissal_reason": "FALSE_POSITIVE",
+            },
+            "vulnerability_id",
+        ),
+        (
+            ConfirmVulnerability,
+            {"vulnerability_id": _OVERSIZED_ID},
+            "vulnerability_id",
+        ),
+        (
+            RevertToDetectedVulnerability,
+            {"vulnerability_id": _OVERSIZED_ID},
+            "vulnerability_id",
+        ),
+    ],
+)
+async def test_oversized_inputs_rejected_before_api_call(
+    gitlab_client_mock, metadata, tool_class, input_data, expected_error
+):
+    gitlab_client_mock.apost = AsyncMock()
+    gitlab_client_mock.aget = AsyncMock()
+
+    with patch("duo_workflow_service.tools.security.gitlab_version") as version:
+        version.get.return_value = "18.5.0"
+        tool = tool_class(metadata=metadata)
+
+        with pytest.raises(ValidationError, match=expected_error):
+            await tool.arun(input_data)
+
+    gitlab_client_mock.apost.assert_not_called()
+    gitlab_client_mock.aget.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "input_class,input_data",
+    [
+        (
+            ListVulnerabilitiesInput,
+            {"project_full_path": "g/" + "p" * (MAX_PROJECT_FULL_PATH_LENGTH - 2)},
+        ),
+        (
+            CreateVulnerabilityIssueInput,
+            {
+                "project_full_path": "namespace/project",
+                "vulnerability_ids": [str(i) for i in range(MAX_VULNERABILITY_IDS)],
+            },
+        ),
+        (
+            LinkVulnerabilityToIssueInput,
+            {
+                "issue_id": "9" * MAX_GITLAB_GLOBAL_ID_LENGTH,
+                "vulnerability_ids": [str(i) for i in range(MAX_VULNERABILITY_IDS)],
+            },
+        ),
+        (
+            LinkVulnerabilityToMergeRequestInput,
+            {
+                "vulnerability_id": "9" * MAX_GITLAB_GLOBAL_ID_LENGTH,
+                "merge_request_id": "9" * MAX_GITLAB_GLOBAL_ID_LENGTH,
+            },
+        ),
+        (
+            ConfirmVulnerabilityInput,
+            {"vulnerability_id": "9" * MAX_GITLAB_GLOBAL_ID_LENGTH},
+        ),
+        (
+            RevertToDetectedVulnerabilityInput,
+            {"vulnerability_id": "9" * MAX_GITLAB_GLOBAL_ID_LENGTH},
+        ),
+    ],
+)
+def test_inputs_at_limit_accepted(input_class, input_data):
+    input_class(**input_data)
+
+
+@pytest.mark.parametrize(
+    "input_class,field_name,expected_max_length",
+    [
+        (ListVulnerabilitiesInput, "project_full_path", MAX_PROJECT_FULL_PATH_LENGTH),
+        (
+            CreateVulnerabilityIssueInput,
+            "project_full_path",
+            MAX_PROJECT_FULL_PATH_LENGTH,
+        ),
+        (LinkVulnerabilityToIssueInput, "issue_id", MAX_GITLAB_GLOBAL_ID_LENGTH),
+        (
+            LinkVulnerabilityToMergeRequestInput,
+            "merge_request_id",
+            MAX_GITLAB_GLOBAL_ID_LENGTH,
+        ),
+        (DismissVulnerabilityInput, "vulnerability_id", MAX_GITLAB_GLOBAL_ID_LENGTH),
+    ],
+)
+def test_limits_exposed_in_tool_schema(input_class, field_name, expected_max_length):
+    field_schema = input_class.model_json_schema()["properties"][field_name]
+
+    assert field_schema["maxLength"] == expected_max_length
+    assert f"Maximum {expected_max_length} characters" in field_schema["description"]
+
+
+@pytest.mark.parametrize(
+    "input_class", [CreateVulnerabilityIssueInput, LinkVulnerabilityToIssueInput]
+)
+def test_vulnerability_ids_limit_exposed_in_tool_schema(input_class):
+    field_schema = input_class.model_json_schema()["properties"]["vulnerability_ids"]
+
+    assert field_schema["maxItems"] == MAX_VULNERABILITY_IDS
+    assert field_schema["items"]["maxLength"] == MAX_GITLAB_GLOBAL_ID_LENGTH
+    description = field_schema["description"]
+    assert f"Up to {MAX_VULNERABILITY_IDS} can be provided" in description
