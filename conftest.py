@@ -9,8 +9,18 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from ai_gateway.prompts.base import (
+    _jinja2_variables_cache,
+    _jinja2_variables_recursive_cache,
+)
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+
+
+@pytest.fixture(autouse=True)
+def clear_jinja2_variables_caches() -> None:
+    _jinja2_variables_cache.clear()
+    _jinja2_variables_recursive_cache.clear()
 
 
 @pytest.fixture(name="gl_http_client", scope="function")
