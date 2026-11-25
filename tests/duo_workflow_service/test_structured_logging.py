@@ -149,6 +149,7 @@ def test_add_workflow_identity_processor_with_values(json_logging_setup):
             flow_id="developer",
             flow_version="1.2.3",
             schema_version="v1",
+            model_identifier="claude_sonnet_5_vertex",
         )
     )
     log = structlog.stdlib.get_logger("test")
@@ -161,6 +162,7 @@ def test_add_workflow_identity_processor_with_values(json_logging_setup):
     assert log_entry.get("flow_name") == "developer"
     assert log_entry.get("item_version") == "1.2.3"
     assert log_entry.get("schema_version") == "v1"
+    assert log_entry.get("model_identifier") == "claude_sonnet_5_vertex"
 
 
 def test_add_workflow_identity_processor_without_values(json_logging_setup):
@@ -176,6 +178,7 @@ def test_add_workflow_identity_processor_without_values(json_logging_setup):
     assert "flow_name" not in log_entry
     assert "item_version" not in log_entry
     assert "schema_version" not in log_entry
+    assert "model_identifier" not in log_entry
 
 
 def test_add_workflow_identity_processor_with_partial_values(json_logging_setup):
@@ -210,6 +213,7 @@ def test_add_workflow_identity_processor_does_not_overwrite_extra_values(
             flow_id="context-flow",
             flow_version="1.2.3",
             schema_version="v1",
+            model_identifier="context-model",
         )
     )
     log = structlog.stdlib.get_logger("test")
@@ -217,6 +221,7 @@ def test_add_workflow_identity_processor_does_not_overwrite_extra_values(
         "test event",
         workflow_definition="extra-definition",
         item_version="9.9.9",
+        model_identifier="extra-model",
     )
 
     output = json_logging_setup.getvalue()
@@ -226,3 +231,4 @@ def test_add_workflow_identity_processor_does_not_overwrite_extra_values(
     assert log_entry.get("flow_name") == "context-flow"
     assert log_entry.get("item_version") == "9.9.9"
     assert log_entry.get("schema_version") == "v1"
+    assert log_entry.get("model_identifier") == "extra-model"

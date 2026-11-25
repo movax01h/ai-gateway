@@ -4,6 +4,7 @@ import contextlib
 import contextvars
 import json
 import os
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
@@ -72,6 +73,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
 from lib.context import agent_mode, client_capabilities, client_type, gitlab_version
+from lib.context.model import current_model_metadata_context
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
@@ -1777,6 +1779,41 @@ async def test_route_default_model_only_on_start(
         )
     else:
         mock_track.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.track_routing_decision")
+@patch("duo_workflow_service.workflows.abstract_workflow.route_default_model")
+async def test_route_default_model_records_the_routed_model(
+    mock_route, _mock_track, workflow, internal_event_client: Mock
+):
+    """The monitoring context gets the model that routing selected, not the model the client requested."""
+    token = current_model_metadata_context.set(
+        SimpleNamespace(name="claude_sonnet_5_5_vertex", identifier=None)
+    )
+    decision = MagicMock()
+
+    def route(*_args, **_kwargs):
+        # The classifier replaces the default model during the call, as in production.
+        current_model_metadata_context.set(
+            SimpleNamespace(name="claude_haiku_5_5_vertex", identifier=None)
+        )
+        return decision
+
+    mock_route.side_effect = route
+    workflow._internal_event_client = internal_event_client
+    workflow._project = None
+
+    try:
+        await workflow._route_default_model(
+            "Fix the typo", WorkflowStatusEventEnum.START
+        )
+    finally:
+        current_model_metadata_context.reset(token)
+
+    assert current_monitoring_context.get().model_identifier == (
+        "claude_haiku_5_5_vertex"
+    )
 
 
 @pytest.mark.asyncio

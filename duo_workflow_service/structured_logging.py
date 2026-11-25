@@ -71,13 +71,14 @@ def setup_logging(cache_logger_on_first_use: bool = True):
         return event_dict
 
     def add_workflow_identity(_: Any, __: str, event_dict: EventDict) -> EventDict:
-        """Add workflow and flow identity fields to structured log events."""
+        """Add workflow, flow and model identity fields to structured log events."""
         context = current_monitoring_context.get()
         fields = {
             "workflow_definition": context.workflow_definition,
             "flow_name": context.flow_id,
             "item_version": context.flow_version,
             "schema_version": context.schema_version,
+            "model_identifier": context.model_identifier,
         }
 
         explicit_extra = event_dict.get("extra")

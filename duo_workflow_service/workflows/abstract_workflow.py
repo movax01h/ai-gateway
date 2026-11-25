@@ -135,6 +135,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
 )
 from lib.context import agent_mode, client_type
+from lib.context.model import current_model_metadata_context
 from lib.context.orbit import is_orbit_tool
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
@@ -1463,6 +1464,10 @@ class AbstractWorkflow(ABC):
             self._prompt_registry,
         )
         if decision:
+            # Routing can replace the default model, so record the model that runs.
+            current_monitoring_context.get().set_model_identifier(
+                current_model_metadata_context.get()
+            )
             track_routing_decision(
                 decision, self._workflow_id, self._internal_event_client
             )

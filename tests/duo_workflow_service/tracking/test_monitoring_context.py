@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import pytest
 
 from duo_workflow_service.tracking import MonitoringContext
@@ -77,3 +80,39 @@ class TestSetFlowIdentity:
         assert context.flow_id is None
         assert context.flow_version is None
         assert context.schema_version is None
+
+
+class TestSetModelIdentifier:
+    @pytest.mark.parametrize(
+        ("model_metadata", "expected"),
+        [
+            # GitLab models carry the GitLab identifier in `name`.
+            (
+                SimpleNamespace(
+                    name="claude_sonnet_5_vertex", identifier=None, api_key="secret"
+                ),
+                "claude_sonnet_5_vertex",
+            ),
+            # Custom and self-hosted models carry the model in `identifier`.
+            (
+                SimpleNamespace(
+                    name="claude_3", identifier="bedrock/claude-3", api_key="secret"
+                ),
+                "bedrock/claude-3",
+            ),
+            # Values that are not strings are ignored.
+            (MagicMock(), None),
+            (SimpleNamespace(name="", identifier=""), None),
+            (None, None),
+        ],
+    )
+    def test_sets_model_identifier(self, model_metadata, expected):
+        context = MonitoringContext()
+        context.set_model_identifier(model_metadata)
+        assert context.model_identifier == expected
+        assert "secret" not in context.model_dump_json()
+
+    def test_keeps_existing_value_when_nothing_resolves(self):
+        context = MonitoringContext(model_identifier="claude_sonnet_5_vertex")
+        context.set_model_identifier(None)
+        assert context.model_identifier == "claude_sonnet_5_vertex"

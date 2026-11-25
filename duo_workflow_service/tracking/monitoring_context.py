@@ -1,5 +1,5 @@
 from contextvars import ContextVar
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -22,6 +22,7 @@ class MonitoringContext(BaseModel):
         PromptInjectionProtectionLevel.LOG_ONLY
     )
     workflow_no_start_reason: Optional[str] = None
+    model_identifier: Optional[str] = None
 
     def set_flow_identity(
         self,
@@ -42,6 +43,24 @@ class MonitoringContext(BaseModel):
             self.flow_version = flow_version
         if schema_version:
             self.schema_version = schema_version
+
+    def set_model_identifier(self, model_metadata: Optional[Any] = None) -> None:
+        """Record the identifier of the model selected for this execution.
+
+        Uses ``identifier`` for custom and self-hosted models and ``name`` (the GitLab identifier) for GitLab models,
+        which matches the ``model_identifier`` in the prompt registry log. Only non-empty strings are stored, so a
+        request without model metadata keeps the current value. Never reads secret fields such as ``api_key``.
+
+        Args:
+            model_metadata: The model metadata of the request, or ``None`` when the request has none.
+        """
+        candidates = (
+            getattr(model_metadata, "identifier", None),
+            getattr(model_metadata, "name", None),
+        )
+        value = next((c for c in candidates if c and isinstance(c, str)), None)
+        if value:
+            self.model_identifier = value
 
     def flow_versioning_fields(self) -> dict[str, str]:
         """Return the flow identity fields for tracing and observability.
