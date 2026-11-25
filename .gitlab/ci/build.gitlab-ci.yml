@@ -17,6 +17,13 @@ install:
   rules: *skip-on-version-tag-rules
   cache:
     policy: push
+  # Install Poetry in its own virtualenv, so the cache keeps it for the other jobs.
+  before_script:
+    - python -m venv --without-pip "$CACHED_POETRY_DIR/venv"
+    - pip --python "$CACHED_POETRY_DIR/venv/bin/python" install poetry==${POETRY_VERSION}
+    - mkdir -p "$CACHED_POETRY_DIR/bin"
+    - ln -sf ../venv/bin/poetry "$CACHED_POETRY_DIR/bin/poetry"
+    - export PATH="$CACHED_POETRY_DIR/bin:$PATH"
   script:
     - poetry install --with lint,test
 

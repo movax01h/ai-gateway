@@ -245,23 +245,37 @@ secret_detection:
   needs: []
 
 .poetry:
+  variables:
+    POETRY_VIRTUALENVS_IN_PROJECT: "true"
+    # The install job puts Poetry in its own virtualenv here, and the cache keeps it.
+    # This directory is separate from the Poetry download cache in $POETRY_CACHE_DIR.
+    # The version in the path makes a new POETRY_VERSION install a new copy.
+    CACHED_POETRY_DIR: "$CI_PROJECT_DIR/.cache/installed-poetry-$POETRY_VERSION"
   cache:
     key:
       files:
         - poetry.lock
         - .gitlab-ci.yml
     policy: pull
+    # The Poetry download cache ($POETRY_CACHE_DIR) is not in the cache. The
+    # `install` job does not restore the cache, and other jobs skip
+    # `poetry install` when `.venv` exists. No job reads it, so it only adds
+    # upload and download time.
     paths:
       - $PIP_CACHE_DIR
-      - $POETRY_CACHE_DIR
       - .venv/
       - scripts/lib/
       - scripts/vendor/
+      - $CACHED_POETRY_DIR
+  # Use the cached Poetry when it exists. Install it with pip on a cold cache.
+  # Only the poetry symlink goes on PATH, so python and pip stay the image's.
   before_script:
-    - pip install poetry==${POETRY_VERSION}
-    - poetry config virtualenvs.in-project true
-    - poetry config cache-dir ${POETRY_CACHE_DIR}
-    - poetry config --list
+    - |
+      if [ -x "$CACHED_POETRY_DIR/bin/poetry" ] && [ -x "$CACHED_POETRY_DIR/venv/bin/python" ]; then
+        export PATH="$CACHED_POETRY_DIR/bin:$PATH"
+      else
+        pip install poetry==${POETRY_VERSION}
+      fi
 
 .docker:
   image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}docker:${DOCKER_VERSION}
