@@ -188,6 +188,14 @@ class PromptSecurity:
             strip_hidden_markdown_comments,
             strip_hidden_unicode_tags,
         ],
+        # Same reasoning as the merge-request tool above: diff content legitimately
+        # contains HTML and mermaid comments, and stripping them makes the reviewer judge
+        # code that does not match the file.
+        "get_local_commit_diff": [
+            encode_dangerous_tags,
+            strip_hidden_markdown_comments,
+            strip_hidden_unicode_tags,
+        ],
         "flow_config_prompts": [
             encode_dangerous_tags,
             strip_hidden_unicode_tags,

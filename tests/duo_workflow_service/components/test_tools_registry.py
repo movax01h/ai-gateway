@@ -363,6 +363,7 @@ _outbox = MagicMock(spec=Outbox)
                 "finalize_code_review_findings",
                 "detect_review_context_truncation",
                 "list_local_commits",
+                "get_local_commit_diff",
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
@@ -393,6 +394,7 @@ _outbox = MagicMock(spec=Outbox)
                 "finalize_code_review_findings",
                 "detect_review_context_truncation",
                 "list_local_commits",
+                "get_local_commit_diff",
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
@@ -685,6 +687,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "fetch_glql_schema": tools.FetchGlqlSchema(metadata=expected_metadata),
         "run_glql_query": tools.RunGLQLQuery(metadata=expected_metadata),
         "list_local_commits": tools.ListLocalCommits(metadata=expected_metadata),
+        "get_local_commit_diff": tools.GetLocalCommitDiff(metadata=expected_metadata),
         "post_sast_fp_analysis_to_gitlab": PostSastFpAnalysisToGitlab(
             metadata=expected_metadata
         ),
@@ -1067,6 +1070,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "finalize_code_review_findings",
         "detect_review_context_truncation",
         "list_local_commits",
+        "get_local_commit_diff",
         "run_tests",
         "bl_discover_and_cluster",
     }
@@ -1153,6 +1157,7 @@ async def test_registry_configuration_with_preapproved_tools(
         "finalize_code_review_findings",
         "detect_review_context_truncation",
         "list_local_commits",
+        "get_local_commit_diff",
         "run_tests",
         "bl_discover_and_cluster",
     }
@@ -3923,6 +3928,7 @@ _EXPECTED_CEILING_EXEMPT = [
     "get_issue",
     "get_issue_note",
     "get_job_logs",
+    "get_local_commit_diff",
     "get_merge_request",
     "get_pipeline_failing_jobs",
     "get_project",
