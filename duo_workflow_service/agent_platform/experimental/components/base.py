@@ -41,6 +41,7 @@ class BaseComponent(BaseModel, ABC):
     flow_id: str
     flow_type: GLReportingEventContext
     user: CloudConnectorUser
+    environment: str | None = None
 
     @model_validator(mode="before")
     @classmethod
