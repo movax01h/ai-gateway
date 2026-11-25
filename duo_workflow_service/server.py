@@ -790,6 +790,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         start_req = start_workflow_request.startRequest
         monitoring_context.workflow_id = start_req.workflowID
         monitoring_context.workflow_definition = start_req.workflowDefinition
+        monitoring_context.set_model_identifier(current_model_metadata_context.get())
 
         client_capabilities.set(set(start_req.clientCapabilities))
         agent_mode.set(start_req.agent_mode)
@@ -1020,16 +1021,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         workflow_id = start_req.workflowID
         set_workflow_id(workflow_id)
 
-        cleaned_request, request_extra = clean_start_request(start_workflow_request)
-        log.info(
-            "Starting workflow %s",
-            cleaned_request,
-            extra={
-                **build_logging_context(workflow_id, workflow_definition),
-                **request_extra,
-            },
-        )
-
         flow_config = start_req.flowConfig
         gl_event_context = GLReportingEventContext.from_workflow_definition(
             workflow_definition,
@@ -1044,6 +1035,19 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         # A flat-rate flow is billed once whatever models it runs, so its models come from the allowlist of the
         # feature it is billed as, not from the client's choice.
         scope_flat_rate_flow_models(gl_event_context.feature_qualified_name, user)
+        # The flat-rate check can replace the requested model, so record the model that runs.
+        monitoring_context.set_model_identifier(current_model_metadata_context.get())
+
+        # Logged after the flat-rate check, so that this line names the model that runs.
+        cleaned_request, request_extra = clean_start_request(start_workflow_request)
+        log.info(
+            "Starting workflow %s",
+            cleaned_request,
+            extra={
+                **build_logging_context(workflow_id, workflow_definition),
+                **request_extra,
+            },
+        )
 
         # Validate billing mandatory fields once the flow is known and before the
         # workflow runs, so an invalid request is rejected before any LLM call.

@@ -6347,6 +6347,92 @@ async def test_flow_versioning_identity_not_stamped_when_resolution_fails(
     assert monitoring_context.schema_version is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_name", ["claude_sonnet_5_vertex", None])
+@patch("duo_workflow_service.server.current_monitoring_context")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_records_model_identifier(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_current_monitoring_context,
+    model_name,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """ExecuteWorkflow records the model from the request metadata before the workflow runs."""
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.successful_execution = MagicMock(return_value=True)
+    mock_workflow.last_error = None
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    monitoring_context = MonitoringContext()
+    mock_current_monitoring_context.get.return_value = monitoring_context
+    model_metadata = (
+        _gitlab_model(model_name, ModelSelectionConfig.instance().get_model(model_name))
+        if model_name
+        else None
+    )
+    token = current_model_metadata_context.set(model_metadata)
+
+    try:
+        result = servicer.ExecuteWorkflow(
+            start_request_iterator,
+            mock_context,
+            internal_event_client=create_mock_internal_event_client(),
+        )
+
+        with pytest.raises(StopAsyncIteration):
+            await anext(result)
+    finally:
+        current_model_metadata_context.reset(token)
+
+    assert monitoring_context.model_identifier == model_name
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.current_monitoring_context")
+@patch("duo_workflow_service.server.normalize_flow_request")
+async def test_execute_workflow_records_model_identifier_when_aborted_at_start(
+    mock_normalize_flow_request,
+    mock_current_monitoring_context,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """A request that aborts before the flat-rate check is logged with the requested model."""
+    mock_normalize_flow_request.side_effect = ValueError("bad request")
+    monitoring_context = MonitoringContext()
+    mock_current_monitoring_context.get.return_value = monitoring_context
+    model_name = "claude_sonnet_5_vertex"
+    token = current_model_metadata_context.set(
+        _gitlab_model(model_name, ModelSelectionConfig.instance().get_model(model_name))
+    )
+
+    try:
+        result = servicer.ExecuteWorkflow(
+            start_request_iterator,
+            mock_context,
+            internal_event_client=create_mock_internal_event_client(),
+        )
+
+        with pytest.raises(grpc.RpcError):
+            await anext(result)
+    finally:
+        current_model_metadata_context.reset(token)
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.INVALID_ARGUMENT, "bad request"
+    )
+    assert monitoring_context.model_identifier == model_name
+
+
 @pytest.mark.parametrize(
     "message,expected",
     [
@@ -7813,6 +7899,60 @@ async def test_execute_workflow_runs_a_flat_rate_flow_on_its_feature_models(
     ]
     assert len(served) == 1
     assert served[0] in review.default_model_identifiers
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.log")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_records_the_model_of_a_flat_rate_flow_that_runs(
+    mock_resolve_flow, mock_workflow_class, mock_log, mock_context, monkeypatch
+):
+    """The monitoring context gets the model that runs after the flat-rate check, not the requested model.
+
+    The "Starting workflow" line gets it too.
+    """
+    monkeypatch.setattr(get_config().custom_models, "enabled", False)
+    current_user.set(_workflow_token_user(flow_config_id=None))
+    details = MagicMock()
+    details.invocation_metadata = [
+        (
+            ModelMetadataInterceptor.X_GITLAB_AGENT_PLATFORM_MODEL_METADATA,
+            json.dumps({"provider": "gitlab", "identifier": "claude_fable_5"}),
+        )
+    ]
+    await ModelMetadataInterceptor().intercept_service(AsyncMock(), details)
+    seen: list[tuple[str, Optional[str]]] = []
+    logged_at_start: list[Optional[str]] = []
+
+    def record_start_log(message: str, *_args, **_kwargs) -> None:
+        if message.startswith("Starting workflow"):
+            logged_at_start.append(current_monitoring_context.get().model_identifier)
+
+    mock_log.info.side_effect = record_start_log
+
+    def record_model() -> None:
+        metadata = current_model_metadata_context.get()
+        assert metadata is not None
+        seen.append(
+            (
+                metadata.llm_definition.gitlab_identifier,
+                current_monitoring_context.get().model_identifier,
+            )
+        )
+
+    await _execute_registry_flow(
+        "code_review",
+        mock_context,
+        mock_resolve_flow,
+        mock_workflow_class,
+        on_build=record_model,
+    )
+
+    [(served, recorded)] = seen
+    assert served != "claude_fable_5"
+    assert recorded == served
+    assert logged_at_start == [served]
 
 
 @pytest.mark.asyncio
