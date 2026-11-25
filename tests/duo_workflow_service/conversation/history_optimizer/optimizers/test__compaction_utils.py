@@ -1135,7 +1135,7 @@ class TestStripToolMetadata:
         # Rendered as prose, not as the f-string's python repr of a dict list.
         assert text == (
             "[Tool result for 'read_file']: "
-            "Read image file: diagram.png\n[image/png omitted from history]"
+            "Read image file: diagram.png\n[image/png removed from history after its turn]"
         )
 
     def test_tool_message_list_content_renders_as_prose(self):

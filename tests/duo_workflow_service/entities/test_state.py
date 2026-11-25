@@ -526,7 +526,7 @@ class TestRenderForDisplay:
         result = render_for_display(blocks, tool_name="read_file")
 
         assert result.startswith(
-            "token [REDACTED]\n[image/png omitted from history]\nyyyy"
+            "token [REDACTED]\n[image/png removed from history after its turn]\nyyyy"
         )
         assert token not in result
         assert "A" * 64 not in result
@@ -652,7 +652,7 @@ class TestBuildToolInfoStructuredContent:
 
         assert info["tool_response"] == (
             "Read image file: ./shot.png (image/png, 6 KB).\n"
-            "[image/png omitted from history]"
+            "[image/png removed from history after its turn]"
         )
         assert payload not in info["tool_response"]
         assert_client_valid_tool_info(info)

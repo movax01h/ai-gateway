@@ -655,10 +655,10 @@ def attachment_content_blocks(
     The label exists for what happens *after* this turn.
     :func:`~duo_workflow_service.entities.image_blocks.strip_image_payloads` drops the payload before the message is
     checkpointed and leaves a deliberately provenance-neutral placeholder, so a resumed session would otherwise read as
-    a bare ``[image/png omitted from history]`` and the model could not answer even "which file did I send you?". A text
-    block is not an image block, so it survives stripping untouched and keeps the filename in the conversation. It costs
-    a handful of tokens and is not a recovery hint: code finds a session file again through the message's record (see
-    :func:`session_file_records`), never through the label.
+    a bare ``[image/png removed from history after its turn]`` and the model could not answer even "which file did I
+    send you?". A text block is not an image block, so it survives stripping untouched and keeps the filename in the
+    conversation. It costs a handful of tokens and is not a recovery hint: code finds a session file again through the
+    message's record (see :func:`session_file_records`), never through the label.
     """
     blocks: list[dict[str, Any]] = []
     for index, attachment in enumerate(attachments, start=1):

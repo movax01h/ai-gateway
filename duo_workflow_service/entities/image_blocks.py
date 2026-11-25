@@ -379,7 +379,7 @@ def without_image_payloads(
     return (replaced, removed) if removed else (messages, 0)
 
 
-_OMITTED = "omitted from history"
+_OMITTED = "removed from history after its turn"
 
 
 def _placeholder(mime_type: Optional[str]) -> str:

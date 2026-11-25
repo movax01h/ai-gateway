@@ -152,7 +152,7 @@ def test_image_blocks_are_stripped_whatever_the_message_role(message):
     assert encoded["content"][0]["type"] == "text"
     assert encoded["content"][1] == {
         "type": "text",
-        "text": "[image/png omitted from history]",
+        "text": "[image/png removed from history after its turn]",
     }
     assert PNG_B64 not in json.dumps(encoded)
 
@@ -221,7 +221,10 @@ def test_an_interrupt_mid_turn_loses_the_image_but_keeps_its_label():
     assert not [block for block in content if block.get("base64")]
     assert {"type": "text", "text": "[attachment 1: screenshot.png]"} in content
     assert {"type": "text", "text": "fix the bug it shows"} in content
-    assert any("omitted from history" in block.get("text", "") for block in content)
+    assert any(
+        "removed from history after its turn" in block.get("text", "")
+        for block in content
+    )
 
 
 @pytest.mark.parametrize(

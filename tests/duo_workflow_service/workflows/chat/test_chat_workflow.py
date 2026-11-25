@@ -2902,7 +2902,10 @@ class TestChatAttachments:
             content=[
                 {"type": "text", "text": "comment, then describe this"},
                 {"type": "text", "text": "[attachment 1: shot.png]"},
-                {"type": "text", "text": "[image/png omitted from history]"},
+                {
+                    "type": "text",
+                    "text": "[image/png removed from history after its turn]",
+                },
             ],
             additional_kwargs={
                 "additional_context": None,

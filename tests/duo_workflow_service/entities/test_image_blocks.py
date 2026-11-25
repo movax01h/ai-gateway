@@ -122,14 +122,14 @@ class TestStripImagePayloads:
         assert stripped[0] == {"type": "text", "text": "look"}
         assert stripped[1] == {
             "type": "text",
-            "text": "[image/png omitted from history]",
+            "text": "[image/png removed from history after its turn]",
         }
         assert PNG_B64 not in json.dumps(stripped)
 
     def test_placeholder_falls_back_when_the_mime_type_is_missing(self):
         (block,) = strip_image_payloads([{"type": "image", "base64": PNG_B64}])
 
-        assert block["text"] == "[image omitted from history]"
+        assert block["text"] == "[image removed from history after its turn]"
 
     @pytest.mark.parametrize(
         "word", ["attachment", "read_file", "upload", "tool", "user"]
@@ -318,7 +318,7 @@ class TestWithoutImagePayloads:
         assert removed == 2
         assert replaced[0].content[1] == {
             "type": "text",
-            "text": "[image/png omitted from history]",
+            "text": "[image/png removed from history after its turn]",
         }
         assert replaced[2].content[0] == {
             "type": "text",
@@ -407,7 +407,7 @@ class TestContentAsText:
 
         assert result == (
             "Read image file: ./a.png (image/png, 3 KB).\n"
-            "[image/png omitted from history]"
+            "[image/png removed from history after its turn]"
         )
         assert "AAAA" not in result
 
@@ -438,7 +438,7 @@ class TestContentAsText:
         result = content_as_text(content)
 
         assert result == (
-            "[image/png omitted from history]\n[audio omitted]\n[dict omitted]"
+            "[image/png removed from history after its turn]\n[audio omitted]\n[dict omitted]"
         )
         assert "BBBB" not in result
 
@@ -470,7 +470,10 @@ class TestContentAsText:
     def test_dict_renders_as_a_single_block(self):
         assert content_as_text({"type": "text", "text": "hello"}) == "hello"
         assert content_as_text({"key": "value"}) == "[dict omitted]"
-        assert content_as_text(self.IMAGE_BLOCK) == "[image/png omitted from history]"
+        assert (
+            content_as_text(self.IMAGE_BLOCK)
+            == "[image/png removed from history after its turn]"
+        )
 
     def test_string_passes_through_by_identity(self):
         content = "a plain string"
@@ -492,7 +495,7 @@ class TestContentAsText:
             Wrapper([{"type": "text", "text": "hi"}, self.IMAGE_BLOCK])
         )
 
-        assert result == "hi\n[image/png omitted from history]"
+        assert result == "hi\n[image/png removed from history after its turn]"
         assert "AAAA" not in result
 
     def test_tuple_content_is_treated_as_a_block_list(self):
@@ -508,7 +511,7 @@ class TestContentAsText:
 
         result = content_as_text(message)
 
-        assert result == "Read\n[image/png omitted from history]"
+        assert result == "Read\n[image/png removed from history after its turn]"
         assert "AAAA" not in result
 
     @pytest.mark.parametrize(
@@ -534,7 +537,7 @@ class TestRenderImageBlocksAsText:
 
         assert (
             render_image_blocks_as_text(blocks)
-            == "lead\n[image/png omitted from history]"
+            == "lead\n[image/png removed from history after its turn]"
         )
 
     @pytest.mark.parametrize(
@@ -672,7 +675,7 @@ class TestInternalImageBlock:
 
         assert is_image_content_block(lookalike) is True
         (stripped,) = strip_image_payloads([lookalike])
-        assert stripped["text"] == "[image/png omitted from history]"
+        assert stripped["text"] == "[image/png removed from history after its turn]"
 
 
 class TestIsImagePlaceholder:
@@ -685,8 +688,17 @@ class TestIsImagePlaceholder:
                 )[0],
                 True,
             ),
-            ({"type": "text", "text": "[image omitted from history]"}, True),
-            ({"type": "text", "text": "see [image/png omitted from history]"}, False),
+            (
+                {"type": "text", "text": "[image removed from history after its turn]"},
+                True,
+            ),
+            (
+                {
+                    "type": "text",
+                    "text": "see [image/png removed from history after its turn]",
+                },
+                False,
+            ),
             ({"type": "text", "text": "[attached file: shot.png]"}, False),
             (image_content_block(base64=PNG_B64, mime_type="image/png"), False),
         ],
