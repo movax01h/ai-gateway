@@ -48,6 +48,61 @@ A few notes:
 - In AI Gateway project, CI/CD scheduled pipeline runs the ingestion to `ai-enablement-dev-69497ba7` GCP project 03:00 AM UTC every day.
   See `ingest:dev` job in the pipelines.
 
+### Production ingestion
+
+The same scheduled pipeline also ingests the documentation into the production GCP projects. Each job uses the
+GCP project from the `INGEST_GCP_PROJECT_NAME` CI/CD variable of its environment.
+
+| Job               | Environment       | GCP project                    | Read by                                                  |
+| ----------------- | ----------------- | ------------------------------ | -------------------------------------------------------- |
+| `ingest:dev`      | `ingest/dev`      | `ai-enablement-dev-69497ba7`   | Local development                                        |
+| `ingest:prod`     | `ingest/prod`     | `gitlab-ai-framework-prod`     | Duo Workflow Service in production (Cloud Run and EKS)   |
+| `ingest:leg-prod` | `ingest/leg-prod` | `gitlab-ai-framework-leg-prod` | AI Gateway in production (GitLab.com, Cloud Run and EKS) |
+
+The three jobs run in parallel and do not depend on each other. If one GCP project fails, the import into the
+other projects still runs.
+
+The services read the GCP project from `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` in their Runway configuration. For
+example, see `.runway/ai-gateway/env-production.yml` and `.runway/ai-gateway-eks/eks-service-production.yaml`.
+
+#### Run production ingestion manually
+
+To ingest without waiting for the schedule:
+
+1. Go to **Build > Pipelines** in the AI Gateway project and select **New pipeline**.
+1. Select the `main` branch. The `build:ingest-image` job does not run on other branches, and the ingest jobs need
+   its image.
+1. Add the variable `GITLAB_INGEST_TRIGGER` with the value `dev`, `prod`, or `leg-prod`.
+1. Select **New pipeline**.
+
+The pipeline runs `ingest:prod:trigger` or `ingest:leg-prod:trigger` automatically. For `dev`, start the
+`ingest:dev:trigger` job manually.
+
+This starts a full `main` pipeline, so other jobs that run on `main` can start too. Check the pipeline and
+cancel any jobs you don't need.
+
+#### Fallback data store version
+
+If the data store for the requested GitLab version does not exist, or the version can't be parsed, AI Gateway and
+Duo Workflow Service retry the search with `AIGW_VERTEX_SEARCH__FALLBACK_DATASTORE_VERSION`. Other Vertex AI
+Search errors are not retried and return HTTP 500. The value is a GitLab `<major>.<minor>` version, for example
+`18.9`.
+
+Several Cloud Run and EKS configurations under `.runway/` set this value. To find all of them, run
+`git grep AIGW_VERTEX_SEARCH__FALLBACK_DATASTORE_VERSION .runway/`. Staging and production have their own values,
+except `.runway/duo-workflow-svc-eks/default-values.yaml`, which applies to both. When you change the value for an
+environment, update every file of that environment. Make sure that the data store for that
+version exists in the GCP project of that environment. No ingest job writes to the staging GCP projects, so the
+staging value can differ from the production value.
+
+Exceptions:
+
+- Duo Workflow Service on EKS staging reads `gitlab-ai-framework-dev` but uses the production fallback value from
+  `default-values.yaml`. When you bump that value, make sure the data store also exists in
+  `gitlab-ai-framework-dev`, or override the value in `.runway/duo-workflow-svc-eks/eks-service-staging.yaml`.
+- `ai-gateway-custom` runs the self-hosted image with `AIGW_CUSTOM_MODELS__ENABLED=true`. It searches a local SQLite
+  index instead of Vertex AI Search, so it does not use the fallback version.
+
 ### Run locally
 
 Login to the GCP via Application Default Credentials (ADC):
@@ -111,11 +166,10 @@ Here is a [preview app for GitLab documentations](https://console.cloud.google.c
    1. Construct the data store ID `<name>-<version>`. App name is same with this. For example,
       `gitlab-docs-17-0`.
 1. Request to the Vertex AI Search with the data store ID.
-   1. If the request encountered an error, it falls back to a stable data store which is hard-coded in AI
-      Gateway. This process would be improved in the future to be more resilient. Example scenarios:
-      1. The data store ID doesn't exist yet (for example, GitLab-Rails bump the `VERSION` and its deployed to
-         GitLab.com, but the ingestion pipeline has not run yet).
-      1. The data is still being processed/indexed by Vertex AI Search, which usually takes 5-10 minutes.
+   1. If the data store is not found, or the GitLab version can't be parsed, it falls back to a stable data store.
+      For example, the data store ID doesn't exist yet when GitLab-Rails bumps the `VERSION` and it is deployed to
+      GitLab.com before the ingestion pipeline has run. See
+      [fallback data store version](#fallback-data-store-version). Other errors return HTTP 500 without a fallback.
 
 ## Check usage quota in GCP console
 
