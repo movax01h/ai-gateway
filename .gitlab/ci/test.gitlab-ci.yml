@@ -287,8 +287,8 @@ check-proto-node:
 check-duo-workflow-docs:
   extends: .poetry
   stage: test
-  needs:
-    - install
+  # Same as `lint`: start right away, and install the dependencies only on a cold cache.
+  needs: []
   script:
     - make duo-workflow-docs
     - |
