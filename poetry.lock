@@ -2855,14 +2855,15 @@ trio = ["trio (>=0.22.0,<1.0)"]
 
 [[package]]
 name = "httpcore2"
-version = "2.6.0"
+version = "2.16.2"
 description = "A minimal low-level HTTP client."
 optional = false
-python-versions = ">=3.10"
+python-versions = ">=3.11"
 groups = ["main"]
+markers = "sys_platform != \"emscripten\""
 files = [
-    {file = "httpcore2-2.6.0-py3-none-any.whl", hash = "sha256:c237a45c7eef885cf032cb9b850d59fcf1fa7e00230307f08aab26486a6ed584"},
-    {file = "httpcore2-2.6.0.tar.gz", hash = "sha256:95b692b582402ec49b3d84c2343556e4ac4c0962c8b3d39c48d485b9ecc240ab"},
+    {file = "httpcore2-2.16.2-py3-none-any.whl", hash = "sha256:16051ae2a42f776007543f32de9349a317b23d2cbb4e1456b4bac0e88b87419a"},
+    {file = "httpcore2-2.16.2.tar.gz", hash = "sha256:6c519d0f7b44f7269fa9bbb4d2763db395a4a2370f046d8e8e0a4b38227815d2"},
 ]
 
 [package.dependencies]
@@ -2873,7 +2874,7 @@ truststore = ">=0.10"
 asyncio = ["anyio (>=4.5.0,<5.0)"]
 http2 = ["h2 (>=3,<5)"]
 socks = ["socksio (==1.*)"]
-trio = ["trio (>=0.22.0,<1.0)"]
+trio = ["trio (>=0.34.0,<1.0)"]
 
 [[package]]
 name = "httplib2"
@@ -2991,30 +2992,44 @@ files = [
 
 [[package]]
 name = "httpx2"
-version = "2.6.0"
+version = "2.16.2"
 description = "The next generation HTTP client."
 optional = false
-python-versions = ">=3.10"
+python-versions = ">=3.11"
 groups = ["main"]
 files = [
-    {file = "httpx2-2.6.0-py3-none-any.whl", hash = "sha256:6cccc3665d6bceb3c1c4f1422ae7e53fda67a853f0135f09b25ce0d4dcac01e3"},
-    {file = "httpx2-2.6.0.tar.gz", hash = "sha256:5d362fd59562cf2139a60c67bb016587a70b36156a517f176c7cbf1587d1ab22"},
+    {file = "httpx2-2.16.2-py3-none-any.whl", hash = "sha256:f05c13aade4c45dbf1c9060647a1058f0acad62398fad96e741269edb33d46f5"},
+    {file = "httpx2-2.16.2.tar.gz", hash = "sha256:748b615678f07d8e3b183efe81ad13b655ca88bfc56ce4589219b2d442860574"},
 ]
 
 [package.dependencies]
-anyio = "*"
-httpcore2 = "2.6.0"
+anyio = {version = ">=4.10", markers = "sys_platform != \"emscripten\""}
+httpcore2 = {version = "2.16.2", markers = "sys_platform != \"emscripten\""}
+httpx2-jsfetch = {version = "*", markers = "sys_platform == \"emscripten\" and python_version >= \"3.12\""}
 idna = ">=3.18"
-truststore = ">=0.10"
+truststore = {version = ">=0.10", markers = "sys_platform != \"emscripten\""}
 typing-extensions = {version = ">=4.5.0", markers = "python_version < \"3.13\""}
 
 [package.extras]
-brotli = ["brotli ; platform_python_implementation == \"CPython\"", "brotlicffi ; platform_python_implementation != \"CPython\""]
-cli = ["click (>=8.4)", "pygments (==2.*)", "rich (>=10,<16)"]
+brotli = ["brotli (>=1.2.0) ; platform_python_implementation == \"CPython\"", "brotlicffi (>=1.2.0.2) ; platform_python_implementation != \"CPython\""]
+cli = ["click (>=8.4.2)", "pygments (==2.*)", "rich (>=10,<16)"]
 http2 = ["h2 (>=3,<5)"]
 socks = ["socksio (==1.*)"]
 ws = ["wsproto (>=1.2)"]
-zstd = ["zstandard (>=0.18.0) ; python_version <= \"3.13\""]
+zstd = ["backports-zstd (>=1.0.0) ; python_version <= \"3.13\""]
+
+[[package]]
+name = "httpx2-jsfetch"
+version = "1.0"
+description = "httpx2 transports for Emscripten/Pyodide, backed by the JavaScript fetch API."
+optional = false
+python-versions = ">=3.12"
+groups = ["main"]
+markers = "sys_platform == \"emscripten\""
+files = [
+    {file = "httpx2_jsfetch-1.0-py3-none-any.whl", hash = "sha256:cb916b707601e69a07721aabc8f3f6659be3a6893bc1ff5c6f9e02241df2da32"},
+    {file = "httpx2_jsfetch-1.0.tar.gz", hash = "sha256:70a0e3eabfef7cce5ad9c629f7d01ca05e418f586646f4ddf14782e4c1454c60"},
+]
 
 [[package]]
 name = "huggingface-hub"
@@ -7557,6 +7572,7 @@ description = "Verify certificates using native system trust stores"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "sys_platform != \"emscripten\""
 files = [
     {file = "truststore-0.10.4-py3-none-any.whl", hash = "sha256:adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981"},
     {file = "truststore-0.10.4.tar.gz", hash = "sha256:9d91bd436463ad5e4ee4aba766628dd6cd7010cf3e2461756b3303710eebc301"},
