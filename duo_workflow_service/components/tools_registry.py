@@ -143,6 +143,7 @@ _READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
     # read-only at class creation, whereas `use_git`'s run_git_command takes arbitrary
     # argv. See duo_workflow_service/tools/read_only_git.py.
     tools.ListLocalCommits,
+    tools.GetLocalCommitDiff,
 ]
 
 _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [

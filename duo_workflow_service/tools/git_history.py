@@ -18,7 +18,7 @@ absent commit. Every answer that could be changed by truncation says so.
 """
 
 import re
-from typing import Any, ClassVar, List, Optional, Tuple, Type
+from typing import Any, ClassVar, List, Optional, Tuple, Type, cast
 
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field, field_validator
@@ -29,6 +29,9 @@ from duo_workflow_service.bl_security.executor_output import (
 )
 from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
+from duo_workflow_service.security.markdown_content_security import (
+    strip_hidden_html_comments,
+)
 from duo_workflow_service.tools.read_only_git import (
     DIFF_FLAGS,
     SHA_RE,
@@ -40,6 +43,7 @@ from duo_workflow_service.tools.read_only_git import (
 )
 
 __all__ = [
+    "GetLocalCommitDiff",
     "ListLocalCommits",
 ]
 
@@ -47,10 +51,24 @@ _MAX_COMMITS = 100
 _MAX_PICKAXE_LENGTH = 200
 # Tab stays: indented code is the normal thing to paste. A NUL would never reach git.
 _CONTROL_CHARACTER_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+# The tools' own caps must bite before the generic byte truncation, which slices
+# mid-hunk and drops later content unnamed. Explicit degradation tells the model what to
+# do next; truncation does not.
+_MAX_PATCH_LINES = 1500
+# Deliberately under the executor's ~50KB output cap, so this tool's explicit degradation
+# happens before the executor splices the middle out of a diff.
+_MAX_PATCH_BYTES = 40 * 1024
 
-
+# A mass rename or a vendored dependency bump can touch thousands of files. Left
+# unbounded, the file list alone outgrows the response budget and the generic cap slices
+# it mid-path.
+_MAX_FILES_LISTED = 100
 _MAX_FILES_PER_COMMIT = 20
 
+# Every pathspec is sent literal, so narrowing a patch means listing every allowed path
+# rather than excluding the denied ones. Past this many the argv itself is the problem,
+# and the answer is for the model to name the one file it cares about.
+_MAX_PATHSPEC_ARGS = 100
 
 # NUL between fields and nothing else: no subject, author name or path can contain one, so
 # nothing in a commit can forge a record boundary. Any other separator byte can.
@@ -70,6 +88,9 @@ Change = Tuple[str, List[str]]
 # One commit: its format fields, then its changes.
 Record = Tuple[List[str], List[Change]]
 
+_COMMIT_FORMAT = "--format=%H%x00%h%x00%an%x00%ad%x00%P%x00%s%x00%b"
+_COMMIT_FIELDS = 7
+
 
 # Without this `git log --name-status` lists no files at all for a merge. It implies -p,
 # so it must be paired with --name-status or it dumps every merge's full patch. It needs
@@ -77,6 +98,10 @@ Record = Tuple[List[str], List[Change]]
 # files against every parent, and `--first-parent` would change which commits are walked.
 _MERGE_FLAG = "--diff-merges=first-parent"
 
+_NOT_THE_REVIEW_TARGET = (
+    "These line numbers belong to this commit, not to the change under review. Use them "
+    "as evidence; never anchor a finding to them."
+)
 
 _HISTORY_IS_EVIDENCE = (
     "These commits are history, not the change under review. Use them as evidence for "
@@ -86,6 +111,27 @@ _HISTORY_IS_EVIDENCE = (
 _WAS_TRUNCATED = (
     "The executor cut the middle out of this output, so it is incomplete. Treat what is "
     "missing as unknown rather than absent, and narrow the request to see it in full."
+)
+
+
+def _narrowing_hint(path: Optional[str], groups: List[Change]) -> str:
+    """How an omitted patch tells the caller to proceed, given what ``path`` already scopes to."""
+    if path is None:
+        return "Call again with path= for the one file you are investigating."
+    if any(p.startswith(f"{path}/") for _, paths in groups for p in paths):
+        return "Narrow the path further."
+    # One file this large is generated, vendored or a lockfile, and nothing narrows it.
+    return (
+        "This is a single file, so the patch cannot be narrowed. Read its current "
+        "contents with read_file, or fetch it at this commit with the GitLab API file "
+        "tools if the commit has been pushed."
+    )
+
+
+_SHALLOW_BOUNDARY = (
+    "This commit sits at the shallow clone's boundary: its parents are not available, so "
+    "the patch lists every file as added. Treat it as a snapshot of the tree, not as what "
+    "the commit introduced."
 )
 
 _SHALLOW_BANNER = (
@@ -108,12 +154,27 @@ _GRAFT_NOTE = (
 # embedded. `encode_dangerous_tags` only covers SECURITY_DELIMITER_TAGS, and adding these
 # to that set would encode the envelope this module writes.
 _ENVELOPE_TAG_RE = re.compile(
-    r"<(/?(?:git_history|history_may_be_incomplete|file_diff|line)\b)"
+    r"<(/?(?:git_history|commit|subject|body|changed_files|excluded_files|patch"
+    r"|file_diff|line|history_may_be_incomplete)\b)"
 )
 
 
 def _neutralise(text: str) -> str:
     return _ENVELOPE_TAG_RE.sub(r"&lt;\1", text)
+
+
+def _prose(text: str) -> str:
+    # The pipeline keeps HTML comments for this tool's output because a patch may carry
+    # them as code; a commit message is prose, where one only ever hides text.
+    return _neutralise(cast(str, strip_hidden_html_comments(text.strip())))
+
+
+_PATCH_ENVELOPE_TAG_RE = re.compile(f"^{_ENVELOPE_TAG_RE.pattern}", re.MULTILINE)
+
+
+def _neutralise_patch(patch: str) -> str:
+    # Diff lines are prefixed and envelope tags stand alone, so `<body>` in code survives.
+    return _PATCH_ENVELOPE_TAG_RE.sub(r"&lt;\1", patch)
 
 
 _PATH_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -279,10 +340,101 @@ def _collect(
     return commits, truncated
 
 
+def _partition_paths(
+    changes: List[Change], policy: DiffExclusionPolicy
+) -> Tuple[List[Change], List[str]]:
+    """Split changes into groups a read-only tool may show and reasons it must not.
+
+    A group is all-or-nothing: if either endpoint of a rename is denied, neither endpoint
+    is fetchable. Matches ``DiffExclusionPolicy.filter_allowed_diffs``, which drops a diff
+    unless both its ``old_path`` and ``new_path`` are allowed.
+
+    An allowed path whose pathspec would also select an excluded one is withheld as well.
+    A pathspec for a file matches a directory of that name too, so a commit replacing
+    allowed ``config`` with excluded ``config/.env`` would otherwise hand back both.
+    """
+    allowed: List[Change] = []
+    excluded: List[str] = []
+    excluded_paths: List[str] = []
+
+    for status, group in changes:
+        reasons = [
+            f"{path} — {reason}"
+            for path in group
+            if (reason := exclusion_reason(path, policy))
+        ]
+
+        if reasons:
+            excluded.extend(reasons)
+            # Name the other endpoint too, so a rename never looks like a partial answer.
+            excluded.extend(
+                f"{path} — excluded: renamed from or to an excluded path"
+                for path in group
+                if not any(reason.startswith(f"{path} —") for reason in reasons)
+            )
+            excluded_paths.extend(group)
+            continue
+
+        allowed.append((status, group))
+
+    covering = [
+        change
+        for change in allowed
+        if any(_covers(path, other) for path in change[1] for other in excluded_paths)
+    ]
+    for change in covering:
+        allowed.remove(change)
+        excluded.extend(
+            f"{path} — excluded: its pathspec would also match an excluded path"
+            for path in change[1]
+        )
+
+    return allowed, excluded
+
+
+def _covers(pathspec: str, path: str) -> bool:
+    """Whether a literal pathspec for *pathspec* also selects *path*: git matches by leading directory."""
+    return path.startswith(f"{pathspec}/")
+
+
+def _under(path: str, scope: str) -> bool:
+    return path == scope or _covers(scope, path)
+
+
+def _paths_of(groups: List[Change]) -> List[str]:
+    paths: List[str] = []
+    for _, group in groups:
+        paths.extend(path for path in group if path not in paths)
+    return paths
+
+
+_DIFF_HEADER_RE = re.compile(r"^diff --git (.*)$", re.MULTILINE)
+
+
+def _patch_stays_within(patch: str, groups: List[Change]) -> bool:
+    """Whether every file header in *patch* names a path from *groups*.
+
+    The partition decides what may be fetched; this checks what git actually returned, so a pathspec matching more than
+    intended is refused rather than relayed. A rename below git's similarity threshold is a delete and an add, so each
+    endpoint's same-path header is accepted too.
+    """
+    expected: set[str] = set()
+    for _, paths in groups:
+        expected.update(f"a/{path} b/{path}" for path in paths)
+        if len(paths) == 2:
+            expected.add(f"a/{paths[0]} b/{paths[1]}")
+    return all(match.group(1) in expected for match in _DIFF_HEADER_RE.finditer(patch))
+
+
 def _cap(entries: List[str], limit: int) -> List[str]:
     if len(entries) <= limit:
         return entries
     return [*entries[:limit], f"... and {len(entries) - limit} more"]
+
+
+def _wrap(tag: str, body: str, attrs: str = "") -> str:
+    opening = f"{tag} {attrs}" if attrs else tag
+    return f"<{opening}>\n{body}\n</{tag}>"
 
 
 class ListLocalCommitsInput(BaseModel):
@@ -563,3 +715,294 @@ class ListLocalCommits(ReadOnlyGitTool):
             return f"Find local commits changing '{args.contains_change}'"
         target = args.path or "the repository"
         return f"List local commit history for {target}"
+
+
+class GetLocalCommitDiffInput(BaseModel):
+    commit_sha: str = Field(
+        description="Full or abbreviated (7+ character) SHA of the commit to show."
+    )
+    path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Repository-relative file or directory to narrow the patch to. Use it when "
+            "the commit is large and only part of it matters."
+        ),
+    )
+
+
+class GetLocalCommitDiff(ReadOnlyGitTool):
+    name: str = "get_local_commit_diff"
+    description: str = (
+        "Show one commit from the local git checkout: its message, author, parents, the "
+        "files it touched and its patch.\n"
+        "Use it after list_local_commits to find out why code was written the way it "
+        "was, before concluding that removing or rewriting it is safe.\n"
+        "Reads the checkout on disk, so it sees local commits that were never pushed. "
+        "Prefer this over get_commit_diff when reviewing a local checkout; use "
+        "get_commit_diff for a project that is not checked out.\n"
+        "Runs only read-only git commands and never writes to the repository.\n"
+        "The patch is a plain unified diff of a past commit. Its line numbers are not "
+        "the line numbers of the change under review, so never anchor a finding to "
+        "them.\n"
+        "Narrow a large patch with `path` rather than reading it all.\n"
+        "Examples:\n"
+        "- get_local_commit_diff(commit_sha='1b8c5fe33340')\n"
+        "- get_local_commit_diff(commit_sha='1b8c5fe33340', path='app/models/user.rb')"
+    )
+    args_schema: Type[BaseModel] = GetLocalCommitDiffInput
+    allowed_git_subcommands: ClassVar[frozenset[str]] = frozenset({"rev-parse", "show"})
+
+    async def _execute(self, **kwargs: Any) -> str:
+        commit_sha = kwargs.get("commit_sha") or ""
+        path = kwargs.get("path")
+
+        if not SHA_RE.match(commit_sha):
+            raise ToolException(
+                f"Error: {commit_sha!r} is not a commit SHA. Pass a full or abbreviated "
+                "(7+ character) hex SHA, such as one from list_local_commits."
+            )
+
+        if path is not None:
+            path = validate_repo_path(path, self.project).rstrip("/")
+
+        commit = await self._resolve_commit(commit_sha)
+        resolved = commit.sha
+        # Git tries ref names before abbreviated hashes, and the boundary pins the
+        # ambiguity warning off, so a tag named after a prefix would answer for it.
+        if not resolved.startswith(commit_sha):
+            raise ToolException(
+                f"Error: {commit_sha!r} names a branch or tag in this checkout, not the "
+                "commit whose SHA starts that way. Pass more of the SHA, or all of it."
+            )
+        fields, changes = await self._metadata(resolved)
+
+        policy = DiffExclusionPolicy(self.project)
+        groups, excluded = _partition_paths(changes, policy)
+        entries = [f"{status} {' -> '.join(paths)}" for status, paths in changes]
+        allowed = _paths_of(groups)
+
+        if path is not None:
+            groups = [
+                group for group in groups if any(_under(p, path) for p in group[1])
+            ]
+            if not groups:
+                withheld = any(
+                    name.startswith(f"{path} —") or name.startswith(f"{path}/")
+                    for name in excluded
+                )
+                if withheld:
+                    raise ToolException(
+                        f"Error: commit {resolved[:12]} changes {path!r}, but that path "
+                        "is excluded, so its patch cannot be shown. Report it as changed "
+                        "and excluded, not as untouched."
+                    )
+                raise ToolException(
+                    f"Error: commit {resolved[:12]} does not change {path!r} or "
+                    "anything under it. The changed files are listed by calling this "
+                    "tool without a path."
+                )
+            # One pathspec covers a directory, unless an excluded file lives under it and
+            # the readable ones must be named individually. A rename's other endpoint
+            # rides along: git applies the pathspec before rename detection, so without
+            # it an edited rename reads as a whole new file.
+            excluded_under = any(name.startswith(f"{path}/") for name in excluded)
+            strays = [p for p in _paths_of(groups) if not _under(p, path)]
+            allowed = _paths_of(groups) if excluded_under else [path, *strays]
+
+        patch, truncated = await self._patch(
+            resolved, allowed, groups, bool(excluded) or path is not None
+        )
+        # At a shallow boundary git has no parents to diff against, so every file reads as
+        # added. A genuine root commit in a full clone has no parents either, but that
+        # patch is true.
+        boundary = commit.shallow and not fields[4].split()
+
+        return self._render(
+            fields,
+            resolved,
+            entries,
+            allowed,
+            excluded,
+            patch,
+            path,
+            _narrowing_hint(path, groups),
+            truncated,
+            boundary,
+        )
+
+    async def _metadata(self, resolved: str) -> Record:
+        raw = await self._git(
+            "show",
+            _COMMIT_FORMAT,
+            "--name-status",
+            "-z",
+            "-M",
+            "--date=short",
+            "--abbrev=12",
+            _MERGE_FLAG,
+            resolved,
+            "--",
+        )
+
+        records, whole = _parse_log(raw, _COMMIT_FIELDS)
+        # A splice inside the file list drops entries from the inventory the exclusion
+        # scoping is built on, so an excluded file could vanish and its patch be fetched.
+        # Below the size gate's floor, tokens left over plus the marker still mean a cut.
+        if _executor_cut(raw) or (not whole and executor_truncated(raw)):
+            raise ToolException(
+                f"Error: commit {resolved[:12]} touches too many files to inventory, so "
+                "no patch can be scoped safely around its excluded files. Narrowing with "
+                "path= cannot help, because the whole file list is what makes the scoping "
+                "safe. If the commit has been pushed, review it with the GitLab API tools."
+            )
+
+        if len(records) != 1:
+            raise ToolException(
+                f"Error: could not read commit {resolved[:12]} from this checkout"
+            )
+
+        return records[0]
+
+    async def _patch(
+        self, resolved: str, allowed: List[str], groups: List[Change], scoped: bool
+    ) -> Tuple[str, bool]:
+        if scoped and (not allowed or len(allowed) > _MAX_PATHSPEC_ARGS):
+            return "", False
+
+        argv = [
+            "show",
+            "--format=",
+            *DIFF_FLAGS,
+            _MERGE_FLAG,
+            resolved,
+            "--",
+        ]
+        # Omitted entirely in the common case: an unscoped pathspec is both cheaper and
+        # avoids `-- ` semantics differing between git versions.
+        if scoped:
+            argv.extend(literal_pathspec(path) for path in allowed)
+
+        raw = await self._git(*argv)
+        if _executor_cut(raw):
+            return "", True
+
+        patch = raw.strip("\n")
+        if not _patch_stays_within(patch, groups):
+            raise ToolException(
+                f"Error: git returned a file outside commit {resolved[:12]}'s readable "
+                "list, so the patch is withheld. Call again with path= for a single file."
+            )
+
+        return patch, False
+
+    @staticmethod
+    def _render(
+        fields: List[str],
+        resolved: str,
+        entries: List[str],
+        allowed: List[str],
+        excluded: List[str],
+        patch: str,
+        path: Optional[str],
+        narrowing: str,
+        truncated: bool = False,
+        boundary: bool = False,
+    ) -> str:
+        _, short_sha, author, date, parents, subject, body = fields
+        parent_shas = parents.split()
+
+        attrs = [
+            f'sha="{resolved}"',
+            f'short_sha="{short_sha}"',
+            f'author="{_attr(author)}"',
+            f'date="{_attr(date)}"',
+        ]
+        if len(parent_shas) > 1:
+            attrs.append(f'merge_parents="{len(parent_shas)}"')
+
+        sections = [_wrap("subject", _prose(subject))]
+        if _prose(body):
+            sections.append(_wrap("body", _prose(body)))
+        if entries:
+            sections.append(
+                _wrap(
+                    "changed_files",
+                    "\n".join(
+                        _neutralise(_printable(e))
+                        for e in _cap(entries, _MAX_FILES_LISTED)
+                    ),
+                    f'count="{len(entries)}"',
+                )
+            )
+        if excluded:
+            sections.append(
+                _wrap(
+                    "excluded_files",
+                    "\n".join(
+                        _neutralise(_printable(e))
+                        for e in _cap(excluded, _MAX_FILES_LISTED)
+                    ),
+                )
+            )
+
+        sections.append(
+            GetLocalCommitDiff._render_patch(
+                patch, allowed, excluded, path, narrowing, truncated
+            )
+        )
+
+        if len(parent_shas) > 1:
+            sections.append(
+                "This is a merge commit; the patch is its diff against the first parent."
+            )
+        if boundary:
+            sections.append(_SHALLOW_BOUNDARY)
+        sections.append(_NOT_THE_REVIEW_TARGET)
+
+        return f"<commit {' '.join(attrs)}>\n" + "\n".join(sections) + "\n</commit>"
+
+    @staticmethod
+    def _render_patch(
+        patch: str,
+        allowed: List[str],
+        excluded: List[str],
+        path: Optional[str],
+        narrowing: str,
+        truncated: bool = False,
+    ) -> str:
+        if not patch:
+            if excluded and not allowed:
+                return _wrap(
+                    "patch",
+                    "Every file this commit touched is excluded, so there is no patch "
+                    "to show. Report that, and why, rather than that the commit changed "
+                    "nothing.",
+                )
+            if truncated:
+                return _wrap("patch", f"{_WAS_TRUNCATED} {narrowing}")
+            if len(allowed) > _MAX_PATHSPEC_ARGS:
+                return _wrap(
+                    "patch",
+                    f"Patch omitted: this commit touches {len(allowed)} readable files, "
+                    f"too many to narrow around the excluded ones. {narrowing}",
+                )
+            return _wrap("patch", "This commit has no textual changes.")
+
+        lines = patch.count("\n") + 1
+        size = len(patch.encode())
+        if lines > _MAX_PATCH_LINES or size > _MAX_PATCH_BYTES:
+            return _wrap(
+                "patch",
+                f"Patch omitted: {lines} lines, {-(-size // 1024)} KB; the limit is "
+                f"{_MAX_PATCH_LINES} lines or {_MAX_PATCH_BYTES // 1024} KB. The "
+                f"changed files are listed above. {narrowing}",
+            )
+
+        attrs = f'path="{_attr(path)}"' if path is not None else ""
+        return _wrap("patch", _neutralise_patch(patch), attrs)
+
+    def format_display_message(
+        self, args: GetLocalCommitDiffInput, _tool_response: Any = None
+    ) -> str:
+        scope = f" for {args.path}" if args.path else ""
+        return f"Read local commit {args.commit_sha}{scope}"
