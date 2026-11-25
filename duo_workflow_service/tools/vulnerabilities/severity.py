@@ -1,11 +1,19 @@
 import json
-from typing import Any, ClassVar, List, Type
+from typing import Any, ClassVar, Type
 
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.security_inputs import (
+    MAX_GITLAB_GLOBAL_ID_LENGTH,
+    MAX_VULNERABILITY_COMMENT_LENGTH,
+    MAX_VULNERABILITY_IDS,
+    VulnerabilityComment,
+    VulnerabilityIdList,
+    VulnerabilitySeverity,
+)
 from duo_workflow_service.tools.tier_access_checker import (
     LICENSED_FEATURE_SECURITY_DASHBOARD,
 )
@@ -18,28 +26,22 @@ __all__ = [
 
 
 class UpdateVulnerabilitySeverityInput(BaseModel):
-    vulnerability_ids: List[str] = Field(
-        description="List of vulnerability IDs to update severity for. These should be the vulnerability IDs as returned by list_vulnerabilities.",
+    vulnerability_ids: VulnerabilityIdList = Field(
+        description="List of vulnerability IDs to update severity for. These should be the vulnerability IDs as "
+        f"returned by list_vulnerabilities. Up to {MAX_VULNERABILITY_IDS} can be provided, "
+        f"each at most {MAX_GITLAB_GLOBAL_ID_LENGTH} characters.",
     )
-    severity: str = Field(
-        description="New severity level for the vulnerabilities. Must be one of: CRITICAL, HIGH, MEDIUM, LOW, INFO, UNKNOWN.",
+    severity: VulnerabilitySeverity = Field(
+        description="New severity level for the vulnerabilities.",
     )
-    comment: str = Field(
-        description="Comment explaining why the vulnerability severity was changed (required, maximum 50,000 characters).",
+    comment: VulnerabilityComment = Field(
+        description="Comment explaining why the vulnerability severity was changed "
+        f"(required, maximum {MAX_VULNERABILITY_COMMENT_LENGTH:,} characters).",
     )
 
 
 class UpdateVulnerabilitySeverity(DuoBaseTool):
     tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
-    VALID_SEVERITIES: ClassVar[set[str]] = {
-        "CRITICAL",
-        "HIGH",
-        "MEDIUM",
-        "LOW",
-        "INFO",
-        "UNKNOWN",
-    }
-    MAX_COMMENT_LENGTH: ClassVar[int] = 50000
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     name: str = "update_vulnerability_severity"
@@ -50,7 +52,8 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
     This tool allows you to override the severity level of one or more vulnerabilities and provide a comment explaining the change.
     The severity must be one of: CRITICAL, HIGH, MEDIUM, LOW, INFO, UNKNOWN.
 
-    A comment explaining the reason for the severity change is required and can be up to 50,000 characters.
+    Up to {MAX_VULNERABILITY_IDS} vulnerabilities can be updated in one call.
+    A comment explaining the reason for the severity change is required and can be up to {MAX_VULNERABILITY_COMMENT_LENGTH:,} characters.
 
     For example:
     - Update single vulnerability severity:
@@ -73,26 +76,10 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
             return value
         return [value]
 
-    def validate_inputs(self, vulnerability_ids, severity, comment):
-        if not isinstance(severity, str):
-            raise ValueError(
-                f"Severity must be a string, got {type(severity).__name__}"
-            )
-        if severity not in self.VALID_SEVERITIES:
-            raise ValueError(
-                f"Invalid severity '{severity}'. Must be one of: {', '.join(self.VALID_SEVERITIES)}"
-            )
-
-        if not isinstance(comment, str):
-            raise ValueError(f"Comment must be a string, got {type(comment).__name__}")
-        if len(comment) > self.MAX_COMMENT_LENGTH:
-            raise ValueError(
-                f"Comment must be {self.MAX_COMMENT_LENGTH:,} characters or less"
-            )
-
+    def validate_inputs(self, vulnerability_ids: list[str]) -> None:
         if not vulnerability_ids:
             raise ValueError("At least one vulnerability ID must be provided")
-        # Filter out falsy values and check if any valid IDs remain
+        # The schema rejects empty strings; this catches empty lists and whitespace-only IDs
         valid_ids = [id for id in vulnerability_ids if id and str(id).strip()]
         if not valid_ids:
             raise ValueError("At least one valid vulnerability ID must be provided")
@@ -102,7 +89,7 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
         severity = kwargs.pop("severity")
         comment = kwargs.pop("comment")
 
-        self.validate_inputs(vulnerability_ids, severity, comment)
+        self.validate_inputs(vulnerability_ids)
 
         # editorconfig-checker-disable
         mutation = """

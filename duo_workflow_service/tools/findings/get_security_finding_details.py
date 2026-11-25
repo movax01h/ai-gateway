@@ -8,6 +8,14 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.findings.queries import (
     GET_SECURITY_FINDING_DETAILS_QUERY,
 )
+from duo_workflow_service.tools.security_inputs import (
+    MAX_GIT_REF_LENGTH,
+    MAX_PROJECT_FULL_PATH_LENGTH,
+    MAX_SECURITY_FINDING_UUID_LENGTH,
+    GitRefStr,
+    ProjectFullPath,
+    SecurityFindingUuid,
+)
 from duo_workflow_service.tools.tier_access_checker import (
     LICENSED_FEATURE_SECURITY_DASHBOARD,
 )
@@ -16,15 +24,19 @@ from duo_workflow_service.tools.tier_access_checker import (
 class GetSecurityFindingDetailsInput(BaseModel):
     """Input model for the GetSecurityFindingDetails tool."""
 
-    project_full_path: str = Field(
-        description="The full path of the project (e.g., 'group/project')."
+    project_full_path: ProjectFullPath = Field(
+        description="The full path of the project (e.g., 'group/project'). "
+        f"Maximum {MAX_PROJECT_FULL_PATH_LENGTH} characters."
     )
-    uuid: str = Field(
-        description="The UUID of the security finding (e.g., 'abc-123-def-456')."
+    uuid: SecurityFindingUuid = Field(
+        description="The UUID of the security finding "
+        "(e.g., '1e9a2bf7-0450-5894-8db5-895c98e39deb'). "
+        f"Maximum {MAX_SECURITY_FINDING_UUID_LENGTH} characters."
     )
-    ref: str = Field(
+    ref: GitRefStr = Field(
         description="The branch or tag ref the pipeline was run for. "
-        "For an MR, use the MR source branch name (e.g., 'my-feature-branch')."
+        "For an MR, use the MR source branch name (e.g., 'my-feature-branch'). "
+        f"Maximum {MAX_GIT_REF_LENGTH} characters."
     )
 
 
