@@ -21,17 +21,21 @@ Lifetime
 :func:`strip_image_payloads` drops inline payloads before a message is
 checkpointed, leaving a short placeholder.
 
-An image is therefore visible to the model **until the first checkpoint write of
-the turn it arrived on**, not for the whole turn and not for later ones. Any
-interrupt writes a checkpoint and resumes by reloading history from it
-(``aget_tuple`` -> ``checkpoint_decoder``), and a tool-call approval is exactly
-that. So "screenshot + fix the bug it shows" followed by an approval finishes
-the turn without the image. This is a known v1 limitation, accepted because the
-payload cannot live in the checkpoint as things stand: 2.5 MB decoded is ~3.3 MB
-of base64 against a 4 MiB message cap, before any history. The durable fix is to
-strip at next-turn ingestion rather than on every write, so the payload survives
-the turn it belongs to; see the follow-up issue referenced from the module that
-produces attachments.
+The checkpoint itself therefore never holds an image past **the first checkpoint
+write of the turn it arrived on**. Any interrupt writes a checkpoint and resumes
+by reloading history from it (``aget_tuple`` -> ``checkpoint_decoder``), and a
+tool-call approval is exactly that. The payload cannot live in the checkpoint:
+2.5 MB decoded is ~3.3 MB of base64 against a 4 MiB message cap, before any
+history.
+
+A session file keeps its stored URL in its user message's record, so on a
+resume the chat workflow fetches it again and puts the image back into the
+latest user message for the agent's input only (see
+:func:`duo_workflow_service.entities.attachments.reinline_session_files`). The
+model sees it for the whole turn it was sent on. This recovers user attachments
+only, not images in general: images from earlier turns, inline base64
+attachments and images a tool read have nothing to fetch and stay as
+placeholders.
 
 The placeholder deliberately says nothing about where the image came from,
 because this module cannot know: a block carries no provenance. A producer that
@@ -81,6 +85,7 @@ __all__ = [
     "image_rejection_note",
     "is_image_block",
     "is_image_content_block",
+    "is_image_placeholder",
     "is_internal_image_block",
     "render_image_blocks_as_text",
     "strip_image_payloads",
@@ -175,11 +180,9 @@ def strip_image_payloads(content: Any) -> Any:
     checkpoints are re-read on every resume and re-emitted whole on each new
     thread group.
 
-    The cost is that the image is visible only until the *first* checkpoint write
-    of its own turn. Because every interrupt writes a checkpoint and then resumes
-    from it, a tool-call approval mid-turn is enough to lose it -- this is not
-    limited to later turns. See the module docstring for why that is accepted for
-    now and what the durable fix looks like.
+    Because every interrupt writes a checkpoint and then resumes from it, a
+    tool-call approval mid-turn is enough to drop the payload. Session files are
+    fetched again on resume; see the module docstring.
 
     Args:
         content: ``BaseMessage.content`` — a string or a list of content blocks.
@@ -376,6 +379,9 @@ def without_image_payloads(
     return (replaced, removed) if removed else (messages, 0)
 
 
+_OMITTED = "omitted from history"
+
+
 def _placeholder(mime_type: Optional[str]) -> str:
     """Return the text that stands in for a stripped image.
 
@@ -383,7 +389,15 @@ def _placeholder(mime_type: Optional[str]) -> str:
     file the user attached (which cannot be fetched again) and for a tool result
     (which can). Naming either one would mislead the model about the other.
     """
-    return f"[{mime_type or 'image'} omitted from history]"
+    return f"[{mime_type or 'image'} {_OMITTED}]"
+
+
+_PLACEHOLDER = re.compile(rf"\[[^\[\]]+ {re.escape(_OMITTED)}\]")
+
+
+def is_image_placeholder(block: Any) -> bool:
+    """Return whether *block* is the text block :func:`strip_image_payloads` left in place of an image."""
+    return bool(_PLACEHOLDER.fullmatch(block_text(block) or ""))
 
 
 def without_image_blocks(content: Any) -> Any:

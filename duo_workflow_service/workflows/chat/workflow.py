@@ -2,19 +2,19 @@
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, List, Mapping, NoReturn, Optional, override
+from typing import Any, Dict, List, Mapping, NoReturn, Optional, cast, override
 from uuid import uuid4
 
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from jinja2 import DebugUndefined
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.errors import (
     GraphRecursionError,
 )
 from langgraph.graph import END, StateGraph
-from langgraph.types import Command
+from langgraph.types import Command, Overwrite
 from structlog import get_logger
 
 from ai_gateway.container import ContainerApplication
@@ -44,6 +44,7 @@ from duo_workflow_service.entities.attachments import (
     attachment_content_blocks,
     attachment_rejection_block,
     partition_attachment_envelopes,
+    reinline_session_files,
     resolve_attachment_envelopes,
     session_file_records,
     split_attachment_envelopes,
@@ -313,6 +314,7 @@ class Workflow(AbstractWorkflow):
             internal_event_client=self._internal_event_client,
         )
 
+        self._reinlined_session_files: dict[str, Optional[dict[str, Any]]] = {}
         self._forced_tool_call = parse_forced_tool_call(self._additional_context)
         # The envelope is machine addressing rather than user-supplied context, so keep
         # it out of both the prompt and the transcript. Stripped whether or not it
@@ -374,6 +376,79 @@ class Workflow(AbstractWorkflow):
             return Routes.STOP
 
         return Routes.CONTINUE
+
+    async def _run_agent_with_session_files(
+        self, state: ChatWorkflowState
+    ) -> Dict[str, Any]:
+        """Run the agent with the session file images of the latest user message put back.
+
+        A tool approval resumes the turn from a checkpoint, which has stripped them, so the model would otherwise lose
+        the image it was asked about once a tool needed approval.
+        """
+        if not self._workflow_config.get(
+            "file_attachments_allowed", False
+        ) or self._agent.awaits_user_input(state):
+            return await self._agent.run(state)
+
+        history = state.get("conversation_history", {}).get(self._agent.name, [])
+        last_human_message_index, latest_human_message = (
+            self._last_human_message_with_index(history)
+        )
+        if last_human_message_index is None or latest_human_message is None:
+            return await self._agent.run(state)
+        message = await reinline_session_files(
+            latest_human_message,
+            self._http_client,
+            self._workflow_id,
+            self._reinlined_session_files,
+        )
+        if message is latest_human_message:
+            return await self._agent.run(state)
+
+        reinlined_history = [
+            *history[:last_human_message_index],
+            message,
+            *history[last_human_message_index + 1 :],
+        ]
+        result = await self._agent.run(
+            cast(
+                ChatWorkflowState,
+                {
+                    **state,
+                    "conversation_history": {
+                        **state["conversation_history"],
+                        self._agent.name: reinlined_history,
+                    },
+                },
+            )
+        )
+        return self._restore_stripped_message(result, message, latest_human_message)
+
+    def _restore_stripped_message(
+        self,
+        result: Dict[str, Any],
+        reinlined_message: HumanMessage,
+        stripped_message: HumanMessage,
+    ) -> Dict[str, Any]:
+        """Put the stripped message back in a history the agent overwrote, so the channel never holds the image.
+
+        Otherwise the overwritten history differs from the checkpointer's baseline, which forces a full rewrite.
+        """
+        update = result.get("conversation_history")
+        if not isinstance(update, Overwrite):
+            return result
+
+        histories = update.value
+        restored_history = [
+            stripped_message if message is reinlined_message else message
+            for message in histories.get(self._agent.name, [])
+        ]
+        return {
+            **result,
+            "conversation_history": Overwrite(
+                {**histories, self._agent.name: restored_history}
+            ),
+        }
 
     async def _run_tools(self, state: ChatWorkflowState) -> list[Any]:
         """Run the requested tool calls, skipping those past the limit ``ChatAgent`` stored for the response."""
@@ -761,6 +836,17 @@ class Workflow(AbstractWorkflow):
                 return Command(goto=next_step, update=state_update)
 
     @staticmethod
+    def _last_human_message_with_index(
+        history: List[BaseMessage],
+    ) -> tuple[int, HumanMessage] | tuple[None, None]:
+        """The index of the latest user message in *history* and the message, or ``(None, None)`` if it has none."""
+        for index in range(len(history) - 1, -1, -1):
+            message = history[index]
+            if isinstance(message, HumanMessage):
+                return index, message
+        return None, None
+
+    @staticmethod
     def _attachment_blocks(
         attachments: list[Attachment], rejection: Optional[str]
     ) -> list[dict[str, Any]]:
@@ -989,7 +1075,7 @@ class Workflow(AbstractWorkflow):
             skip_agent_msg=True,
         )
 
-        graph.add_node("agent", self._agent.run)
+        graph.add_node("agent", self._run_agent_with_session_files)
         graph.add_node("run_tools", self._run_tools)
         graph.add_node("forced_call_complete", self._forced_call_complete)
 

@@ -61,13 +61,17 @@ import base64
 import binascii
 import json
 import re
-from typing import Any, Callable, Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
 
 import structlog
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel
 
-from duo_workflow_service.entities.image_blocks import image_content_block
+from duo_workflow_service.entities.image_blocks import (
+    block_text,
+    image_content_block,
+    is_image_placeholder,
+)
 from duo_workflow_service.entities.message_ingestion import ATTACHMENTS_KWARG
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
@@ -87,6 +91,7 @@ __all__ = [
     "parse_attachments",
     "partition_attachment_envelopes",
     "payload_matches_mime_type",
+    "reinline_session_files",
     "resolve_attachment_envelopes",
     "session_file_records",
     "session_files_in",
@@ -327,6 +332,26 @@ def _parse_one(item: AdditionalContext, index: int) -> Attachment:
     if error:
         raise ValueError(f"attachment '{label}' could not be read: {error}")
 
+    return _validated_attachment(mime_type, data, label).model_copy(
+        update={"filename": filename, "url": url}
+    )
+
+
+def _validated_attachment(mime_type: Any, data: Any, label: str) -> Attachment:
+    """Validate a file's media type, size and signature, however it arrived.
+
+    Args:
+        mime_type: The declared media type.
+        data: The base64-encoded payload.
+        label: Names the file in error messages.
+
+    Returns:
+        The validated :class:`Attachment`, without a filename or url.
+
+    Raises:
+        ValueError: If the file is missing, of an unsupported media type, over the
+            per-attachment size cap, or does not match its declared type.
+    """
     if not isinstance(mime_type, str) or not mime_type:
         raise ValueError(f"attachment '{label}' is missing 'mime_type'.")
     if not isinstance(data, str) or not data:
@@ -351,13 +376,7 @@ def _parse_one(item: AdditionalContext, index: int) -> Attachment:
 
     _verify_declared_type(decoded, mime_type, label)
 
-    return Attachment(
-        mime_type=mime_type,
-        data=data,
-        filename=filename,
-        byte_size=byte_size,
-        url=url,
-    )
+    return Attachment(mime_type=mime_type, data=data, byte_size=byte_size)
 
 
 def parse_attachments(items: Sequence[AdditionalContext]) -> list[Attachment]:
@@ -645,7 +664,7 @@ def attachment_content_blocks(
     for index, attachment in enumerate(attachments, start=1):
         if attachment.filename:
             blocks.append(
-                {"type": "text", "text": f"[attachment {index}: {attachment.filename}]"}
+                {"type": "text", "text": _attachment_label(index, attachment.filename)}
             )
         blocks.append(
             image_content_block(
@@ -654,6 +673,11 @@ def attachment_content_blocks(
             )
         )
     return blocks
+
+
+def _attachment_label(number: int | str, filename: str) -> str:
+    """The label written before attachment *number*'s image, and rebuilt to find that image again."""
+    return f"[attachment {number}: {filename}]"
 
 
 def attachment_rejection_block(reason: str) -> dict[str, Any]:
@@ -763,3 +787,101 @@ def session_files_in(message: BaseMessage) -> list[dict[str, Any]]:
         and isinstance(record.get("url"), str)
         and _SESSION_FILE_PATH.fullmatch(record["url"])
     ]
+
+
+async def reinline_session_files(
+    message: HumanMessage,
+    gitlab_client: GitlabHttpClient,
+    workflow_id: str,
+    cache: dict[str, Optional[dict[str, Any]]],
+) -> HumanMessage:
+    """Return *message* with each stripped session file image fetched again from the URL in its record.
+
+    A checkpoint write replaces every image with a placeholder, and a tool approval resumes the turn from that
+    checkpoint, so without this the model loses the user's image partway through the turn. Inline attachments keep
+    their placeholder: only a session file can be fetched again.
+
+    *cache* maps each URL to its image block, or ``None`` if it could not be read, so later model calls in the same
+    run do not fetch it again.
+    """
+    if not isinstance(message.content, list):
+        return message
+
+    content = list(message.content)
+    stripped = list(_stripped_session_file_images(content, session_files_in(message)))
+    images = await asyncio.gather(
+        *(
+            _cached_session_file_image(url, cache, gitlab_client, workflow_id)
+            for _, url in stripped
+        )
+    )
+    reinlined = False
+    for (index, _), image in zip(stripped, images):
+        if image is None:
+            continue
+
+        content[index] = image
+        reinlined = True
+
+    return message.model_copy(update={"content": content}) if reinlined else message
+
+
+def _stripped_session_file_images(
+    content: Sequence[Any], records: Sequence[dict[str, Any]]
+) -> Iterator[tuple[int, str]]:
+    """Yield the index of each stripped session file image in *content*, with the URL its record keeps.
+
+    A record's image is the placeholder right after the label written for it. The label is rebuilt from the record
+    rather than parsed, so its wording is no contract and the user's text is never read as an address.
+    """
+    urls_by_label = _session_file_urls_by_label(records)
+    for index in range(1, len(content)):
+        url = urls_by_label.get(block_text(content[index - 1]) or "")
+        if url and is_image_placeholder(content[index]):
+            yield index, url
+
+
+def _session_file_urls_by_label(records: Sequence[dict[str, Any]]) -> dict[str, str]:
+    """Map the label written for each named record to the URL that record keeps."""
+    return {
+        _attachment_label(
+            record["id"].removeprefix("attachment-"), record["filename"]
+        ): record["url"]
+        for record in records
+        if record.get("filename")
+    }
+
+
+async def _cached_session_file_image(
+    url: str,
+    cache: dict[str, Optional[dict[str, Any]]],
+    gitlab_client: GitlabHttpClient,
+    workflow_id: str,
+) -> Optional[dict[str, Any]]:
+    """Return the image block for *url*, fetching it only the first time each URL is seen."""
+    if url not in cache:
+        cache[url] = await _fetch_session_file_image(url, gitlab_client, workflow_id)
+    return cache[url]
+
+
+async def _fetch_session_file_image(
+    url: str,
+    gitlab_client: GitlabHttpClient,
+    workflow_id: str,
+) -> Optional[dict[str, Any]]:
+    """Fetch and validate the session file *url* names, the same way a turn's reference is."""
+    try:
+        body = await _fetch_session_file(url, gitlab_client, workflow_id)
+        attachment = _validated_attachment(
+            body.get("content_type"), body.get("data"), url
+        )
+    except ValueError as exc:
+        log.warning(
+            "Could not reinline a session file",
+            workflow_id=workflow_id,
+            url=url,
+            reason=str(exc),
+        )
+        return None
+
+    return image_content_block(base64=attachment.data, mime_type=attachment.mime_type)

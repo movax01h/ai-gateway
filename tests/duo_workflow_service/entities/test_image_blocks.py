@@ -15,6 +15,7 @@ from duo_workflow_service.entities.image_blocks import (
     image_limit_kind,
     is_image_block,
     is_image_content_block,
+    is_image_placeholder,
     is_internal_image_block,
     render_image_blocks_as_text,
     strip_image_payloads,
@@ -672,3 +673,24 @@ class TestInternalImageBlock:
         assert is_image_content_block(lookalike) is True
         (stripped,) = strip_image_payloads([lookalike])
         assert stripped["text"] == "[image/png omitted from history]"
+
+
+class TestIsImagePlaceholder:
+    @pytest.mark.parametrize(
+        ("block", "expected"),
+        [
+            (
+                strip_image_payloads(
+                    [image_content_block(base64=PNG_B64, mime_type="image/png")]
+                )[0],
+                True,
+            ),
+            ({"type": "text", "text": "[image omitted from history]"}, True),
+            ({"type": "text", "text": "see [image/png omitted from history]"}, False),
+            ({"type": "text", "text": "[attached file: shot.png]"}, False),
+            (image_content_block(base64=PNG_B64, mime_type="image/png"), False),
+        ],
+        ids=["stripped", "no mime type", "inside other text", "label", "image"],
+    )
+    def test_matches_only_the_stripped_image_text(self, block, expected):
+        assert is_image_placeholder(block) is expected

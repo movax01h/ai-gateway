@@ -694,6 +694,16 @@ class ChatAgent:
             "ui_chat_log": compaction_ui_chat_log_update(list(result.ui_chat_logs)),
         }
 
+    def awaits_user_input(self, state: ChatWorkflowState) -> bool:
+        """Whether the turn already ended in a reply, so ``run`` returns without calling the model."""
+        history = state.get("conversation_history", {}).get(self.name, [])
+        return (
+            not state.get("approval")
+            and bool(history)
+            and isinstance(history[-1], AIMessage)
+            and not history[-1].tool_calls
+        )
+
     async def run(self, state: ChatWorkflowState) -> Dict[str, Any]:
         approval_state = state.get("approval", None)
         operation_type = self._operation_type(state)
@@ -714,6 +724,16 @@ class ChatAgent:
         #    respond gracefully about the interruption.
         # 2. AIMessage has no tool_calls: The AI already responded, and there's no new user
         #    input to process. Return INPUT_REQUIRED to wait for actual user input.
+        if self.awaits_user_input(state):
+            log.info(
+                "No new user input detected, skipping LLM call",
+                last_message_type=type(history[-1]).__name__,
+            )
+            return {
+                "status": WorkflowStatusEnum.INPUT_REQUIRED,
+                "ui_chat_log": [],
+            }
+
         if not approval_state:
             if history and isinstance(history[-1], AIMessage):
                 last_ai = history[-1]
@@ -736,15 +756,6 @@ class ChatAgent:
                     ]
                     history.extend(synthetic_tool_messages)
                     history_modified = True
-                else:
-                    log.info(
-                        "No new user input detected, skipping LLM call",
-                        last_message_type=type(last_ai).__name__,
-                    )
-                    return {
-                        "status": WorkflowStatusEnum.INPUT_REQUIRED,
-                        "ui_chat_log": [],
-                    }
 
         is_compact, compact_user_instruction = self._detect_compact_command(state)
         if is_compact:
