@@ -14,9 +14,11 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.security_inputs import (
     MAX_GITLAB_GLOBAL_ID_LENGTH,
     MAX_PROJECT_FULL_PATH_LENGTH,
+    MAX_VULNERABILITY_COMMENT_LENGTH,
     MAX_VULNERABILITY_IDS,
     GitLabGlobalIdStr,
     ProjectFullPath,
+    VulnerabilityComment,
     VulnerabilityIdList,
 )
 from duo_workflow_service.tools.tier_access_checker import (
@@ -49,6 +51,8 @@ VULNERABILITY_IDS_LIMIT_DESCRIPTION = (
     f"Up to {MAX_VULNERABILITY_IDS} can be provided, "
     f"each at most {MAX_GITLAB_GLOBAL_ID_LENGTH} characters."
 )
+
+COMMENT_LENGTH_DESCRIPTION = f"Maximum {MAX_VULNERABILITY_COMMENT_LENGTH:,} characters."
 
 
 class VulnerabilitySeverity(StrEnum):
@@ -94,6 +98,19 @@ class VulnerabilityState(StrEnum):
     CONFIRMED = "CONFIRMED"
     DISMISSED = "DISMISSED"
     RESOLVED = "RESOLVED"
+
+
+class VulnerabilityDismissalReason(StrEnum):
+    """Valid reasons for dismissing a vulnerability."""
+
+    ACCEPTABLE_RISK = "ACCEPTABLE_RISK"
+    FALSE_POSITIVE = "FALSE_POSITIVE"
+    MITIGATING_CONTROL = "MITIGATING_CONTROL"
+    USED_IN_TESTS = "USED_IN_TESTS"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+DISMISSAL_REASONS_DESCRIPTION = ", ".join(VulnerabilityDismissalReason)
 
 
 __all__ = [
@@ -409,12 +426,11 @@ class DismissVulnerabilityInput(BaseModel):
     vulnerability_id: GitLabGlobalIdStr = Field(
         description=f"ID of the vulnerability to be dismissed. {ID_LENGTH_DESCRIPTION}"
     )
-    comment: str = Field(
-        description="Comment why vulnerability was dismissed (maximum 50,000 characters)."
+    comment: VulnerabilityComment = Field(
+        description=f"Comment why vulnerability was dismissed. {COMMENT_LENGTH_DESCRIPTION}"
     )
-    dismissal_reason: str = Field(
-        description="Reason why vulnerability should be dismissed (ACCEPTABLE_RISK, FALSE_POSITIVE, MITIGATING_CONTROL,"
-        " USED_IN_TESTS, NOT_APPLICABLE)"
+    dismissal_reason: VulnerabilityDismissalReason = Field(
+        description=f"Reason why vulnerability should be dismissed ({DISMISSAL_REASONS_DESCRIPTION})"
     )
 
 
@@ -426,10 +442,10 @@ class DismissVulnerability(DuoBaseTool):
     {PROJECT_IDENTIFICATION_DESCRIPTION}
 
     The tool supports dismissing a vulnerability by ID, with a dismissal reason, and comment.
-    The dismiss reason must be one of: ACCEPTABLE_RISK, FALSE_POSITIVE, MITIGATING_CONTROL, USED_IN_TESTS, NOT_APPLICABLE.
+    The dismiss reason must be one of: {DISMISSAL_REASONS_DESCRIPTION}.
     If a dismissal reason is not given, you will need to ask for one.
 
-    A comment explaining the reason for the dismissal is required and can be up to 50,000 characters.
+    A comment explaining the reason for the dismissal is required and can be up to {MAX_VULNERABILITY_COMMENT_LENGTH:,} characters.
     If a comment is not given, you will need to ask for one.
 
     For example:
@@ -446,24 +462,6 @@ class DismissVulnerability(DuoBaseTool):
         vulnerability_id = kwargs.pop("vulnerability_id")
         comment = kwargs.pop("comment")
         dismissal_reason = kwargs.pop("dismissal_reason")
-
-        # Validate severity value
-        valid_dismissal_reasons = {
-            "ACCEPTABLE_RISK",
-            "FALSE_POSITIVE",
-            "MITIGATING_CONTROL",
-            "USED_IN_TESTS",
-            "NOT_APPLICABLE",
-        }
-        if dismissal_reason not in valid_dismissal_reasons:
-            raise ToolException(
-                f"Invalid dismissal reason '{dismissal_reason}'. "
-                f"Must be one of: {', '.join(valid_dismissal_reasons)}"
-            )
-
-        # Validate comment length
-        if len(comment) > 50000:
-            raise ToolException("Comment must be 50,000 characters or less")
 
         # editorconfig-checker-disable
         # Build GraphQL mutation
@@ -864,9 +862,9 @@ class ConfirmVulnerabilityInput(BaseModel):
         "(e.g., either digit ids like '123' or gid like 'gid://gitlab/Vulnerability/123'). "
         f"{ID_LENGTH_DESCRIPTION}",
     )
-    comment: Optional[str] = Field(
+    comment: Optional[VulnerabilityComment] = Field(
         default=None,
-        description="Comment explaining why the vulnerability was confirmed (maximum 50,000 characters)",
+        description=f"Comment explaining why the vulnerability was confirmed. {COMMENT_LENGTH_DESCRIPTION}",
     )
 
 
@@ -884,10 +882,6 @@ that needs to be addressed.
     async def _execute(self, **kwargs: Any) -> str:
         vulnerability_id = kwargs.pop("vulnerability_id")
         comment = kwargs.pop("comment", None)
-
-        # Validate comment length
-        if comment is not None and len(comment) > 50000:
-            raise ToolException("Comment must be 50,000 characters or less")
 
         # Build GraphQL mutation
         mutation = """
@@ -945,19 +939,21 @@ class RevertToDetectedVulnerabilityInput(BaseModel):
         description="The ID of the vulnerability to revert to detected state "
         f"(e.g., 'gid://gitlab/Vulnerability/123'). {ID_LENGTH_DESCRIPTION}",
     )
-    comment: Optional[str] = Field(
+    comment: Optional[VulnerabilityComment] = Field(
         default=None,
-        description="Optional comment explaining why the vulnerability was reverted to detected state.",
+        description="Optional comment explaining why the vulnerability was reverted to detected state. "
+        f"{COMMENT_LENGTH_DESCRIPTION}",
     )
 
 
 class RevertToDetectedVulnerability(DuoBaseTool):
     tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "revert_to_detected_vulnerability"
-    description: str = """Revert a vulnerability's state back to 'detected' status in GitLab using GraphQL.
+    description: str = f"""Revert a vulnerability's state back to 'detected' status in GitLab using GraphQL.
 
     The vulnerability is identified by its GitLab internal ID, which can be obtained from the
-    list_vulnerabilities tool. An optional comment can be provided to explain the reason for reverting.
+    list_vulnerabilities tool. An optional comment of up to {MAX_VULNERABILITY_COMMENT_LENGTH:,} characters can be
+    provided to explain the reason for reverting.
 
     For example:
     - Revert a vulnerability without comment:
