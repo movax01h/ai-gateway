@@ -9,6 +9,7 @@ metadata:
   owner_email_handle: mnohr
 spec:
   regions:
+    - us-east1
     - us-east4
     - asia-northeast1
     - asia-northeast3

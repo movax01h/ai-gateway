@@ -10,8 +10,12 @@ metadata:
 spec:
   regions:
     - us-east1
+    - us-east4
     - asia-northeast1
+    - asia-northeast3
     - europe-west2
+    - europe-west3
+    - europe-west9
   request_timeout: 3600
   region_overrides:
     us-east1:
