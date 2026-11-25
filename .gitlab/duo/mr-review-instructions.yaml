@@ -237,6 +237,11 @@ instructions:
     instructions: |
       For prompt template changes, verify:
       1. Sensitive data is not hardcoded in prompt templates.
+      1. When a template extends a base template or includes shared partials, check the fully rendered prompt
+        for two instructions on the same topic that disagree or both claim to be preferred (for example two
+        different branch-name formats). Suggest aligning the new text with the shared format, or stating that it
+        replaces the base text when the base has no block to override.
+        Why: the model has to guess which instruction wins, and the result differs between runs.
 
   - name: Authentication and Security
     fileFilters:
