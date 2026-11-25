@@ -2597,7 +2597,7 @@ class TestStructuredContentInToolCard:
 
         assert response.content == (
             "Read image file: ./shot.png (image/png, 6 KB).\n"
-            "[image/png omitted from history]"
+            "[image/png removed from history after its turn]"
         )
         assert payload not in response.content
 

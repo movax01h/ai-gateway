@@ -16,6 +16,7 @@ from ai_gateway.prompts.model_variables import (
 )
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.message_ingestion import (
+    ATTACHMENTS_KWARG,
     non_blank_text_block,
     split_text_blocks,
 )
@@ -64,12 +65,21 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
 
         gitlab_instance_info = GitLabServiceContext.get_current_instance_info()
         model_metadata = get_model_metadata()
+        history = restore_message_consistency(input["conversation_history"][agent_name])
+        has_attached_images = any(
+            message.additional_kwargs.get(ATTACHMENTS_KWARG)
+            for message in history
+            if isinstance(message, HumanMessage)
+        )
 
         static_template_context = self._build_static_template_context(
             gitlab_instance_info, model_metadata
         )
         dynamic_template_context = self._build_dynamic_template_context(
-            project, namespace, _kwargs.get("web_search", WebSearchState())
+            project,
+            namespace,
+            _kwargs.get("web_search", WebSearchState()),
+            has_attached_images,
         )
         denied_tools = list(dict.fromkeys(input.get("denied_tools", []) or []))
         system_template_override = _kwargs.get("system_template_override")
@@ -85,7 +95,6 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             )
         )
 
-        history = restore_message_consistency(input["conversation_history"][agent_name])
         for m in history:
             if isinstance(m, HumanMessage):
                 slash_command = None
@@ -171,8 +180,10 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         project: Project | None,
         namespace: Namespace | None,
         web_search: WebSearchState,
+        has_attached_images: bool,
     ) -> dict[str, Any]:
         return {
+            "has_attached_images": has_attached_images,
             "current_date": datetime.now().strftime("%Y-%m-%d"),
             "current_time": datetime.now().strftime("%H:%M:%S"),
             "current_timezone": datetime.now().astimezone().tzname(),

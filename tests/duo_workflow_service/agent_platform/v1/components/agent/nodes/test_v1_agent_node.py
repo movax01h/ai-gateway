@@ -3736,7 +3736,7 @@ class TestAgentNodeImageLimitFallback:
         assert is_image_content_block(saved[4].content[1])
         assert saved[0].content[1] == {
             "type": "text",
-            "text": "[image/png omitted from history]",
+            "text": "[image/png removed from history after its turn]",
         }
         assert saved[2].content[1]["type"] == "text"
         assert saved[-2] == HumanMessage(content=IMAGE_LIMIT_SEEN_MESSAGE)

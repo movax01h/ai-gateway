@@ -1038,7 +1038,7 @@ class TestReinlineSessionFiles:
         assert texts == [
             "[attachment 2: a.png]",
             "[attachment 1: inline.png]",
-            "[image/png omitted from history]",
+            "[image/png removed from history after its turn]",
             "[attachment 2: a.png]",
             None,
             "[attachment 3: a.png]",
@@ -1110,7 +1110,10 @@ class TestReinlineSessionFiles:
             ).model_copy(
                 update={
                     "content": [
-                        {"type": "text", "text": "[image/png omitted from history]"}
+                        {
+                            "type": "text",
+                            "text": "[image/png removed from history after its turn]",
+                        }
                     ]
                 }
             ),

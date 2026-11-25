@@ -17,7 +17,10 @@ from duo_workflow_service.agents.prompt_adapter import (
     ChatAgentPromptTemplate,
     DefaultPromptAdapter,
 )
-from duo_workflow_service.entities.message_ingestion import assemble_user_message
+from duo_workflow_service.entities.message_ingestion import (
+    ATTACHMENTS_KWARG,
+    assemble_user_message,
+)
 from duo_workflow_service.entities.state import (
     MAX_TOOL_CALLS_PER_MODEL_CALL,
     ChatWorkflowState,
@@ -1265,6 +1268,95 @@ class TestFeatureFlagPropagationToStaticTemplateContext:
             _, first_kwargs = mock_formatter.call_args_list[0]
             assert context_key in first_kwargs
             assert first_kwargs[context_key] is expected_enabled
+
+
+_SESSION_FILE_RECORD = {
+    "id": "attachment-1",
+    "url": "/api/v4/ai/duo_workflows/workflows/1234/session_files/5",
+    "filename": "shot.png",
+    "mime_type": "image/png",
+}
+
+
+@pytest.mark.parametrize(
+    "prompt_template",
+    [
+        {
+            "system_static": (
+                "{% if system_template_override %}{{ system_template_override }}"
+                "{% else %}{% include 'chat/agent/partials/system_static/1.0.0.jinja' %}"
+                "{% endif %}"
+            ),
+            "system_dynamic": "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}",
+            "user": "{{ message.content }}",
+        }
+    ],
+)
+@pytest.mark.parametrize(
+    "system_template_override",
+    [None, "You are a custom agent."],
+    ids=["default_agent", "custom_agent"],
+)
+class TestImageHistoryRule:
+    @pytest.mark.parametrize(
+        ("history", "expected"),
+        [
+            (
+                [
+                    HumanMessage(
+                        content="what is this?",
+                        additional_kwargs={ATTACHMENTS_KWARG: [_SESSION_FILE_RECORD]},
+                    ),
+                    AIMessage(content="A chart."),
+                    HumanMessage(content="thanks"),
+                ],
+                True,
+            ),
+            ([HumanMessage(content="Hello")], False),
+            (
+                [
+                    HumanMessage(
+                        content="Hello", additional_kwargs={ATTACHMENTS_KWARG: []}
+                    )
+                ],
+                False,
+            ),
+        ],
+        ids=["earlier_turn_has_attachments", "no_attachments", "empty_records"],
+    )
+    @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+    def test_the_rule_renders_only_when_the_chat_has_attachments(
+        self,
+        mock_get_model_metadata,
+        model_provider,
+        prompt_config,
+        sample_chat_workflow_state: ChatWorkflowState,
+        system_template_override,
+        history,
+        expected,
+    ):
+        mock_get_model_metadata.return_value = None
+        sample_chat_workflow_state["conversation_history"] = {"test_agent": history}
+
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
+
+        with patch.object(
+            GitLabServiceContext, "get_current_instance_info", return_value=None
+        ):
+            result = template.invoke(
+                sample_chat_workflow_state,
+                agent_name="test_agent",
+                system_template_override=system_template_override,
+            )
+
+        static_message, *other_messages = [
+            str(message.content)
+            for message in result.to_messages()
+            if isinstance(message, SystemMessage)
+        ]
+
+        assert "<image_history>" not in static_message
+        assert ("<image_history>" in "\n".join(other_messages)) is expected
 
 
 @pytest.mark.parametrize(

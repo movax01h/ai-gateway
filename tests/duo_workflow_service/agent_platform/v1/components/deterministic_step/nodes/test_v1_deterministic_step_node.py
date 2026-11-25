@@ -206,7 +206,7 @@ class TestDeterministicStepNode:
         stored = result[FlowStateKeys.CONTEXT]["responses"]
         assert stored == (
             "Read image file: ./shot.png (image/png, 3 KB). The image follows.\n"
-            "[image/png omitted from history]"
+            "[image/png removed from history after its turn]"
         )
         assert payload not in str(result)
         assert result[FlowStateKeys.CONTEXT]["status"] == "success"
