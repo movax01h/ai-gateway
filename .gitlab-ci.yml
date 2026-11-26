@@ -244,6 +244,15 @@ gitlab-advanced-sast:
 secret_detection:
   needs: []
 
+# container_scanning scans $TARGET_IMAGE, so it needs only the manifest job.
+# Without needs, it also waits for the security policy jobs in earlier stages.
+# The manifest job does not run on canonical v1.x tags, so the need is optional.
+container_scanning:
+  needs:
+    - job: build-docker-model-gateway
+      artifacts: false
+      optional: true
+
 .poetry:
   cache:
     key:
