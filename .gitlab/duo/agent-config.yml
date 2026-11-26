@@ -65,6 +65,11 @@ setup_script:
   # GitHub release download that gen-proto-go and gen-proto-node need.
   - make bin/protoc gen-proto-go-install
 
+  # Pre-fetch the tiktoken encoding: the session sandbox blocks the
+  # openaipublic.blob.core.windows.net download that TikTokenCounter
+  # (tests/prompts, tests/duo_workflow_service) triggers at import/collection time.
+  - poetry run python -c 'import tiktoken; tiktoken.encoding_for_model("gpt-4o")'
+
   # Pre-install the Ruby client gems so gen-proto-ruby works offline in the session.
   - (cd clients/ruby && bundle install)
 
