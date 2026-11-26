@@ -213,6 +213,9 @@ then succeeds as soon as the child pipeline starts (fire-and-forget), so the ~30
 blocks or delays the parent pipeline; the result appears as a downstream pipeline. The wait on
 unit tests is deliberate: a registered CEF experiment cannot be canceled and consumes a
 dedicated VM, so the delay lets rapidly superseded pipelines auto-cancel before submitting.
+On a Draft merge request, the job is manual. Marking the merge request as ready does not
+start a pipeline, so to get the eval before merge, push again, run a new pipeline, or start
+the manual job.
 
 ### Triaging sanity-check failures
 
