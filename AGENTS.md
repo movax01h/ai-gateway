@@ -622,6 +622,25 @@ or `glab api projects/:id/merge_requests/<iid>/pipelines`. Looking a pipeline up
 by your commit SHA can instead return a `duo_workflow` pipeline
 (`refs/workloads/...`) with only a `workload` job.
 
+Validating a branch's CI config with the lint API: `workflow:rules` allow
+pipelines only for MRs, schedules, `main`, and stable branches, so a dry run in
+the context of a feature branch always fails with `The pipeline did not run`.
+A dry run reads `.gitlab-ci.yml` from `content_ref` (default: `main`), but
+reads local includes (`.gitlab/ci/*.yml`) from `dry_run_ref`.
+
+```shell
+# Static check: reads every file from the branch. Shows syntax errors and all
+# jobs, including jobs in .gitlab/ci/*.yml, without rules evaluated.
+glab api "projects/39903947/ci/lint?content_ref=<branch>&include_jobs=true"
+# Dry run as a main pipeline: rules evaluated, but local includes come from
+# main. Use it only for changes to .gitlab-ci.yml itself.
+glab api "projects/39903947/ci/lint?content_ref=<branch>&dry_run=true&dry_run_ref=main&include_jobs=true"
+```
+
+Don't use `ref=<branch>&dry_run=true`. It reads `.gitlab-ci.yml` from `main`
+and local includes from the branch, so it fails when the two differ. To check
+rules of jobs in `.gitlab/ci/*.yml`, use the MR pipeline.
+
 ## Project-Specific Details
 
 ### Prompt Management
