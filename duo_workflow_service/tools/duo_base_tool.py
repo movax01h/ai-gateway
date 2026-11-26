@@ -21,6 +21,9 @@ from pydantic import BaseModel, Field
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
+from duo_workflow_service.policies.target_tool_governance import (
+    enforce_target_tool_governance,
+)
 from duo_workflow_service.security.secret_redaction import redact_secrets
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.tier_access_checker import TierAccessChecker
@@ -197,6 +200,7 @@ class DuoBaseTool(BaseTool):
         """
         saved_kwargs = dict(kwargs)
         kwargs = self._apply_tool_options(kwargs)
+        await enforce_target_tool_governance(self, kwargs)
         tool_result = await self._execute(*args, **kwargs)
 
         feature = self._get_required_feature_for_tier_check(saved_kwargs)

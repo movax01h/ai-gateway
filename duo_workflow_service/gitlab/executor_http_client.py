@@ -405,15 +405,18 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
             )
 
     async def graphql(
-        self, query: str, variables: Optional[dict] = None, timeout: float = 10.0
+        self,
+        query: str,
+        variables: Optional[dict] = None,
+        timeout: float = 10.0,
+        retry_transient_errors: bool = True,
     ) -> Any:
         payload = {
             "query": query,
             "variables": variables or {},
         }
 
-        @_retry_on_transient_error
-        async def _graphql_with_retry() -> str:
+        async def _graphql_once() -> str:
             try:
                 action_response = await self._run_http_action(
                     contract_pb2.Action(
@@ -430,8 +433,14 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
 
             return self._graphql_response_body(action_response)
 
+        request = (
+            _retry_on_transient_error(_graphql_once)
+            if retry_transient_errors
+            else _graphql_once
+        )
+
         try:
-            response = await _graphql_with_retry()
+            response = await request()
         except _RetryableStatusError as exc:
             # All retry attempts exhausted.  GraphQL callers have no status code
             # to inspect, so surface the status in the message instead.
