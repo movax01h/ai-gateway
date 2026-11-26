@@ -29,7 +29,7 @@ Example below:
 
 - [ ] Tests added for new functionality. If not, please raise an issue to follow up.
 - [ ] Documentation added/updated, if needed.
-- [ ] If this change may affect agent quality, check the result of the `sanity-check-trigger` downstream pipeline (SWE-bench eval on CEF) once it completes (~30 min). It runs automatically and never blocks merging; failures require manual analysis in LangSmith. Infra/setup failures (GDK provisioning, CEF availability, provider quotas) are triaged by the AI Core Infra group.
+- [ ] If this change may affect agent quality, check the result of the `sanity-check-trigger` downstream pipeline (SWE-bench eval on CEF) once it completes (~30 min). It runs automatically once the MR is not a Draft (on a Draft MR, start the manual job) and never blocks merging; failures require manual analysis in LangSmith. Infra/setup failures (GDK provisioning, CEF availability, provider quotas) are triaged by the AI Core Infra group.
 - [ ] If this change requires executor implementation: verified that issues/MRs exist for
   the [Node executor](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp) or confirmed that changes are
   backward-compatible and don't break existing executor functionality.

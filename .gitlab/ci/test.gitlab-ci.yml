@@ -166,6 +166,11 @@ sanity-check-trigger:
     - tests:unit
   allow_failure: true  # a misconfigured child pipeline must never block MRs
   rules:
+    # A Draft MR gets many pushes. On a Draft MR, the author starts the eval
+    # by hand. The merge train and the default branch still run it.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_DRAFT == "true"
+      changes: !reference [.duo-workflow-service-dependencies, changes]
+      when: manual
     # Only changes that can affect agent quality are worth a CEF eval; the
     # push rule (rather than any pipeline source) keeps scheduled/web/API
     # pipelines on the default branch from firing it.
