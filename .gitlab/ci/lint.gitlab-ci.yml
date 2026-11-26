@@ -29,21 +29,22 @@ lint:
 # Quality report so violations annotate the MR diff inline. The full `lint` job
 # above still runs ruff via `make lint-code` for local/CI parity; this job just
 # fails fast and surfaces findings in the UI.
+# ruff has no Python dependencies, so the job installs only ruff, at the version
+# and with the hashes in poetry.lock, and does not restore the Poetry cache.
 lint:ruff:
-  extends: .poetry
   stage: test
   rules:
     - !reference [.skip-on-docs-only-mr, rules]
     - when: on_success
-  # Same as `lint`: start right away, and install the dependencies only on a cold cache.
   needs: []
   variables:
     RUFF_PATHS: "ai_gateway duo_workflow_service lib lints scripts tests integration_tests"
   script:
-    - make install-lint-deps
-    - poetry run ruff check --output-format=gitlab --output-file=gl-code-quality-report.json ${RUFF_PATHS} || true
-    - poetry run ruff check ${RUFF_PATHS}
-    - poetry run ruff format --check ${RUFF_PATHS}
+    - python -m scripts.locked_requirement ruff > ruff-requirements.txt
+    - pip install --require-hashes --no-deps -r ruff-requirements.txt
+    - ruff check --output-format=gitlab --output-file=gl-code-quality-report.json ${RUFF_PATHS} || true
+    - ruff check ${RUFF_PATHS}
+    - ruff format --check ${RUFF_PATHS}
   artifacts:
     when: always
     reports:
