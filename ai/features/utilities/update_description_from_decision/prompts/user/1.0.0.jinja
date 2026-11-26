@@ -1,0 +1,27 @@
+<title>
+{{ title }}
+</title>
+
+<description>
+{{ description }}
+</description>
+
+<question>
+{{ question }}
+</question>
+
+<options>
+{%- for option in options or [] %}
+- {{ option }}
+{%- endfor %}
+</options>
+
+<answer>
+{{ answer or "" }}
+</answer>
+
+<rationale>
+{{ rationale or "" }}
+</rationale>
+
+Respond with the full updated description only.

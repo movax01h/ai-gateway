@@ -41,6 +41,7 @@
 # Legacy non-agentic Duo features
 /ai/features/utilities/generate_commit_message @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
 /ai/features/utilities/generate_description @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
+/ai/features/utilities/update_description_from_decision @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
 
 # Model configuration check prompt (self-hosted connection test) is co-owned by AI Model Services
 /ai/features/model_configuration/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/custom-models
@@ -152,6 +153,7 @@
 # Legacy non-agentic Duo features
 /ai/features/utilities/generate_commit_message @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
 /ai/features/utilities/generate_description @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
+/ai/features/utilities/update_description_from_decision @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
 
 # Model configuration check prompt (self-hosted connection test)
 /ai/features/model_configuration/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/custom-models
