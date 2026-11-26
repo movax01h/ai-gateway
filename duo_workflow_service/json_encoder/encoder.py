@@ -77,4 +77,7 @@ def dumps_checkpoint(obj: Any) -> str:
     checkpoint with `PG::UntranslatableCharacter` and the workflow fails. They carry no
     meaning for the model, so they are dropped.
     """
-    return _NUL_ESCAPE_RE.sub(r"\1", json.dumps(obj, cls=CustomEncoder))
+    encoded = json.dumps(obj, cls=CustomEncoder)
+    if "\\u0000" not in encoded:
+        return encoded
+    return _NUL_ESCAPE_RE.sub(r"\1", encoded)
