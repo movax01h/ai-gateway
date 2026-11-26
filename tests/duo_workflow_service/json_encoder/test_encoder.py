@@ -1,5 +1,6 @@
 import base64
 import json
+from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -9,6 +10,7 @@ from duo_workflow_service.entities.state import (
     AdditionalContext,
     ApprovalStateRejection,
 )
+from duo_workflow_service.json_encoder import encoder
 from duo_workflow_service.json_encoder.encoder import CustomEncoder, dumps_checkpoint
 
 PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\npixels").decode()
@@ -257,3 +259,11 @@ def test_dumps_checkpoint_uses_custom_encoder():
 
     assert reloaded["messages"][0]["content"] == "output"
     assert reloaded["messages"][0]["type"] == "ToolMessage"
+
+
+def test_dumps_checkpoint_skips_the_regex_without_nul():
+    with patch.object(encoder, "_NUL_ESCAPE_RE") as nul_escape:
+        encoded = dumps_checkpoint({"content": "no nul", "path": "C:\\u0001"})
+
+    nul_escape.sub.assert_not_called()
+    assert json.loads(encoded) == {"content": "no nul", "path": "C:\\u0001"}
