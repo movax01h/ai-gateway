@@ -234,12 +234,11 @@ include:
   # because without the component the job would have no script.
   - local: .gitlab/ci/danger-review.gitlab-ci.yml
     rules: *danger-review-include-rules
-  - component: $CI_SERVER_FQDN/gitlab-org/analytics-section/analytics-instrumentation/ci-components/internal_events_validation@v1.1.0
+  - component: $CI_SERVER_FQDN/gitlab-org/analytics-section/analytics-instrumentation/ci-components/internal_events_validation@v1.3.0
     rules:
       - if: $CI_SERVER_HOST == "gitlab.com"
     inputs:
       stage: "validate"
-      version: "1.1.1"
 
 # Overwrite internal_events_validation to start as soon as possible
 Internal event definitions validation:
