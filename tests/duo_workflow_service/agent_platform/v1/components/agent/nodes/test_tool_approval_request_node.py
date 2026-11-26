@@ -173,6 +173,43 @@ def mock_ai_message_with_tool_calls_fixture():
     return mock_message
 
 
+class TestToolApprovalRequestNodeWhileTheTurnIsBeingRecovered:
+    """A turn that stopped or failed is recovered: its calls were interrupted by the user."""
+
+    @pytest.mark.asyncio
+    async def test_it_asks_for_nothing(
+        self,
+        tool_approval_request_node,
+        state_with,
+        mock_ai_message_with_tool_calls,
+    ):
+        state = {
+            **state_with([mock_ai_message_with_tool_calls]),
+            FlowStateKeys.STATUS: WorkflowStatusEnum.RECOVERY,
+        }
+
+        result = await tool_approval_request_node.run(state)
+
+        # No card asks to approve what the user interrupted, and the status is left for the router and the agent.
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_it_asks_otherwise(
+        self,
+        tool_approval_request_node,
+        state_with,
+        mock_ai_message_with_tool_calls,
+    ):
+        state = state_with([mock_ai_message_with_tool_calls])
+
+        result = await tool_approval_request_node.run(state)
+
+        assert (
+            result[FlowStateKeys.STATUS]
+            == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+        )
+
+
 class TestToolApprovalRequestNodeValidCalls:
     """Test suite for valid tool call handling."""
 

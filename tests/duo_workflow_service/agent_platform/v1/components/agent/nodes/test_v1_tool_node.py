@@ -24,6 +24,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
     AgentStuckError,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node import (
+    INTERRUPTED_CALL_SKIPPED_UI_MESSAGE,
     ToolNode,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
@@ -37,6 +38,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 )
 from duo_workflow_service.agent_platform.v1.state.base import NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.security.prompt_security import SecurityException
 from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
 from lib.context.tool_loop import init_tool_loop_counters, tool_loop_stats
@@ -2469,3 +2471,76 @@ async def test_run_list_content_reaches_tool_message_as_list(
     assert isinstance(tool_message, ToolMessage)
     assert tool_message.content == block_list
     assert tool_message.content[1]["base64"] == "aGVsbG8="
+
+
+class TestToolNodeYieldsWhileTheTurnIsBeingRecovered:
+    """The node reads the status the engine writes: no inbox is involved."""
+
+    @staticmethod
+    def _recovering(state):
+        return {**state, FlowStateKeys.STATUS: WorkflowStatusEnum.RECOVERY}
+
+    @pytest.mark.asyncio
+    async def test_it_runs_no_tool_while_the_turn_is_being_recovered(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+        mock_tool,
+        mock_toolset,
+        ui_history,
+        mock_tool_call,
+    ):
+        mock_toolset.get.return_value = mock_tool
+
+        result = await tool_node.run(self._recovering(flow_state_with_tool_calls))
+
+        mock_tool.ainvoke.assert_not_called()
+        # The history is not written at all: the agent closes each open call as interrupted when it renders it.
+        assert FlowStateKeys.CONVERSATION_HISTORY not in result
+        # The pending card of the call is settled under the call's own ID.
+        ui_history.log.error.assert_called_once_with(
+            tool=mock_tool,
+            tool_call_args=mock_tool_call["args"],
+            message=INTERRUPTED_CALL_SKIPPED_UI_MESSAGE.format(
+                tool_name=mock_tool.name
+            ),
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+            message_id=mock_tool_call["id"],
+            subsession_id=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_it_settles_no_card_for_a_call_of_a_tool_the_toolset_does_not_have(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+        mock_tool,
+        mock_toolset,
+        ui_history,
+    ):
+        # A card was streamed only for a call the agent could make, so a call to an unknown tool has none to settle.
+        mock_toolset.get.return_value = None
+
+        result = await tool_node.run(self._recovering(flow_state_with_tool_calls))
+
+        mock_tool.ainvoke.assert_not_called()
+        ui_history.log.error.assert_not_called()
+        assert FlowStateKeys.CONVERSATION_HISTORY not in result
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "status",
+        [
+            WorkflowStatusEnum.EXECUTION,
+            WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+            WorkflowStatusEnum.IDLE,
+        ],
+    )
+    async def test_it_runs_the_tools_under_any_other_status(
+        self, tool_node, flow_state_with_tool_calls, mock_tool, status
+    ):
+        state = {**flow_state_with_tool_calls, FlowStateKeys.STATUS: status}
+
+        await tool_node.run(state)
+
+        mock_tool.ainvoke.assert_called_once()

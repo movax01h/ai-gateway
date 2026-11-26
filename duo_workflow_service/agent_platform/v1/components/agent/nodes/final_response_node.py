@@ -100,6 +100,20 @@ class FinalResponseNode(BaseAgentComponentNode):  # pylint: disable=too-many-ins
         self._component_name = component_name
         self._tracker = tracker
 
+    def _skip_for_recovery(self, state: FlowState) -> dict:
+        """Write no answer, because the turn is being recovered and no agent has read the message that recovers it.
+
+        The history ends in a turn nobody answered, so there is nothing to finish. The component's router sends a
+        top-level agent back to its agent node to read the message.
+
+        A subagent leaves the message to its supervisor, and the output is written as no answer rather than left out:
+        a supervisor reads a missing key as a broken run, and an explicit `None` as a delegation that ended without one.
+        """
+        log.info("Writing no final answer: the turn is being recovered", node=self.name)
+        if not self.is_subagent:
+            return {}
+        return self._output_key.to_iokey(state).to_nested_dict(None)
+
     async def _run(self, state: FlowState, runtime: Any = None) -> dict:
         history_iokey = self._history_iokey(state)
         output_iokey = self._output_key.to_iokey(state)

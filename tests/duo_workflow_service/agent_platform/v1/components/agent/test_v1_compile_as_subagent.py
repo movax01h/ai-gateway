@@ -242,3 +242,25 @@ class TestCompileAsSubagentClaimant:
             recipient=Address.of("supervisor").child(component_name, "call-1"),
             accepts_unaddressed=False,
         )
+
+    def test_a_dispatched_run_tells_its_nodes_they_run_for_a_supervisor(
+        self, subagent_component
+    ):
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.agent.component.AgentNode"
+            ) as agent_node_cls,
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.agent.component.FinalResponseNode"
+            ) as final_response_node_cls,
+        ):
+            agent_node_cls.return_value.name = f"{subagent_component.name}#agent"
+            final_response_node_cls.return_value.name = (
+                f"{subagent_component.name}#final_response"
+            )
+            subagent_component.compile_as_subagent(
+                address=lambda _state: Address.of("supervisor").child("x", "call-1")
+            )
+
+        assert agent_node_cls.return_value.is_subagent is True
+        assert final_response_node_cls.return_value.is_subagent is True
