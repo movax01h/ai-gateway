@@ -651,14 +651,18 @@ class AgentComponent(AgentComponentBase):
 
         prompt = self._build_prompt(tools=tools, tool_choice=tool_choice)
 
+        tracker = ToolEventTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+        )
+
         node_agent = AgentNode(
             name=self.__entry_hook__(),
             conversation_history_key=self._conversation_history_key,
             prompt=prompt,
             inputs=self.inputs,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
+            tracker=tracker,
             invoke_config=self._agent_node_invoke_config(),
             optimizer_pipeline=self._build_optimizer_pipeline(),
             response_schema=self._response_schema,
@@ -678,11 +682,6 @@ class AgentComponent(AgentComponentBase):
             ),
             response_schema_tool_choice=tool_choice,
             prompt_template_inputs={"tools_enabled": self._tools_enabled(prompt)},
-        )
-        tracker = ToolEventTracker(
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
         )
         node_tools = ToolNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
@@ -711,9 +710,7 @@ class AgentComponent(AgentComponentBase):
             response_schema=self._response_schema,
             response_schema_tracking=self.response_schema_tracking,
             component_name=self.name,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
+            tracker=tracker,
         )
 
         graph.add_node(self.__entry_hook__(), node_agent.run)

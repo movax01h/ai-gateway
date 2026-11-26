@@ -37,6 +37,9 @@ from duo_workflow_service.agent_platform.core.inbox.message import (
     inbound_message,
 )
 from duo_workflow_service.agent_platform.utils.exceptions import ModelRefusalError
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    WorkflowEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
     _LITELLM_EMPTY_CONTENT_PLACEHOLDER,
     AgentFinalOutput,
@@ -137,9 +140,12 @@ def agent_node_fixture(
 ):
     """Fixture for AgentNode instance (default, no response schema)."""
     return AgentNode(
-        flow_id=flow_id,
-        flow_type=GLReportingEventContext.from_workflow_definition(
-            "software_development"
+        tracker=WorkflowEventTracker(
+            flow_id=flow_id,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
+            internal_event_client=mock_internal_event_client,
         ),
         name="test_agent_node",
         prompt=mock_prompt,
@@ -147,7 +153,6 @@ def agent_node_fixture(
         conversation_history_key=RuntimeIOKey(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
-        internal_event_client=mock_internal_event_client,
         invoke_config={},
         optimizer_pipeline=optimizer_pipeline,
     )
@@ -164,9 +169,12 @@ def agent_node_with_schema_fixture(
 ):
     """Fixture for AgentNode instance with AgentFinalOutput response schema."""
     return AgentNode(
-        flow_id=flow_id,
-        flow_type=GLReportingEventContext.from_workflow_definition(
-            "software_development"
+        tracker=WorkflowEventTracker(
+            flow_id=flow_id,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
+            internal_event_client=mock_internal_event_client,
         ),
         name="test_agent_node",
         prompt=mock_prompt,
@@ -174,7 +182,6 @@ def agent_node_with_schema_fixture(
         conversation_history_key=RuntimeIOKey(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
-        internal_event_client=mock_internal_event_client,
         invoke_config={},
         optimizer_pipeline=optimizer_pipeline,
         response_schema=AgentFinalOutput,
@@ -287,9 +294,12 @@ class TestAgentNode:
         """Build-time `prompt_template_inputs` (e.g. `tools_enabled`) are merged into every prompt invocation so the
         template can branch on them."""
         node = AgentNode(
-            flow_id=flow_id,
-            flow_type=GLReportingEventContext.from_workflow_definition(
-                "software_development"
+            tracker=WorkflowEventTracker(
+                flow_id=flow_id,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                internal_event_client=mock_internal_event_client,
             ),
             name="test_agent_node",
             prompt=mock_prompt,
@@ -297,7 +307,6 @@ class TestAgentNode:
             conversation_history_key=RuntimeIOKey(
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
-            internal_event_client=mock_internal_event_client,
             invoke_config={},
             optimizer_pipeline=optimizer_pipeline,
             prompt_template_inputs={"tools_enabled": {"web_search": True}},
@@ -478,9 +487,12 @@ class TestAgentNode:
             mock_error_handler.handle_error = AsyncMock()
 
             agent_node = AgentNode(
-                flow_id=flow_id,
-                flow_type=GLReportingEventContext.from_workflow_definition(
-                    "software_development"
+                tracker=WorkflowEventTracker(
+                    flow_id=flow_id,
+                    flow_type=GLReportingEventContext.from_workflow_definition(
+                        "software_development"
+                    ),
+                    internal_event_client=mock_internal_event_client,
                 ),
                 name="test_agent_node",
                 prompt=mock_prompt,
@@ -489,7 +501,6 @@ class TestAgentNode:
                     alias="conversation_history",
                     factory=lambda _: conversation_history_key,
                 ),
-                internal_event_client=mock_internal_event_client,
                 invoke_config={},
                 optimizer_pipeline=optimizer_pipeline,
             )
@@ -544,9 +555,12 @@ class TestAgentNode:
             mock_error_handler.handle_error = AsyncMock()
 
             agent_node = AgentNode(
-                flow_id=flow_id,
-                flow_type=GLReportingEventContext.from_workflow_definition(
-                    "software_development"
+                tracker=WorkflowEventTracker(
+                    flow_id=flow_id,
+                    flow_type=GLReportingEventContext.from_workflow_definition(
+                        "software_development"
+                    ),
+                    internal_event_client=mock_internal_event_client,
                 ),
                 name="test_agent_node",
                 prompt=mock_prompt,
@@ -555,7 +569,6 @@ class TestAgentNode:
                     alias="conversation_history",
                     factory=lambda _: conversation_history_key,
                 ),
-                internal_event_client=mock_internal_event_client,
                 invoke_config={},
                 optimizer_pipeline=optimizer_pipeline,
             )
@@ -854,9 +867,12 @@ class TestAgentNodeContextLimits:
     ):
         """AgentNode constructed with an explicit per-agent max_context_tokens."""
         return AgentNode(
-            flow_id=flow_id,
-            flow_type=GLReportingEventContext.from_workflow_definition(
-                "software_development"
+            tracker=WorkflowEventTracker(
+                flow_id=flow_id,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                internal_event_client=mock_internal_event_client,
             ),
             name="test_agent_node",
             prompt=mock_prompt,
@@ -865,7 +881,6 @@ class TestAgentNodeContextLimits:
                 alias="conversation_history",
                 factory=lambda _: conversation_history_key,
             ),
-            internal_event_client=mock_internal_event_client,
             invoke_config={},
             optimizer_pipeline=optimizer_pipeline,
             max_context_tokens=64000,
@@ -1119,9 +1134,12 @@ class TestAgentNodeHistoryOptimization:
         )
 
         node = AgentNode(
-            flow_id=flow_id,
-            flow_type=GLReportingEventContext.from_workflow_definition(
-                "software_development"
+            tracker=WorkflowEventTracker(
+                flow_id=flow_id,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                internal_event_client=mock_internal_event_client,
             ),
             name="test_agent_node",
             prompt=mock_prompt,
@@ -1129,7 +1147,6 @@ class TestAgentNodeHistoryOptimization:
             conversation_history_key=RuntimeIOKey(
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
-            internal_event_client=mock_internal_event_client,
             invoke_config={},
             optimizer_pipeline=optimizer_pipeline,
             ui_history=ui_history,
@@ -1351,9 +1368,12 @@ class TestAgentNodeServerToolCards:
     ):
         mock_prompt.ainvoke = AsyncMock(return_value=self._searching_turn())
         node = AgentNode(
-            flow_id=flow_id,
-            flow_type=GLReportingEventContext.from_workflow_definition(
-                "software_development"
+            tracker=WorkflowEventTracker(
+                flow_id=flow_id,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                internal_event_client=mock_internal_event_client,
             ),
             name="developer_agent#agent",
             prompt=mock_prompt,
@@ -1361,7 +1381,6 @@ class TestAgentNodeServerToolCards:
             conversation_history_key=RuntimeIOKey(
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
-            internal_event_client=mock_internal_event_client,
             invoke_config={},
             optimizer_pipeline=optimizer_pipeline,
             ui_history=UIHistory(
@@ -1966,9 +1985,12 @@ class TestAgentNodeReasoning:
     ):
         """Fixture for AgentNode with ui_history enabled."""
         return AgentNode(
-            flow_id=flow_id,
-            flow_type=GLReportingEventContext.from_workflow_definition(
-                "software_development"
+            tracker=WorkflowEventTracker(
+                flow_id=flow_id,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                internal_event_client=mock_internal_event_client,
             ),
             name="test_agent_node",
             prompt=mock_prompt,
@@ -1976,7 +1998,6 @@ class TestAgentNodeReasoning:
             conversation_history_key=RuntimeIOKey(
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
-            internal_event_client=mock_internal_event_client,
             invoke_config={},
             optimizer_pipeline=optimizer_pipeline,
             ui_history=ui_history_with_reasoning,
@@ -2244,9 +2265,12 @@ class TestAgentNodeReasoning:
             writer_class=agent_tools_ui_log_writer_class(component_name="test_agent"),
         )
         node = AgentNode(
-            flow_id=flow_id,
-            flow_type=GLReportingEventContext.from_workflow_definition(
-                "software_development"
+            tracker=WorkflowEventTracker(
+                flow_id=flow_id,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                internal_event_client=mock_internal_event_client,
             ),
             name="test_agent_node",
             prompt=mock_prompt,
@@ -2254,7 +2278,6 @@ class TestAgentNodeReasoning:
             conversation_history_key=RuntimeIOKey(
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
-            internal_event_client=mock_internal_event_client,
             invoke_config={},
             optimizer_pipeline=optimizer_pipeline,
             ui_history=ui_history_no_reasoning,
@@ -2333,9 +2356,12 @@ class TestAgentNodeReasoning:
         schema = Mock()
         schema.tool_title = "structured_response"
         node = AgentNode(
-            flow_id=flow_id,
-            flow_type=GLReportingEventContext.from_workflow_definition(
-                "software_development"
+            tracker=WorkflowEventTracker(
+                flow_id=flow_id,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                internal_event_client=mock_internal_event_client,
             ),
             name="test_agent_node",
             prompt=mock_prompt,
@@ -2343,7 +2369,6 @@ class TestAgentNodeReasoning:
             conversation_history_key=RuntimeIOKey(
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
-            internal_event_client=mock_internal_event_client,
             invoke_config={},
             optimizer_pipeline=optimizer_pipeline,
             ui_history=ui_history_with_reasoning,
@@ -2446,9 +2471,12 @@ class TestAgentNodeInvokeConfig:
         """invoke_config is passed as config= to every ainvoke call."""
         config = {"tags": ["some tag"]}
         node = AgentNode(
-            flow_id=flow_id,
-            flow_type=GLReportingEventContext.from_workflow_definition(
-                "software_development"
+            tracker=WorkflowEventTracker(
+                flow_id=flow_id,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                internal_event_client=mock_internal_event_client,
             ),
             name="test_agent_node",
             prompt=mock_prompt,
@@ -2457,7 +2485,6 @@ class TestAgentNodeInvokeConfig:
                 alias="conversation_history",
                 factory=lambda _: conversation_history_key,
             ),
-            internal_event_client=mock_internal_event_client,
             invoke_config=config,
             optimizer_pipeline=optimizer_pipeline,
         )
@@ -2513,15 +2540,17 @@ def make_agent_node_fixture(
             if name in budget_field_names
         }
         kwargs = {
-            "flow_id": flow_id,
-            "flow_type": GLReportingEventContext.from_workflow_definition("developer"),
+            "tracker": WorkflowEventTracker(
+                flow_id=flow_id,
+                flow_type=GLReportingEventContext.from_workflow_definition("developer"),
+                internal_event_client=mock_internal_event_client,
+            ),
             "name": "test_agent_node",
             "prompt": mock_prompt,
             "inputs": inputs,
             "conversation_history_key": RuntimeIOKey(
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
-            "internal_event_client": mock_internal_event_client,
             "invoke_config": {},
             "optimizer_pipeline": optimizer_pipeline,
             "cycle_budget": replace(default_budget, **budget_overrides),
@@ -4412,7 +4441,7 @@ class TestAgentNodeImageFallbackCounter:
             await agent_node.run(base_flow_state)
 
         metrics.count_image_fallback.assert_called_once_with(
-            flow_type=agent_node._flow_type.value,
+            flow_type=agent_node._tracker.flow_type.value,
             kind=kind,
             model_name="Mistral-7B-Instruct-v0.3",
             model_vendor="custom_openai",
@@ -4720,9 +4749,12 @@ class TestTheAgentRendersWhatItReceives:
     @pytest.fixture(name="node")
     def node_fixture(self, prompt):
         node = AgentNode(
-            flow_id="flow-1",
-            flow_type=GLReportingEventContext.from_workflow_definition(
-                "software_development"
+            tracker=WorkflowEventTracker(
+                flow_id="flow-1",
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                internal_event_client=None,
             ),
             name="agent#agent",
             prompt=prompt,
@@ -4733,7 +4765,6 @@ class TestTheAgentRendersWhatItReceives:
                     target="conversation_history", subkeys=["agent"]
                 ),
             ),
-            internal_event_client=None,
             invoke_config={},
             optimizer_pipeline=_NoOptimizer(),
         )

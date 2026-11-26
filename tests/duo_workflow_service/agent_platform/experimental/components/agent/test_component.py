@@ -882,9 +882,11 @@ class TestAgentComponentAttachNodes:
             == mock_prompt_registry.get_on_behalf.return_value
         )
         assert agent_call_kwargs["inputs"] == inputs
-        assert agent_call_kwargs["flow_id"] == flow_id
-        assert agent_call_kwargs["flow_type"] == flow_type
-        assert agent_call_kwargs["internal_event_client"] == mock_internal_event_client
+        # The agent reports through the same tracker as the tool and final response nodes of its component.
+        agent_tracker = agent_call_kwargs["tracker"]
+        assert agent_tracker.flow_id == flow_id
+        assert agent_tracker.flow_type == flow_type
+        assert agent_tracker._internal_event_client == mock_internal_event_client
         # Agent Node UI logging
         assert "ui_history" in agent_call_kwargs
         assert isinstance(agent_call_kwargs["ui_history"], UIHistory)

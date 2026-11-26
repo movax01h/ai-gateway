@@ -8,6 +8,9 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    WorkflowEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
     AgentFinalOutput,
 )
@@ -24,6 +27,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     RuntimeIOKey,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
+from lib.events import GLReportingEventContext
 
 
 def _make_conversation_history_key(component_name: str) -> RuntimeIOKey:
@@ -451,6 +455,11 @@ class TestResponseSchemaTracking:
         mock_event_client = Mock()
 
         node = FinalResponseNode(
+            tracker=WorkflowEventTracker(
+                flow_id="test_flow_123",
+                flow_type=flow_type,
+                internal_event_client=mock_event_client,
+            ),
             name="test_node",
             conversation_history_key=_make_conversation_history_key(component_name),
             output_key=_make_output_key(simple_output),
@@ -458,9 +467,6 @@ class TestResponseSchemaTracking:
             response_schema=AgentFinalOutput,
             response_schema_tracking=True,
             component_name=component_name,
-            flow_id="test_flow_123",
-            flow_type=flow_type,
-            internal_event_client=mock_event_client,
         )
 
         token = response_schema_tracking_results.set({})
@@ -511,6 +517,13 @@ class TestResponseSchemaTracking:
         mock_event_client = Mock()
 
         node = FinalResponseNode(
+            tracker=WorkflowEventTracker(
+                flow_id="test_flow_id",
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                internal_event_client=mock_event_client,
+            ),
             name="test_node",
             conversation_history_key=_make_conversation_history_key(component_name),
             output_key=_make_output_key(simple_output),
@@ -518,7 +531,6 @@ class TestResponseSchemaTracking:
             response_schema=AgentFinalOutput,
             response_schema_tracking=False,
             component_name=component_name,
-            internal_event_client=mock_event_client,
         )
 
         token = response_schema_tracking_results.set({})
@@ -556,9 +568,6 @@ class TestResponseSchemaTracking:
             response_schema=AgentFinalOutput,
             response_schema_tracking=True,
             component_name=component_name,
-            flow_id="test_flow_123",
-            flow_type=None,
-            internal_event_client=None,
         )
 
         token = response_schema_tracking_results.set({})
@@ -603,6 +612,11 @@ class TestResponseSchemaTracking:
         }
 
         node = FinalResponseNode(
+            tracker=WorkflowEventTracker(
+                flow_id="test_flow_123",
+                flow_type=flow_type,
+                internal_event_client=Mock(),
+            ),
             name="test_node",
             conversation_history_key=_make_conversation_history_key(component_name),
             output_key=_make_output_key(simple_output),
@@ -614,9 +628,6 @@ class TestResponseSchemaTracking:
                 "merge_request_url": "context:inputs.merge_request.url",
             },
             component_name=component_name,
-            flow_id="test_flow_123",
-            flow_type=flow_type,
-            internal_event_client=Mock(),
         )
 
         token = response_schema_tracking_results.set({})
@@ -658,6 +669,11 @@ class TestResponseSchemaTracking:
         flow_type = GLReportingEventContext("fix_pipeline", "fix_pipeline/v1", False)
 
         node = FinalResponseNode(
+            tracker=WorkflowEventTracker(
+                flow_id="test_flow_123",
+                flow_type=flow_type,
+                internal_event_client=Mock(),
+            ),
             name="test_node",
             conversation_history_key=_make_conversation_history_key(component_name),
             output_key=_make_output_key(simple_output),
@@ -669,9 +685,6 @@ class TestResponseSchemaTracking:
                 "merge_request_url": "context:inputs.merge_request.url",
             },
             component_name=component_name,
-            flow_id="test_flow_123",
-            flow_type=flow_type,
-            internal_event_client=Mock(),
         )
 
         token = response_schema_tracking_results.set({})

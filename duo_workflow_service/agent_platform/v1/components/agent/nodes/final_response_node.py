@@ -1,4 +1,3 @@
-import json
 from typing import Optional, Type
 
 import structlog
@@ -7,6 +6,9 @@ from langchain_core.messages import AIMessage, ToolMessage
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
+)
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    WorkflowEventTracker,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
     DEFAULT_SESSION_ID_KEY,
@@ -30,10 +32,6 @@ from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking.response_schema_tracking_context import (
     response_schema_tracking_results,
 )
-from lib.events import GLReportingEventContext
-from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.client import InternalEventsClient
-from lib.internal_events.event_enum import EventEnum
 
 __all__ = ["FinalResponseNode"]
 
@@ -83,9 +81,7 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         response_schema_tracking_context: Optional[dict[str, str]] = None,
         component_name: Optional[str] = None,
         session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
-        flow_id: Optional[str] = None,
-        flow_type: Optional[GLReportingEventContext] = None,
-        internal_event_client: Optional[InternalEventsClient] = None,
+        tracker: Optional[WorkflowEventTracker] = None,
     ):
         self.name = name
         self._ui_history = ui_history
@@ -96,9 +92,7 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         self._response_schema_tracking_context = response_schema_tracking_context or {}
         self._component_name = component_name
         self._session_id_key = session_id_key
-        self._flow_id = flow_id
-        self._flow_type = flow_type
-        self._internal_event_client = internal_event_client
+        self._tracker = tracker
 
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
@@ -221,7 +215,7 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         if collector:
             collector.capture(
                 ToolInvokedEvent(
-                    workflow_id=self._flow_id or "",
+                    workflow_id=self._tracker.flow_id if self._tracker else "",
                     tool_name=self._response_schema.tool_title,
                     tool_args=final_response_call.get("args", {}),
                     # Synthetic response-formatting tool authorized by config; it
@@ -266,14 +260,14 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         self, parsed_response: BaseAgentOutput, state: FlowState
     ) -> None:
         output_data = parsed_response.to_output()
-        flow_type_value = self._flow_type.value if self._flow_type else "unknown"
+        flow_type_value = self._tracker.flow_type.value if self._tracker else "unknown"
         component_name = self._component_name or self.name
         tracking_context = self._resolve_tracking_context(state)
 
         log.info(
             "Response schema output tracked",
             component_name=component_name,
-            flow_id=self._flow_id,
+            flow_id=self._tracker.flow_id if self._tracker else None,
             flow_type=flow_type_value,
             response_output=output_data,
             **tracking_context,
@@ -284,22 +278,8 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
             component_name=component_name,
         )
 
-        if self._internal_event_client and self._flow_type:
-            extra = {}
-            if isinstance(output_data, dict):
-                extra = {field: str(value) for field, value in output_data.items()}
-
-            additional_properties = InternalEventAdditionalProperties(
-                label=component_name,
-                property=json.dumps(output_data, default=str),
-                value=self._flow_id,
-                **extra,
-            )
-            self._internal_event_client.track_event(
-                event_name=EventEnum.WORKFLOW_RESPONSE_SCHEMA_OUTPUT.value,
-                additional_properties=additional_properties,
-                category=flow_type_value,
-            )
+        if self._tracker:
+            self._tracker.track_response_schema_output(component_name, output_data)
 
         # Store in ContextVar for access by the checkpointer at workflow completion.
         # Mutate the dict in-place so changes are visible to the parent async task

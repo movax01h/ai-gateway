@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, Optional
 
 from langchain_core.tools import BaseTool, ToolException
 from pydantic import ValidationError
@@ -11,7 +11,7 @@ from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 
-__all__ = ["ToolEventTracker"]
+__all__ = ["ToolEventTracker", "WorkflowEventTracker"]
 
 # The tool whose successful result means a new merge request now exists,
 # and the key it wraps the GitLab API response
@@ -19,8 +19,17 @@ CREATE_MERGE_REQUEST_TOOL_NAME = "create_merge_request"
 _CREATED_MR_RESPONSE_KEY = "created_merge_request"
 
 
-class ToolEventTracker:
-    """Class that centralises tool event tracking and error formatting."""
+class WorkflowEventTracker:
+    """Reports the internal events of one flow: it knows which flow they belong to and where they go.
+
+    Every event of a flow carries the flow's ID as its value and is filed under the flow's type. The nodes that report
+    take one tracker and ask it to report, so none of them repeats that and none has to be handed the three parts.
+
+    Args:
+        flow_id: The flow's ID, the value of every event it reports.
+        flow_type: The flow's reporting context, whose value is the category every event is filed under.
+        internal_event_client: Where the events go.
+    """
 
     def __init__(
         self,
@@ -32,6 +41,84 @@ class ToolEventTracker:
         self._flow_id = flow_id
         self._flow_type = flow_type
         self._internal_event_client = internal_event_client
+
+    @property
+    def flow_id(self) -> str:
+        """The flow's ID."""
+        return self._flow_id
+
+    @property
+    def flow_type(self) -> GLReportingEventContext:
+        """The flow's reporting context."""
+        return self._flow_type
+
+    def track(
+        self,
+        event_name: EventEnum,
+        label: Optional[str],
+        property_: str,
+        **extra: Any,
+    ) -> None:
+        """Report an event of this flow: its ID is the value, and its type is the category.
+
+        Args:
+            event_name: The event.
+            label: What the event is about, as the event's label. May be absent.
+            property_: The event's property.
+            **extra: Further fields the event carries.
+        """
+        self._internal_event_client.track_event(
+            event_name=event_name.value,
+            additional_properties=InternalEventAdditionalProperties(
+                label=label,
+                property=property_,
+                value=self._flow_id,
+                **extra,
+            ),
+            category=self._flow_type.value,
+        )
+
+    def track_max_cycles_reached(
+        self, component_name: Optional[str], max_cycles: Optional[int], cycle_count: int
+    ) -> None:
+        """Report that an agent crossed its ``max_cycles`` soft limit.
+
+        Args:
+            component_name: The design-time name of the agent's component, which labels the event. Absent when the
+                node's name carries none.
+            max_cycles: The agent's limit.
+            cycle_count: How many cycles it has run.
+        """
+        self.track(
+            EventEnum.WORKFLOW_MAX_CYCLES_REACHED,
+            label=component_name,
+            property_="workflow_id",
+            max_cycles=max_cycles,
+            cycle_count=cycle_count,
+        )
+
+    def track_response_schema_output(
+        self, component_name: str, output_data: Any
+    ) -> None:
+        """Report the structured output an agent produced through its response schema.
+
+        Args:
+            component_name: The name of the agent's component, which labels the event.
+            output_data: What the response schema produced. A dict also contributes each field as an extra.
+        """
+        extra = {}
+        if isinstance(output_data, dict):
+            extra = {field: str(value) for field, value in output_data.items()}
+        self.track(
+            EventEnum.WORKFLOW_RESPONSE_SCHEMA_OUTPUT,
+            label=component_name,
+            property_=json.dumps(output_data, default=str),
+            **extra,
+        )
+
+
+class ToolEventTracker(WorkflowEventTracker):
+    """Class that centralises tool event tracking and error formatting."""
 
     def track_internal_event(
         self,
@@ -82,19 +169,14 @@ class ToolEventTracker:
         except (json.JSONDecodeError, KeyError, TypeError):
             return
 
-        additional_properties = InternalEventAdditionalProperties(
+        self.track(
+            EventEnum.WORKFLOW_MERGE_REQUEST_CREATED,
             label=tool_name,
-            property=str(merge_request_id),
-            value=self._flow_id,
+            property_=str(merge_request_id),
             merge_request_iid=merge_request.get("iid"),
             created_merge_request_url=merge_request.get("web_url"),
             source_branch=merge_request.get("source_branch"),
             target_branch=merge_request.get("target_branch"),
-        )
-        self._internal_event_client.track_event(
-            event_name=EventEnum.WORKFLOW_MERGE_REQUEST_CREATED.value,
-            additional_properties=additional_properties,
-            category=self._flow_type.value,
         )
 
     def track_tool_governance_event(

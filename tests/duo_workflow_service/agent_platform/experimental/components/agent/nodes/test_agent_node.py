@@ -12,6 +12,9 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes.age
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
 from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    WorkflowEventTracker,
+)
 from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
@@ -54,9 +57,12 @@ def agent_node_fixture(
 ):
     """Fixture for AgentNode instance (default, no response schema)."""
     return AgentNode(
-        flow_id=flow_id,
-        flow_type=GLReportingEventContext.from_workflow_definition(
-            "software_development"
+        tracker=WorkflowEventTracker(
+            flow_id=flow_id,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
+            internal_event_client=mock_internal_event_client,
         ),
         name="test_agent_node",
         prompt=mock_prompt,
@@ -64,7 +70,6 @@ def agent_node_fixture(
         conversation_history_key=RuntimeIOKey(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
-        internal_event_client=mock_internal_event_client,
         invoke_config={},
         optimizer_pipeline=optimizer_pipeline,
     )
@@ -81,9 +86,12 @@ def agent_node_with_schema_fixture(
 ):
     """Fixture for AgentNode instance with AgentFinalOutput response schema."""
     return AgentNode(
-        flow_id=flow_id,
-        flow_type=GLReportingEventContext.from_workflow_definition(
-            "software_development"
+        tracker=WorkflowEventTracker(
+            flow_id=flow_id,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
+            internal_event_client=mock_internal_event_client,
         ),
         name="test_agent_node",
         prompt=mock_prompt,
@@ -91,7 +99,6 @@ def agent_node_with_schema_fixture(
         conversation_history_key=RuntimeIOKey(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
-        internal_event_client=mock_internal_event_client,
         invoke_config={},
         optimizer_pipeline=optimizer_pipeline,
         response_schema=AgentFinalOutput,
@@ -270,9 +277,12 @@ class TestAgentNode:
             mock_error_handler.handle_error = AsyncMock()
 
             agent_node = AgentNode(
-                flow_id=flow_id,
-                flow_type=GLReportingEventContext.from_workflow_definition(
-                    "software_development"
+                tracker=WorkflowEventTracker(
+                    flow_id=flow_id,
+                    flow_type=GLReportingEventContext.from_workflow_definition(
+                        "software_development"
+                    ),
+                    internal_event_client=mock_internal_event_client,
                 ),
                 name="test_agent_node",
                 prompt=mock_prompt,
@@ -281,7 +291,6 @@ class TestAgentNode:
                     alias="conversation_history",
                     factory=lambda _: conversation_history_key,
                 ),
-                internal_event_client=mock_internal_event_client,
                 invoke_config={},
                 optimizer_pipeline=optimizer_pipeline,
             )

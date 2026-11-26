@@ -210,15 +210,19 @@ class OneOffComponent(PromptReference, BaseComponent):
             factory=lambda _: static_history_key,
         )
 
+        tracker = ToolEventTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+        )
+
         # reuse existing agent_node
         agent_node = AgentNode(
             name=self.__entry_hook__(),
             conversation_history_key=conversation_history_key_runtime,
             prompt=prompt,
             inputs=self.inputs,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
+            tracker=tracker,
             # OneOffComponent has no streaming-relevant ui_log_events — always suppress.
             invoke_config={"tags": [TAG_NOSTREAM]},
             max_context_tokens=get_model_max_context_token_limit(self.model_tags),
@@ -226,11 +230,6 @@ class OneOffComponent(PromptReference, BaseComponent):
         )
 
         # Use enhanced tool node with error correction
-        tracker = ToolEventTracker(
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
-        )
         tool_node = ToolNodeWithErrorCorrection(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
             component_name=self.name,

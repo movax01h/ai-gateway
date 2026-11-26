@@ -244,10 +244,11 @@ class TestOneOffComponentAttachNodes:
             == mock_prompt_registry.get_on_behalf.return_value
         )
         assert agent_call_kwargs["inputs"] == inputs
-        assert agent_call_kwargs["flow_id"] == flow_id
-        assert agent_call_kwargs["flow_type"] == flow_type
+        agent_tracker = agent_call_kwargs["tracker"]
+        assert agent_tracker.flow_id == flow_id
+        assert agent_tracker.flow_type == flow_type
         assert (
-            agent_call_kwargs["internal_event_client"]
+            agent_tracker._internal_event_client
             == one_off_component.internal_event_client
         )
         # Wiring guard: attach passes the resolved per-agent limit through.
