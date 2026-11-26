@@ -689,14 +689,18 @@ class SupervisorAgentComponent(AgentComponentBase):
             for e in self.ui_log_events
             if e.name in UILogEventsAgent.__members__
         ]
+        tracker = ToolEventTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+        )
+
         node_agent = AgentNode(
             name=self.__entry_hook__(),
             conversation_history_key=supervisor_history_key,
             prompt=prompt,
             inputs=self.inputs,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
+            tracker=tracker,
             invoke_config=self._agent_node_invoke_config(),
             optimizer_pipeline=self._build_optimizer_pipeline(),
             response_schema=self._response_schema,
@@ -707,11 +711,6 @@ class SupervisorAgentComponent(AgentComponentBase):
                 ),
             ),
             cycle_budget=self._cycle_budget,
-        )
-        tracker = ToolEventTracker(
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
         )
         node_tools = ToolNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",

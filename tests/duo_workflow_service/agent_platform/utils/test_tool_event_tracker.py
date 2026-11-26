@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
+    WorkflowEventTracker,
 )
 from duo_workflow_service.policies.target_tool_governance import (
     TargetToolGovernanceUnavailable,
@@ -340,3 +341,58 @@ def test_governance_event_reaches_a_real_counter(event_name, outcome, expected_o
     assert samples[0].labels["event"] == event_name.value
     assert samples[0].labels["outcome"] == expected_outcome
     assert samples[0].labels["flow_type"] == "chat"
+
+
+class TestWorkflowEventTracker:
+    """What every node that reports shares: the flow's ID is the event's value, and its type is the category."""
+
+    @pytest.fixture(name="client")
+    def client_fixture(self):
+        return Mock()
+
+    @pytest.fixture(name="workflow_tracker")
+    def workflow_tracker_fixture(self, client):
+        return WorkflowEventTracker(
+            flow_id="test-flow-123",
+            flow_type=Mock(value="software_development"),
+            internal_event_client=client,
+        )
+
+    def test_exposes_the_flow_it_reports_for(self, workflow_tracker):
+        assert workflow_tracker.flow_id == "test-flow-123"
+        assert workflow_tracker.flow_type.value == "software_development"
+
+    def test_track_files_the_event_under_the_flows_type_with_its_id_as_value(
+        self, workflow_tracker, client
+    ):
+        workflow_tracker.track(
+            EventEnum.WORKFLOW_MAX_CYCLES_REACHED, "label", "property", extra_field=1
+        )
+
+        client.track_event.assert_called_once()
+        kwargs = client.track_event.call_args.kwargs
+        assert kwargs["event_name"] == EventEnum.WORKFLOW_MAX_CYCLES_REACHED.value
+        assert kwargs["category"] == "software_development"
+        properties = kwargs["additional_properties"]
+        assert (properties.label, properties.property, properties.value) == (
+            "label",
+            "property",
+            "test-flow-123",
+        )
+        assert properties.extra == {"extra_field": 1}
+
+    @pytest.mark.parametrize("field", ["event_name", "property_"])
+    def test_track_sends_a_field_named_like_one_of_its_arguments_as_an_extra(
+        self, workflow_tracker, client, field
+    ):
+        # An agent's response schema can have a field with either name, and each field is sent as an extra of the event.
+        workflow_tracker.track(
+            EventEnum.WORKFLOW_RESPONSE_SCHEMA_OUTPUT,
+            "component",
+            "the output",
+            **{field: "a value"},
+        )
+
+        properties = client.track_event.call_args.kwargs["additional_properties"]
+        assert (properties.label, properties.property) == ("component", "the output")
+        assert properties.extra == {field: "a value"}

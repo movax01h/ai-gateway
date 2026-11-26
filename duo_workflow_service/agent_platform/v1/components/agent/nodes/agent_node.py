@@ -36,6 +36,9 @@ from duo_workflow_service.agent_platform.core.inbox import (
 )
 from duo_workflow_service.agent_platform.core.inbox.view import inbound_messages_view
 from duo_workflow_service.agent_platform.node_naming import component_name_from_node
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    WorkflowEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
@@ -85,9 +88,7 @@ from duo_workflow_service.gitlab.help_links import help_page_url
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking.langsmith_tags import tag_current_run
 from lib.context import LLMFinishReason, extract_finish_reason
-from lib.events import GLReportingEventContext
 from lib.events.contextvar import mark_llm_call_retry
-from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum
 
 __all__ = [
@@ -219,15 +220,14 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     This surfaces the LLM's reasoning commentary in the session view.
 
     Args:
-        flow_id: Identifier of the current flow execution.
-        flow_type: Reporting context used for internal events and metrics.
+        tracker: Reports this agent's internal events, such as reaching its ``max_cycles`` limit, for the flow it belongs
+            to, and says which flow that is for the metrics the agent records.
         name: LangGraph node name (used when registering with ``StateGraph``).
         prompt: Bound ``Prompt`` instance used to invoke the LLM.
         inputs: ``IOKey`` list describing which state values to pass as prompt
             variables.
         conversation_history_key: ``RuntimeIOKey`` that resolves the
             conversation-history ``IOKey`` at runtime.
-        internal_event_client: Client for tracking internal telemetry events.
         ui_history: Optional UI log history writer.  When provided, reasoning
             text from mid-loop ``AIMessage``s is emitted as
             ``ON_AGENT_REASONING`` entries (if that event is enabled).
@@ -269,10 +269,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
     _conversation_history_key: RuntimeIOKey
 
-    _internal_event_client: InternalEventsClient
-
-    _flow_id: str
-    _flow_type: GLReportingEventContext
+    _tracker: WorkflowEventTracker
     _error_handler: ModelErrorHandler
     _optimizer_pipeline: HistoryOptimizerPipeline
     _ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]]
@@ -286,12 +283,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
     def __init__(
         self,
-        flow_id: str,
-        flow_type: GLReportingEventContext,
+        tracker: WorkflowEventTracker,
         name: str,
         prompt: Prompt,
         inputs: Sequence[IOKey | RuntimeIOKey],
-        internal_event_client: InternalEventsClient,
         conversation_history_key: RuntimeIOKey,
         invoke_config: RunnableConfig,
         optimizer_pipeline: HistoryOptimizerPipeline,
@@ -307,12 +302,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         # Which inbox messages this agent takes, set by the component that owns the node. Without one the agent
         # claims nothing.
         self.claimant: Optional[Callable[[FlowState], Claimant]] = None
-        self._flow_id = flow_id
-        self._flow_type = flow_type
+        self._tracker = tracker
         self.name = name
         self._prompt = prompt
         self._inputs = inputs
-        self._internal_event_client = internal_event_client
         self._error_handler = ModelErrorHandler()
         self._optimizer_pipeline = optimizer_pipeline
         self._conversation_history_key = conversation_history_key
@@ -509,17 +502,12 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         node name (``{component}#agent``); the label is the design-time component name, matching how
         ``duo_workflow_compaction_executed`` labels the same agent.
         """
-        additional_properties = InternalEventAdditionalProperties(
-            label=component_name_from_node(self.name),
-            property="workflow_id",
-            value=self._flow_id,
+        self._tracker.track(
+            EventEnum.WORKFLOW_MAX_CYCLES_REACHED,
+            component_name_from_node(self.name),
+            "workflow_id",
             max_cycles=self._cycle_budget.max_cycles,
             cycle_count=cycle_count,
-        )
-        self._internal_event_client.track_event(
-            event_name=EventEnum.WORKFLOW_MAX_CYCLES_REACHED.value,
-            additional_properties=additional_properties,
-            category=self._flow_type.value,
         )
 
     def _iteration_warning_message(self, cycles_remaining: int) -> str:
@@ -1065,7 +1053,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             provider_message=message[:500],
         )
         duo_workflow_metrics.count_image_fallback(
-            flow_type=self._flow_type.value,
+            flow_type=self._tracker.flow_type.value,
             kind=kind.value,
             model_name=prompt.reported_model_name,
             model_vendor=prompt.model_vendor or "unknown",

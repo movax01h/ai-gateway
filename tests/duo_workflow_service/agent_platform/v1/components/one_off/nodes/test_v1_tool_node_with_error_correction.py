@@ -1070,26 +1070,21 @@ class TestToolNodeWithErrorCorrectionMonitoring:
         # Verify monitoring was called
         mock_tool_monitoring.time_tool_call.assert_called_once_with(
             tool_name=mock_tool.name,
-            flow_type=tool_node_with_error_correction._tracker._flow_type.value,
+            flow_type=tool_node_with_error_correction._tracker.flow_type.value,
         )
 
-    def test_record_metric_for_tool_failure(
+    def test_a_tool_failure_is_counted_with_the_flows_type(
         self, tool_node_with_error_correction, mock_tool_monitoring
     ):
-        """Test _record_metric method for tool failures."""
-        from lib.internal_events import InternalEventAdditionalProperties
-
-        additional_props = InternalEventAdditionalProperties(
-            property="test_tool", error_type="TypeError"
+        """The node's tracker counts a failure through its public path, labelled with the flow's type."""
+        tool_node_with_error_correction._tracker.track_internal_event(
+            EventEnum.WORKFLOW_TOOL_FAILURE,
+            tool_name="test_tool",
+            extra={"error_type": "TypeError"},
         )
 
-        tool_node_with_error_correction._tracker._record_metric(
-            EventEnum.WORKFLOW_TOOL_FAILURE, additional_props
-        )
-
-        # Verify metrics were recorded
         mock_tool_monitoring.count_agent_platform_tool_failure.assert_called_once_with(
-            flow_type=tool_node_with_error_correction._tracker._flow_type.value,
+            flow_type=tool_node_with_error_correction._tracker.flow_type.value,
             tool_name="test_tool",
             failure_reason="TypeError",
         )

@@ -113,25 +113,24 @@ class OneOffComponent(AgentComponentBase):
         )
 
         # reuse existing agent_node
+        tracker = ToolEventTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+        )
+
         agent_node = AgentNode(
             name=self.__entry_hook__(),
             conversation_history_key=self._default_conversation_history_key,
             prompt=prompt,
             inputs=self.inputs,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
+            tracker=tracker,
             # OneOffComponent has no streaming-relevant ui_log_events — always suppress.
             invoke_config=self.STREAMING_DISABLED_CONFIG,
             optimizer_pipeline=self._build_optimizer_pipeline(),
         )
 
         # Use enhanced tool node with error correction
-        tracker = ToolEventTracker(
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
-        )
         tool_node = ToolNodeWithErrorCorrection(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
             component_name=self.name,

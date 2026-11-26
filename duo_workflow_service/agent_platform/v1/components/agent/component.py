@@ -1204,14 +1204,18 @@ class AgentComponent(AgentComponentBase):
                 template_inputs={"tools_enabled": self._tools_enabled(wrap_up)},
             )
 
+        tracker = ToolEventTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+        )
+
         node_agent = AgentNode(
             name=self.__entry_hook__(),
             conversation_history_key=self._conversation_history_key,
             prompt=prompt,
             inputs=self.inputs,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
+            tracker=tracker,
             invoke_config=self._agent_node_invoke_config(),
             max_context_tokens=get_model_max_context_token_limit(self.model_tags),
             optimizer_pipeline=self._build_optimizer_pipeline(),
@@ -1227,11 +1231,6 @@ class AgentComponent(AgentComponentBase):
             trim_ui_chat_log=self._trim_ui_chat_log,
             prompt_template_inputs={"tools_enabled": self._tools_enabled(prompt)},
             wrap_up_prompt=wrap_up_prompt,
-        )
-        tracker = ToolEventTracker(
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
         )
         node_tools = ToolNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
@@ -1266,9 +1265,7 @@ class AgentComponent(AgentComponentBase):
             response_schema_tracking_context=self.response_schema_tracking_context,
             component_name=self.name,
             session_id_key=self._session_id_key,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
+            tracker=tracker,
         )
 
         node_agent.claimant = self._claimant

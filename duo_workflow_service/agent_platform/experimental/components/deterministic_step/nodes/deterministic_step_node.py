@@ -123,7 +123,7 @@ class DeterministicStepNode:
         self, tool_call_args: dict[str, Any], tool: BaseTool
     ) -> str | Any:
         with duo_workflow_metrics.time_tool_call(
-            tool_name=tool.name, flow_type=self._tracker._flow_type.value
+            tool_name=tool.name, flow_type=self._tracker.flow_type.value
         ):
             tool_call_result = await tool.ainvoke(tool_call_args)
 
