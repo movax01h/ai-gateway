@@ -171,6 +171,16 @@ sanity-check-trigger:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_DRAFT == "true"
       changes: !reference [.duo-workflow-service-dependencies, changes]
       when: manual
+    # A change to the eval pipeline itself must be testable in its own MR.
+    # GitLab does not flatten a nested !reference in `changes`, so these files
+    # have their own rules.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_DRAFT == "true"
+      changes: &sanity-check-pipeline-files
+        - .gitlab/ci/sanity-check.gitlab-ci.yml
+        - scripts/submit_cef_eval.sh
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: *sanity-check-pipeline-files
     # Only changes that can affect agent quality are worth a CEF eval; the
     # push rule (rather than any pipeline source) keeps scheduled/web/API
     # pipelines on the default branch from firing it.

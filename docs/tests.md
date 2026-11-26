@@ -216,6 +216,9 @@ dedicated VM, so the delay lets rapidly superseded pipelines auto-cancel before 
 On a Draft merge request, the job is manual. Marking the merge request as ready does not
 start a pipeline, so to get the eval before merge, push again, run a new pipeline, or start
 the manual job.
+The trigger also runs on MR pipelines that change `.gitlab/ci/sanity-check.gitlab-ci.yml` or
+`scripts/submit_cef_eval.sh`, so a change to the eval pipeline can be tested in its own merge
+request.
 
 ### Triaging sanity-check failures
 
