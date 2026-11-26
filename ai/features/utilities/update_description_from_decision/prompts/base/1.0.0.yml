@@ -1,0 +1,9 @@
+---
+name: Update Description From Decision
+unit_primitive: duo_agent_platform
+models_from: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'update_description_from_decision/system/1.0.0.jinja' %}
+  user: |
+    {% include 'update_description_from_decision/user/1.0.0.jinja' %}
