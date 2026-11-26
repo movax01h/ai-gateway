@@ -1,10 +1,12 @@
 # pylint: disable=file-naming-for-tests,import-outside-toplevel
 import json
+from typing import ClassVar
 from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
+from ai_gateway.response_schemas.base import BaseAgentOutput
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -496,6 +498,68 @@ class TestResponseSchemaTracking:
             assert component_name in results
         finally:
             response_schema_tracking_results.reset(token)
+
+    @pytest.mark.asyncio
+    @patch(
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.final_response_node.duo_workflow_metrics"
+    )
+    async def test_a_schema_field_named_like_an_argument_of_the_event_is_sent_as_an_extra(
+        self, _mock_metrics, component_name, simple_output, base_flow_state, ui_history
+    ):
+        from duo_workflow_service.tracking.response_schema_tracking_context import (
+            response_schema_tracking_results,
+        )
+
+        class NamedLikeTheEventOutput(BaseAgentOutput):
+            tool_title: ClassVar[str] = "set_task_status"
+
+            event_name: str
+            property_: str
+
+            def to_output(self) -> dict:
+                return self.model_dump()
+
+        mock_event_client = Mock()
+        node = FinalResponseNode(
+            tracker=WorkflowEventTracker(
+                flow_id="test_flow_123",
+                flow_type=GLReportingEventContext(
+                    "fix_pipeline", "fix_pipeline/v1", False
+                ),
+                internal_event_client=mock_event_client,
+            ),
+            name="test_node",
+            conversation_history_key=_make_conversation_history_key(component_name),
+            output_key=_make_output_key(simple_output),
+            ui_history=ui_history,
+            response_schema=NamedLikeTheEventOutput,
+            response_schema_tracking=True,
+            component_name=component_name,
+        )
+        message = Mock(spec=AIMessage)
+        message.tool_calls = [
+            {
+                "id": "tool_id",
+                "name": NamedLikeTheEventOutput.tool_title,
+                "args": {"event_name": "an event", "property_": "a property"},
+            }
+        ]
+        state = {**base_flow_state, "conversation_history": {component_name: [message]}}
+
+        token = response_schema_tracking_results.set({})
+        try:
+            await node.run(state)
+        finally:
+            response_schema_tracking_results.reset(token)
+
+        # The final response finished, and the fields went out with the event as extras.
+        properties = mock_event_client.track_event.call_args.kwargs[
+            "additional_properties"
+        ]
+        assert properties.extra == {
+            "event_name": "an event",
+            "property_": "a property",
+        }
 
     @pytest.mark.asyncio
     @patch(

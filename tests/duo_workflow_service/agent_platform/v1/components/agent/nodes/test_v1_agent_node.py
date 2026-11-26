@@ -2818,6 +2818,32 @@ class TestAgentNodeMaxCycles:
         _, kwargs = mock_internal_event_client.track_event.call_args
         assert kwargs["additional_properties"].label == "fix_pipeline_execution"
 
+    @pytest.mark.asyncio
+    async def test_soft_limit_event_has_no_label_when_the_node_name_carries_no_component(
+        self,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        mock_internal_event_client,
+    ):
+        """A node named with nothing reports the event unlabelled, and still reports it."""
+        state = copy.deepcopy(base_flow_state)
+        state["context"].setdefault(component_name, {})["cycle_count"] = 2
+        agent_node = make_agent_node(name="")
+
+        await agent_node.run(state)
+
+        mock_internal_event_client.track_event.assert_called_once()
+        properties = mock_internal_event_client.track_event.call_args.kwargs[
+            "additional_properties"
+        ]
+        assert properties.label is None
+        assert (properties.property, properties.value) == (
+            "workflow_id",
+            "test_flow_id",
+        )
+        assert properties.extra == {"max_cycles": 3, "cycle_count": 3}
+
 
 class TestAgentNodeIterationWarning:
     """Test suite for AgentNode approaching-soft-limit warning (iteration_warning_offset)."""

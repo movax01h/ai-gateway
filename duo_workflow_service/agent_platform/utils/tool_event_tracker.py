@@ -57,9 +57,13 @@ class WorkflowEventTracker:
         event_name: EventEnum,
         label: Optional[str],
         property_: str,
+        /,
         **extra: Any,
     ) -> None:
         """Report an event of this flow: its ID is the value, and its type is the category.
+
+        The first three arguments are positional-only, so a field of the event can be named like one of them: an agent's
+        response schema may have a field called ``event_name`` or ``property_``, and it is sent as an extra.
 
         Args:
             event_name: The event.
@@ -78,44 +82,6 @@ class WorkflowEventTracker:
             category=self._flow_type.value,
         )
 
-    def track_max_cycles_reached(
-        self, component_name: Optional[str], max_cycles: Optional[int], cycle_count: int
-    ) -> None:
-        """Report that an agent crossed its ``max_cycles`` soft limit.
-
-        Args:
-            component_name: The design-time name of the agent's component, which labels the event. Absent when the
-                node's name carries none.
-            max_cycles: The agent's limit.
-            cycle_count: How many cycles it has run.
-        """
-        self.track(
-            EventEnum.WORKFLOW_MAX_CYCLES_REACHED,
-            label=component_name,
-            property_="workflow_id",
-            max_cycles=max_cycles,
-            cycle_count=cycle_count,
-        )
-
-    def track_response_schema_output(
-        self, component_name: str, output_data: Any
-    ) -> None:
-        """Report the structured output an agent produced through its response schema.
-
-        Args:
-            component_name: The name of the agent's component, which labels the event.
-            output_data: What the response schema produced. A dict also contributes each field as an extra.
-        """
-        extra = {}
-        if isinstance(output_data, dict):
-            extra = {field: str(value) for field, value in output_data.items()}
-        self.track(
-            EventEnum.WORKFLOW_RESPONSE_SCHEMA_OUTPUT,
-            label=component_name,
-            property_=json.dumps(output_data, default=str),
-            **extra,
-        )
-
 
 class ToolEventTracker(WorkflowEventTracker):
     """Class that centralises tool event tracking and error formatting."""
@@ -132,24 +98,16 @@ class ToolEventTracker(WorkflowEventTracker):
             "client_capabilities": list(client_capabilities.get()),
         }
 
-        additional_properties = InternalEventAdditionalProperties(
-            label=EventLabelEnum.WORKFLOW_TOOL_CALL_LABEL.value,
-            property=tool_name,
-            value=self._flow_id,
-            **extra,
-        )
         if event_name == EventEnum.WORKFLOW_TOOL_SUCCESS:
             current = tool_executions.get()
             if current is not None:
                 current.append(tool_name)
-        self._record_metric(
-            event_name=event_name,
-            additional_properties=additional_properties,
-        )
-        self._internal_event_client.track_event(
-            event_name=event_name.value,
-            additional_properties=additional_properties,
-            category=self._flow_type.value,
+        self._record_metric(event_name=event_name, tool_name=tool_name, extra=extra)
+        self.track(
+            event_name,
+            EventLabelEnum.WORKFLOW_TOOL_CALL_LABEL.value,
+            tool_name,
+            **extra,
         )
 
     def track_merge_request_created(self, tool_name: str, tool_response: Any) -> None:
@@ -171,8 +129,8 @@ class ToolEventTracker(WorkflowEventTracker):
 
         self.track(
             EventEnum.WORKFLOW_MERGE_REQUEST_CREATED,
-            label=tool_name,
-            property_=str(merge_request_id),
+            tool_name,
+            str(merge_request_id),
             merge_request_iid=merge_request.get("iid"),
             created_merge_request_url=merge_request.get("web_url"),
             source_branch=merge_request.get("source_branch"),
@@ -198,12 +156,13 @@ class ToolEventTracker(WorkflowEventTracker):
     def _record_metric(
         self,
         event_name: EventEnum,
-        additional_properties: InternalEventAdditionalProperties,
+        tool_name: str,
+        extra: dict[str, Any],
     ) -> None:
         """Record Prometheus metrics for tool failures."""
         if event_name == EventEnum.WORKFLOW_TOOL_FAILURE:
-            tool_name = additional_properties.property or "unknown"
-            failure_reason = additional_properties.extra.get("error_type", "unknown")
+            tool_name = tool_name or "unknown"
+            failure_reason = extra.get("error_type", "unknown")
             duo_workflow_metrics.count_agent_platform_tool_failure(
                 flow_type=self._flow_type.value,
                 tool_name=tool_name,

@@ -1,3 +1,4 @@
+import json
 from typing import Optional, Type
 
 import structlog
@@ -32,6 +33,7 @@ from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking.response_schema_tracking_context import (
     response_schema_tracking_results,
 )
+from lib.internal_events.event_enum import EventEnum
 
 __all__ = ["FinalResponseNode"]
 
@@ -279,7 +281,15 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         )
 
         if self._tracker:
-            self._tracker.track_response_schema_output(component_name, output_data)
+            extra = {}
+            if isinstance(output_data, dict):
+                extra = {field: str(value) for field, value in output_data.items()}
+            self._tracker.track(
+                EventEnum.WORKFLOW_RESPONSE_SCHEMA_OUTPUT,
+                component_name,
+                json.dumps(output_data, default=str),
+                **extra,
+            )
 
         # Store in ContextVar for access by the checkpointer at workflow completion.
         # Mutate the dict in-place so changes are visible to the parent async task

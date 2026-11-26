@@ -436,7 +436,7 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
             record_approval_source(tool_call_id, ApprovalSource.PREAPPROVED_CONFIG)
 
             with duo_workflow_metrics.time_tool_call(
-                tool_name=tool.name, flow_type=self._tracker._flow_type.value
+                tool_name=tool.name, flow_type=self._tracker.flow_type.value
             ):
                 # Wrap as a ToolCall dict (not bare args) so tool_call_id threads through
                 # to on_tool_start for approval_source lookup; unwrap the resulting

@@ -353,41 +353,18 @@ class TestWorkflowEventTracker:
         )
         assert properties.extra == {"extra_field": 1}
 
-    def test_reports_that_an_agent_crossed_its_cycle_limit(
-        self, workflow_tracker, client
+    @pytest.mark.parametrize("field", ["event_name", "property_"])
+    def test_track_sends_a_field_named_like_one_of_its_arguments_as_an_extra(
+        self, workflow_tracker, client, field
     ):
-        workflow_tracker.track_max_cycles_reached("developer", 3, 4)
-
-        kwargs = client.track_event.call_args.kwargs
-        assert kwargs["event_name"] == "duo_workflow_max_cycles_reached"
-        properties = kwargs["additional_properties"]
-        assert (properties.label, properties.property) == ("developer", "workflow_id")
-        assert properties.extra == {"max_cycles": 3, "cycle_count": 4}
-
-    @pytest.mark.parametrize(
-        "output,extra",
-        [
-            ({"summary": "done", "score": 3}, {"summary": "done", "score": "3"}),
-            ("plain text", {}),
-        ],
-        ids=["a_dict_contributes_each_field", "anything_else_is_only_the_property"],
-    )
-    def test_reports_the_structured_output_of_an_agent(
-        self, workflow_tracker, client, output, extra
-    ):
-        workflow_tracker.track_response_schema_output("developer", output)
-
-        kwargs = client.track_event.call_args.kwargs
-        assert kwargs["event_name"] == "duo_workflow_response_schema_output"
-        properties = kwargs["additional_properties"]
-        assert properties.label == "developer"
-        assert json.loads(properties.property) == output
-        assert properties.extra == extra
-
-    def test_a_tool_tracker_is_a_workflow_tracker_and_reports_the_same_way(self):
-        tool_tracker = ToolEventTracker(
-            flow_id="f", flow_type=Mock(value="t"), internal_event_client=Mock()
+        # An agent's response schema can have a field with either name, and each field is sent as an extra of the event.
+        workflow_tracker.track(
+            EventEnum.WORKFLOW_RESPONSE_SCHEMA_OUTPUT,
+            "component",
+            "the output",
+            **{field: "a value"},
         )
 
-        assert isinstance(tool_tracker, WorkflowEventTracker)
-        assert (tool_tracker.flow_id, tool_tracker.flow_type.value) == ("f", "t")
+        properties = client.track_event.call_args.kwargs["additional_properties"]
+        assert (properties.label, properties.property) == ("component", "the output")
+        assert properties.extra == {field: "a value"}
