@@ -160,6 +160,33 @@ instructions:
         writes in a batch, which write comes first), it must say so in a comment and a test must pin it.
         Why: an upgrade that changes the property otherwise breaks stored checkpoints with no failing test.
 
+  - name: In-process caches
+    fileFilters:
+      - "**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      For a new process-wide cache (`functools.lru_cache`, `cache`, a module-level dict or an LRU class), verify:
+      1. Where do the keys come from? If any key can be derived from client input (an inline flow config, a prompt,
+        a request body), the cache must be bounded by the bytes it holds, not by its number of entries. Why: an
+        entry-count limit such as `maxsize=1024` still allows 1024 entries of several MiB each, and the memory can
+        stay held after `cache_clear()`.
+      1. Weigh the whole entry (key and cached value), not only the key length. Why: the value can weigh many times
+        its key, and a character count is not a byte count (CPython stores 1, 2 or 4 bytes per character).
+      1. Entries that are too large to keep must be returned to the caller but not stored. Apply the size check where
+        the entry is stored, including on validation paths that run before an input is rejected. Why: otherwise inputs
+        that are rejected anyway still fill the cache with unused entries.
+      1. Keys must not include text that differs per session or per request (rendered output, usernames, random
+        suffixes). Why: every such call adds an entry that is never hit again and evicts useful ones.
+      1. Callers must get a copy of a mutable cached value, or the cache must hold an immutable one.
+      1. An `autouse` fixture must reset the cache between tests, in a `conftest.py` that every test of the cached code
+        can see. Use the root `conftest.py` when tests outside `tests/` use it, such as feature tests in
+        `ai/features/<domain>/<feature>/tests/`. The same applies to a module-level registry or singleton. Why: the
+        suite runs in random order with xdist, so a test that reuses a key with different mocks passes or fails by
+        order.
+      1. A test must fail when the bound is removed: one test at the limit and one just over it. For nested input,
+        test a multi-level case (for example includes of includes), not only one level. Why: an unbounded cache or a
+        one-level recursion can pass the whole suite unnoticed.
+
   - name: Dependency Injection
     fileFilters:
       - "**/*.py"
