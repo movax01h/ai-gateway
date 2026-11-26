@@ -274,12 +274,22 @@ include:
 # Overwrite internal_events_validation to start as soon as possible.
 # The component include stays in the sync schedule, because this override
 # has no script. A job rule removes the job instead.
+# On MRs, run only when config/events/ or this file (validator version) changes.
+# product_group is still checked against gitlab-org/gitlab@master, so main and schedules always run it.
 Internal event definitions validation:
   needs: []
   rules:
     - <<: *if-security-sync-schedule
       when: never
-    - if: $CI_SERVER_HOST == "gitlab.com"
+    - if: $CI_SERVER_HOST != "gitlab.com"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - config/events/**/*
+        - .gitlab-ci.yml
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - when: on_success
 
 # Use the same larger runner as tests:unit so the analyzer has enough CPU/memory
 # to run its multi-core scan instead of falling back to a single core.
