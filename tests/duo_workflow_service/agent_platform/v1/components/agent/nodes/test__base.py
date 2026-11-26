@@ -1,4 +1,3 @@
-# pylint: disable=file-naming-for-tests
 import pytest
 
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._base import (
