@@ -247,6 +247,8 @@ async def test_send_event_with_missing_plan_steps(checkpoint_notifier):
 def test_workflow_status_mapping():
     expected_mapping = {
         WorkflowStatusEnum.EXECUTION: "RUNNING",
+        # Rails and the client see a running session: neither has a status for a turn being recovered.
+        WorkflowStatusEnum.RECOVERY: "RUNNING",
         WorkflowStatusEnum.ERROR: "FAILED",
         WorkflowStatusEnum.INPUT_REQUIRED: "INPUT_REQUIRED",
         WorkflowStatusEnum.IDLE: "IDLE",

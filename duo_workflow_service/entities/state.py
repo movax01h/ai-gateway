@@ -57,6 +57,10 @@ class WorkflowStatusEnum(StrEnum):
     APPROVAL_ERROR = "approval_error"
     FINISHED = "finished"
     STOPPED = "stopped"
+    # A turn that stopped or failed is being recovered. The nodes that would act on what the user interrupted yield
+    # while it holds, and the agent that claims the message that recovers the turn sets EXECUTION again. Rails sees a
+    # running session: it has no status of its own for this.
+    RECOVERY = "recovery"
 
 
 class MessageTypeEnum(StrEnum):

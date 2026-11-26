@@ -2214,11 +2214,15 @@ def test_aput_with_no_status_update(
     assert status_event is None
 
 
+@pytest.mark.parametrize(
+    "status", [WorkflowStatusEnum.APPROVAL_ERROR, WorkflowStatusEnum.RECOVERY]
+)
 def test_aput_with_noop_status_update(
     http_client,
     workflow_id,
     workflow_type,
     workflow_config,
+    status,
 ):
     workflow = GitLabWorkflow(
         http_client,
@@ -2227,8 +2231,7 @@ def test_aput_with_noop_status_update(
         workflow_config=workflow_config,
     )
 
-    # status update with noop status (approval_error)
-    writes: Sequence[tuple[str, Any]] = [("status", WorkflowStatusEnum.APPROVAL_ERROR)]
+    writes: Sequence[tuple[str, Any]] = [("status", status)]
     status_event = workflow._get_workflow_status_event(writes)
     assert status_event is None
 

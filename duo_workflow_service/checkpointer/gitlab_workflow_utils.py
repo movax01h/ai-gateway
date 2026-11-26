@@ -103,7 +103,13 @@ def decode_gitlab_checkpoint_payload(checkpoint: Mapping[str, Any]) -> dict:
     return json.loads(checkpoint["checkpoint"], object_hook=checkpoint_decoder)
 
 
-NOOP_WORKFLOW_STATUSES = [WorkflowStatusEnum.APPROVAL_ERROR]
+# Statuses that are shown as RUNNING and never sent to Rails as a status event. RECOVERY is the engine's own marker that a
+# stopped or failed turn is being continued: Rails already says running, and an event from it would move the session
+# before the node that decides what the turn does next has run.
+NOOP_WORKFLOW_STATUSES = [
+    WorkflowStatusEnum.APPROVAL_ERROR,
+    WorkflowStatusEnum.RECOVERY,
+]
 
 # Statuses where a session rests and takes a next free-text message: a gate's
 # INPUT_REQUIRED or the chat engine's IDLE turn boundary. Approvals are not in

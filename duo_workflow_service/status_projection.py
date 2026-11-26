@@ -7,6 +7,10 @@ status event and the streamed checkpoint's ``status``. The saved checkpoint keep
 ``IDLE`` is the first such status: a session at rest after a turn, done for now and taking a next message. The
 nearest status older consumers know is ``INPUT_REQUIRED``, which is exactly what they saw before ``IDLE`` existed.
 
+``RECOVERY`` is decided in ``gitlab_workflow_utils`` instead, because it needs no capability: no consumer renders it,
+so every one sees ``RUNNING`` (``WORKFLOW_STATUS_TO_CHECKPOINT_STATUS``), and a write of it sends no Rails status event
+(``NOOP_WORKFLOW_STATUSES``).
+
 Two consumers, two capabilities, both negotiated through the existing capability list Workhorse forwards.
 
 GitLab advertises ``IDLE_STATUS_EVENT_CAPABILITY`` as a server capability when it accepts the ``idle`` status event.
