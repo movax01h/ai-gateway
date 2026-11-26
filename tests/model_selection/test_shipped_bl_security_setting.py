@@ -45,6 +45,17 @@ def test_the_default_model_sends_no_sampling_params(selection_config):
     assert getattr(params, "top_p", None) is None
 
 
+def test_fable_5_2_is_selectable_for_bl_security_but_not_a_default(selection_config):
+    setting = selection_config.get_unit_primitive_config_map()[_FEATURE_SETTING]
+    assert "claude_fable_5_2" in setting.selectable_models
+    assert "claude_fable_5_2" not in setting.default_model_identifiers
+
+
+def test_fable_5_2_is_not_restricted_to_bl_security(selection_config):
+    # Fable 5.2 is also used outside BLSA, so restricting it would break those flows.
+    assert selection_config.restricted_flows_for(["claude_fable_5_2"]) is None
+
+
 _MYTHOS_VERSIONS = ["5_1", "5_2"]
 
 
