@@ -193,11 +193,17 @@ check-pricing-multipliers:
 .PHONY: format
 format: codespell ruff-format ruff-fix docformatter
 
+# The lint targets run every check with --keep-going and fail at the end, so one
+# run reports all failures, not only the first one.
 .PHONY: lint
-lint: lint-code lint-doc
+lint:
+	@$(MAKE) --no-print-directory --keep-going lint-code lint-doc
+
+LINT_CODE_CHECKS := check-ruff check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-yamllint check-graphql lint-proto
 
 .PHONY: lint-code
-lint-code: check-ruff check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-yamllint check-graphql lint-proto
+lint-code:
+	@$(MAKE) --no-print-directory --keep-going $(LINT_CODE_CHECKS)
 
 .PHONY: lint-commit
 lint-commit:
@@ -319,7 +325,8 @@ test-agents: install-test-deps
 		$(if $(VALIDATION_MODEL),--validation-model=$(VALIDATION_MODEL))
 
 .PHONY: lint-doc
-lint-doc: vale markdownlint lychee
+lint-doc:
+	@$(MAKE) --no-print-directory --keep-going vale markdownlint lychee
 
 .PHONY: vale
 vale:
