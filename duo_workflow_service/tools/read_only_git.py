@@ -54,10 +54,7 @@ from typing import Any, ClassVar, NamedTuple, Optional, Tuple
 from langchain_core.tools import ToolException
 from pydantic import PrivateAttr
 
-from duo_workflow_service.bl_security.executor_output import (
-    EXIT_CODE_HEADER,
-    strip_size_limit_notice,
-)
+from duo_workflow_service.bl_security.executor_output import unwrap_command_output
 from duo_workflow_service.executor.action import _execute_action
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
 from duo_workflow_service.tools.command import (
@@ -354,7 +351,7 @@ class ReadOnlyGitTool(DuoBaseTool):
             ),
         )
 
-        return _unwrap_command_output(raw, argv[0])
+        return unwrap_git_output(raw, argv[0])
 
     async def _require_git_floor(self, metadata: dict[str, Any]) -> None:
         """Refuse a git older than ``GIT_FLOOR``, once per instance, before any command runs.
@@ -372,7 +369,7 @@ class ReadOnlyGitTool(DuoBaseTool):
         )
         floor = ".".join(map(str, GIT_FLOOR))
         try:
-            reported = _unwrap_command_output(raw, "version").strip()
+            reported = unwrap_git_output(raw, "version").strip()
         except ToolException as exc:
             raise GitTooOldError(
                 f"Error: {self.name} needs git {floor} or later and could not check "
@@ -511,29 +508,31 @@ def diagnostics(body: str) -> str:
     return "\n".join(lines)
 
 
-def _unwrap_command_output(raw: str, subcommand: str) -> str:
+class GitCommandError(ToolException):
+    """A git command that ran and exited non-zero, carrying the code it exited with."""
+
+    def __init__(self, subcommand: str, code: str, body: str) -> None:
+        super().__init__(
+            f"Error: git {subcommand} exited with {code}: {diagnostics(body)}"
+        )
+        self.code = code
+
+
+def unwrap_git_output(raw: str, subcommand: str) -> str:
     """Strip the executor's exit-code header, raising when the command actually failed.
 
-    The action reports success whatever git exited with, so the header is the only signal
-    that the body is an error rather than output. A failure relays only git's own
-    diagnostic lines, never the output that preceded them. A response over the executor's size limit
-    puts its notice *before* the header; that notice is kept on the returned body so
-    ``executor_truncated`` still sees it. An executor that returns the output bare is
-    tolerated, so the tools work against both.
+    The one failure policy for every git boundary on the executor. The action reports
+    success whatever git exited with, so the header is the only signal that the body is
+    an error rather than output. A failure relays only git's own diagnostic lines, never
+    the output that preceded them, and carries the code as data. A size-limit notice is
+    kept on the returned body so ``executor_truncated`` still sees it. An executor that
+    returns the output bare is tolerated, so the tools work against both.
     """
-    text = strip_size_limit_notice(raw)
-    notice = raw[: len(raw) - len(text)]
-
-    header = EXIT_CODE_HEADER.match(text)
-    if header is None:
-        return raw
-
-    body = text[header.end() :]
-    code = header.group(1)
-    if code != "0":
-        if REFUSED_LAZY_FETCH.search(body):
-            raise ToolException(PARTIAL_CLONE_MESSAGE.format(subcommand=subcommand))
-        detail = diagnostics(body)
-        raise ToolException(f"Error: git {subcommand} exited with {code}: {detail}")
-
-    return notice + body
+    output = unwrap_command_output(raw)
+    # Compared as text: the header admits any non-space token, so a non-numeric code is a
+    # failure to report rather than a parse error to raise from here.
+    if output.code is None or output.code == "0":
+        return output.body
+    if REFUSED_LAZY_FETCH.search(output.body):
+        raise ToolException(PARTIAL_CLONE_MESSAGE.format(subcommand=subcommand))
+    raise GitCommandError(subcommand, output.code, output.body)

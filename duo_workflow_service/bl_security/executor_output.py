@@ -6,12 +6,15 @@ and still reports success. A truncated listing is not a complete list, so caller
 """
 
 import re
+from typing import NamedTuple, Optional
 
 __all__ = [
     "EXIT_CODE_HEADER",
+    "CommandOutput",
     "complete_lines",
     "executor_truncated",
     "strip_size_limit_notice",
+    "unwrap_command_output",
 ]
 
 EXIT_CODE_HEADER = re.compile(r"\AExit code: (\S*)\n")
@@ -27,6 +30,30 @@ def executor_truncated(text: str) -> bool:
 def strip_size_limit_notice(text: str) -> str:
     """``text`` without the leading size-limit notice, if it carries one."""
     return _SIZE_LIMIT_NOTICE.sub("", text, count=1)
+
+
+class CommandOutput(NamedTuple):
+    """A command response split at its envelope; ``code`` is ``None`` when it came bare."""
+
+    code: Optional[str]
+    body: str
+
+
+def unwrap_command_output(raw: str) -> CommandOutput:
+    """Split a ``runCommand`` response into the exit code it reports and the output after it.
+
+    The action reports success whatever the command exited with, so the header is the only signal of a failure; what
+    counts as one is the caller's to decide, and nothing is raised here. The code stays text, because the header
+    admits any non-space token. A response over the executor's size limit puts its notice *before* the header; the
+    notice is stripped to find the header and kept on the body, so ``executor_truncated`` still sees it. An executor
+    that returns the output bare is tolerated: the response comes back whole, with no code.
+    """
+    text = strip_size_limit_notice(raw)
+    header = EXIT_CODE_HEADER.match(text)
+    if header is None:
+        return CommandOutput(None, raw)
+    notice = raw[: len(raw) - len(text)]
+    return CommandOutput(header.group(1), notice + text[header.end() :])
 
 
 def complete_lines(text: str) -> list[str]:
