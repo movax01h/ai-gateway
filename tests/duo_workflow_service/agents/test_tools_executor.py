@@ -38,6 +38,10 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.errors.typing import TierAccessDeniedException
 from duo_workflow_service.executor.action import ToolExceptionWithResponse
 from duo_workflow_service.executor.outbox import Outbox
+from duo_workflow_service.policies.target_tool_governance import (
+    TargetToolGovernanceUnavailable,
+    ToolCallDeniedByTargetRules,
+)
 from duo_workflow_service.security.prompt_scanner import DetectionType, ScanResult
 from duo_workflow_service.security.scanner_factory import PromptInjectionDetectedError
 from duo_workflow_service.tools import RunCommand, Toolset
@@ -2654,3 +2658,87 @@ class TestStructuredContentInToolCard:
 
         assert isinstance(card, ToolMessage)
         assert card.name == "read_file"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_datetime")
+@patch("duo_workflow_service.agents.tools_executor.log_exception")
+async def test_a_target_rules_denial_is_tracked_as_a_block_not_an_exception(
+    mock_log_exception,
+    workflow_state,
+    internal_event_client: Mock,
+    flow_type: GLReportingEventContext,
+):
+    tool = mock_tool(
+        side_effect=ToolCallDeniedByTargetRules(
+            "test_tool is denied by the AI tool rules of group-b/project."
+        )
+    )
+    mock_toolset = MagicMock(spec=Toolset)
+    mock_toolset.__contains__ = MagicMock(return_value=True)
+    mock_toolset.__getitem__ = MagicMock(return_value=tool)
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=mock_toolset,
+        workflow_id="123",
+        workflow_type=flow_type,
+        internal_event_client=internal_event_client,
+    )
+    state = _tool_call_state(workflow_state, "test_tool", {})
+
+    result = await tools_executor.run(state)
+
+    mock_log_exception.assert_not_called()
+    tracked = [
+        call.kwargs.get("event_name")
+        for call in internal_event_client.track_event.call_args_list
+    ]
+    assert EventEnum.WORKFLOW_TOOL_FAILURE.value not in tracked
+    internal_event_client.track_event.assert_any_call(
+        event_name=EventEnum.WORKFLOW_TOOL_BLOCKED.value,
+        additional_properties=InternalEventAdditionalProperties(
+            label=flow_type.value,
+            property="test_tool",
+            value="123",
+            tool_name="test_tool",
+        ),
+        category=flow_type.value,
+    )
+    assert "denied by the AI tool rules of group-b/project" in str(
+        cast(dict, result[0])["conversation_history"]["planner"][0].content
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_datetime")
+@patch("duo_workflow_service.agents.tools_executor.log_exception")
+async def test_a_failed_target_rules_check_is_reported_as_an_exception(
+    mock_log_exception,
+    workflow_state,
+    internal_event_client: Mock,
+    flow_type: GLReportingEventContext,
+):
+    error = TargetToolGovernanceUnavailable(
+        "test_tool was not run because GitLab could not check the AI tool rules of its target."
+    )
+    tool = mock_tool(side_effect=error)
+    mock_toolset = MagicMock(spec=Toolset)
+    mock_toolset.__contains__ = MagicMock(return_value=True)
+    mock_toolset.__getitem__ = MagicMock(return_value=tool)
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=mock_toolset,
+        workflow_id="123",
+        workflow_type=flow_type,
+        internal_event_client=internal_event_client,
+    )
+    state = _tool_call_state(workflow_state, "test_tool", {})
+
+    await tools_executor.run(state)
+
+    mock_log_exception.assert_called_once()
+    tracked = [
+        call.kwargs.get("event_name")
+        for call in internal_event_client.track_event.call_args_list
+    ]
+    assert EventEnum.WORKFLOW_TOOL_BLOCKED.value not in tracked

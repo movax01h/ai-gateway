@@ -51,6 +51,11 @@ class FeatureFlag(StrEnum):
     # Tracking: https://gitlab.com/gitlab-org/gitlab/-/work_items/639804
     # Epic: https://gitlab.com/groups/gitlab-org/-/work_items/24653
     DUO_AUTO_MODE_CLASSIFIER = "duo_auto_mode_classifier"
+    # Checks GitLab write tool calls against the tool rules of the project or group they target, see
+    # duo_workflow_service/policies/target_tool_governance.py. Definition:
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/beta/duo_workflow_target_tool_governance.yml
+    # Epic: https://gitlab.com/groups/gitlab-org/-/work_items/24114
+    DUO_WORKFLOW_TARGET_TOOL_GOVERNANCE = "duo_workflow_target_tool_governance"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

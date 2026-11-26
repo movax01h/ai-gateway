@@ -32,6 +32,9 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.errors.typing import TierAccessDeniedException
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.policies.target_tool_governance import (
+    ToolCallDeniedByTargetRules,
+)
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
@@ -581,20 +584,32 @@ class ToolsExecutor:
         tool_name = tool_call["name"]
         error_type = type(error).__name__
 
-        log_exception(error, extra={"context": "Tools executor raised error"})
+        denied = isinstance(error, ToolCallDeniedByTargetRules)
+        if denied:
+            # A policy result, not a fault: count it as a block instead of reporting an exception.
+            track_tool_governance_event(
+                self._internal_event_client,
+                EventEnum.WORKFLOW_TOOL_BLOCKED,
+                flow_type=self._workflow_type.value,
+                flow_id=self._workflow_id,
+                tool_name=tool_name,
+            )
+        else:
+            log_exception(error, extra={"context": "Tools executor raised error"})
 
         response = getattr(error, "response", None)
         tool_response = f"Tool {tool_name} raised ToolException: {error!s}"
         if response:
             tool_response = f"{tool_response} {response}"
-        self._track_internal_event(
-            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-            tool_name=tool_name,
-            extra={
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
+        if not denied:
+            self._track_internal_event(
+                event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
+                tool_name=tool_name,
+                extra={
+                    "error": str(error),
+                    "error_type": type(error).__name__,
+                },
+            )
 
         details = response if response != error_text else None
         tool_error = (

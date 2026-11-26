@@ -10,6 +10,10 @@ from pydantic import ValidationError
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.policies.target_tool_governance import (
+    TargetToolGovernanceUnavailable,
+    ToolCallDeniedByTargetRules,
+)
 from duo_workflow_service.tracking.duo_workflow_metrics import DuoWorkflowMetrics
 from lib.events import GLReportingEventContext
 from lib.internal_events.event_enum import EventEnum
@@ -205,6 +209,30 @@ class TestHandleToolException:
         assert (
             call_kwargs["additional_properties"].extra["error_type"] == "ToolException"
         )
+
+
+class TestTargetRulesDenial:
+    @pytest.mark.parametrize(
+        "handler", ["handle_tool_exception", "handle_execution_error"]
+    )
+    def test_a_denial_is_tracked_as_a_block_not_a_failure(self, tracker, handler):
+        error = ToolCallDeniedByTargetRules("my_tool is denied by AI tool rules.")
+
+        getattr(tracker.tracker, handler)("my_tool", error)
+
+        events = [
+            c.kwargs["event_name"] for c in tracker.client.track_event.call_args_list
+        ]
+        assert events == [EventEnum.WORKFLOW_TOOL_BLOCKED.value]
+        tracker.metrics.count_agent_platform_tool_failure.assert_not_called()
+
+    def test_a_failed_check_is_still_a_failure(self, tracker):
+        error = TargetToolGovernanceUnavailable("GitLab could not check")
+
+        tracker.tracker.handle_tool_exception("my_tool", error)
+
+        call_kwargs = tracker.client.track_event.call_args.kwargs
+        assert call_kwargs["event_name"] == EventEnum.WORKFLOW_TOOL_FAILURE.value
 
 
 CREATED_MERGE_REQUEST = {

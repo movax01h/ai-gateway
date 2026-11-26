@@ -35,7 +35,11 @@ class MockGitLabHttpClient(GitlabHttpClient):
         return result
 
     async def graphql(
-        self, query: str, variables: Optional[dict] = None, timeout: float = 10.0
+        self,
+        query: str,
+        variables: Optional[dict] = None,
+        timeout: float = 10.0,
+        retry_transient_errors: bool = True,
     ) -> Any:
         """Mock implementation of the abstract graphql method."""
         return await self.mock_graphql(query, variables, timeout)

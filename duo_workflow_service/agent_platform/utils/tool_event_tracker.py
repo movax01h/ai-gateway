@@ -5,6 +5,9 @@ from langchain_core.tools import BaseTool, ToolException
 from pydantic import ValidationError
 
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.policies.target_tool_governance import (
+    ToolCallDeniedByTargetRules,
+)
 from duo_workflow_service.tracking.tool_governance import track_tool_governance_event
 from lib.context import client_capabilities, tool_executions
 from lib.events import GLReportingEventContext
@@ -173,19 +176,23 @@ class ToolEventTracker:
         error: Exception,
     ) -> str:
         """Handle a generic execution error response and track the failure event."""
-        self.track_internal_event(
-            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-            tool_name=tool_name,
-            extra={
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
+        self._track_failure(tool_name, error)
 
         return f"Tool runtime exception due to {error!s} {getattr(error, 'response', None)}"
 
     def handle_tool_exception(self, tool_name: str, error: ToolException) -> str:
         """Handle a ToolException response and track the failure event."""
+        self._track_failure(tool_name, error)
+        return f"Tool exception occurred due to {error!s}"
+
+    def _track_failure(self, tool_name: str, error: Exception) -> None:
+        # A denial by the target's tool rules is a policy result, so it counts as a block, not a failure.
+        if isinstance(error, ToolCallDeniedByTargetRules):
+            self.track_tool_governance_event(
+                EventEnum.WORKFLOW_TOOL_BLOCKED, tool_name=tool_name
+            )
+            return
+
         self.track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
             tool_name=tool_name,
@@ -194,4 +201,3 @@ class ToolEventTracker:
                 "error_type": type(error).__name__,
             },
         )
-        return f"Tool exception occurred due to {error!s}"

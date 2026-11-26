@@ -554,6 +554,20 @@ async def test_graphql_exhausts_retries_on_repeated_timeouts(
     assert monkeypatch_execute_http_response.call_count == 4
 
 
+@pytest.mark.asyncio
+async def test_graphql_makes_one_attempt_when_retries_are_off(
+    client, monkeypatch_execute_http_response
+):
+    monkeypatch_execute_http_response.side_effect = asyncio.TimeoutError()
+
+    with pytest.raises(Exception, match="GraphQL request timed out after 5.0 seconds"):
+        await client.graphql(
+            "{ currentUser { username } }", timeout=5.0, retry_transient_errors=False
+        )
+
+    assert monkeypatch_execute_http_response.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # Tests for the DWS-side timeout on REST calls
 # ---------------------------------------------------------------------------
