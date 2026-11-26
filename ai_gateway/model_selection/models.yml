@@ -1211,7 +1211,7 @@ models:
     params:
       model: "gemini-4-neon"
       max_tokens: 65_536
-      thinking_level: "medium"
+      thinking_level: "low"
       streaming: "true"
     prompt_params:
       vertex_location: global
