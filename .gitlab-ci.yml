@@ -349,7 +349,10 @@ secret_detection:
 pages:
   stage: deploy_pages
   # The script reads only files in the repository, so the job does not wait for
-  # other jobs or download their artifacts.
+  # other jobs or download their artifacts. The script uses only the Python
+  # standard library, so the job uses the slim image. The slim image is about
+  # 40 MB to pull. The full image is about 390 MB.
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}python:3.12.15-slim
   needs: []
   script:
     - mkdir -p public
