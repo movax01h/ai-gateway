@@ -267,6 +267,8 @@ class AgentNode(BaseAgentComponentNode):  # pylint: disable=too-many-instance-at
             response schema tool only so the agent cannot keep exploring, with its own
             template variables. When ``None``, wrap-up turns use ``prompt`` and
             ``prompt_template_inputs``.
+        session_id_key: ``IOKey`` resolving the active subsession ID, so what the agent writes is attributed to the
+            subagent it runs for.
     """
 
     name: str
