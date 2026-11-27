@@ -2,7 +2,7 @@
 import base64
 import json
 import re
-from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
 from uuid import UUID
 
 import pytest
@@ -11,7 +11,8 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrim
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
-from langgraph.types import Overwrite
+from langgraph.types import Command, Overwrite
+from structlog.testing import capture_logs
 
 from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.config.base import PromptConfig
@@ -26,6 +27,7 @@ from duo_workflow_service.agent_platform.v1.catalog import (
 )
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
+from duo_workflow_service.agents.tools_executor import SKIPPED_TOOL_CALL_TEMPLATE
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.checkpointer.notifier import UserInterface
@@ -43,6 +45,7 @@ from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
     UiChatLog,
+    tool_calls_to_run,
 )
 from duo_workflow_service.errors.typing import (
     NotifiableException,
@@ -67,6 +70,8 @@ from duo_workflow_service.workflows.chat.workflow import (
     CHAT_UTILITY_TOOLS,
     NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS,
     RUN_COMMAND_TOOLS,
+    TOOL_CALL_LIMIT_REACHED_REPLY,
+    TOOL_CALL_WRAP_UP_NOTICE,
     Routes,
     Workflow,
     _resolve_additional_context_vars,
@@ -81,7 +86,11 @@ from lib.context.approval_sources import (
     record_approval_source,
 )
 from lib.events import GLReportingEventContext
-from lib.feature_flags import FeatureFlag, current_feature_flag_context
+from lib.feature_flags import (
+    FeatureFlag,
+    current_feature_flag_context,
+    is_feature_enabled,
+)
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
 
@@ -1219,6 +1228,80 @@ async def test_get_graph_input_resume_with_approval(workflow_with_approval):
     assert result.update["status"] == WorkflowStatusEnum.EXECUTION
     assert "conversation_history" not in result.update
     assert "ui_chat_log" not in result.update
+
+
+@pytest.fixture(name="workflow_with_rejection")
+def workflow_with_rejection_fixture(workflow_with_project):
+    workflow_with_project._approval = contract_pb2.Approval(
+        rejection=contract_pb2.Approval.Rejected(message="Use a different file")
+    )
+    return workflow_with_project
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("workflow_fixture", "goal", "status_event", "checkpoint", "expected"),
+    [
+        (
+            "workflow_with_project",
+            "Test goal",
+            WorkflowStatusEventEnum.START,
+            None,
+            {"tool_call_budget": {"used": 0, "wrap_up_notices": 0}},
+        ),
+        (
+            "workflow_with_project",
+            "New input",
+            WorkflowStatusEventEnum.RESUME,
+            EXISTING_CHECKPOINT,
+            {
+                "tool_call_budget": {"used": 0, "wrap_up_notices": 0},
+                "max_tool_calls": None,
+            },
+        ),
+        (
+            "workflow_with_approval",
+            "",
+            WorkflowStatusEventEnum.RESUME,
+            EXISTING_CHECKPOINT,
+            {},
+        ),
+        (
+            "workflow_with_rejection",
+            "",
+            WorkflowStatusEventEnum.RESUME,
+            EXISTING_CHECKPOINT,
+            {},
+        ),
+        (
+            "workflow_with_project",
+            "",
+            WorkflowStatusEventEnum.RETRY,
+            EXISTING_CHECKPOINT,
+            {},
+        ),
+    ],
+    ids=[
+        "new_session",
+        "new_user_message",
+        "approval_resume",
+        "rejection_with_feedback",
+        "reconnect",
+    ],
+)
+async def test_get_graph_input_resets_the_tool_call_budget_only_for_a_new_user_message(
+    request, workflow_fixture, goal, status_event, checkpoint, expected
+):
+    workflow = request.getfixturevalue(workflow_fixture)
+
+    result = await workflow.get_graph_input(goal, status_event, checkpoint)
+
+    update = result.update if checkpoint else result
+    assert {
+        key: update[key]
+        for key in ("tool_call_budget", "max_tool_calls")
+        if key in update
+    } == expected
 
 
 @pytest.mark.asyncio
@@ -4006,14 +4089,35 @@ def compile_graph_recording_visited_nodes(
     async def run_agent(state):
         visited.append("agent")
         reply = next(scripted, AIMessage(content="done"))
-        return {"conversation_history": {"test_prompt": [reply]}}
+        # Stores the limit for the response the way ChatAgent does.
+        max_tool_calls = (
+            tool_calls_to_run(state.get("tool_call_budget"))
+            if is_feature_enabled(FeatureFlag.DUO_CHAT_TOOL_CALL_LIMITS)
+            else None
+        )
+        return {
+            "conversation_history": {"test_prompt": [reply]},
+            "max_tool_calls": max_tool_calls,
+        }
 
-    async def run_tools(state):
+    async def run_tools(state, max_tool_calls=None, skipped_tool_call_notice=None):
         visited.append("run_tools")
         last_message = state["conversation_history"]["test_prompt"][-1]
         results = []
         cards = []
-        for tool_call in getattr(last_message, "tool_calls", []):
+        for index, tool_call in enumerate(getattr(last_message, "tool_calls", [])):
+            if max_tool_calls is not None and index >= max_tool_calls:
+                results.append(
+                    ToolMessage(
+                        content=skipped_tool_call_notice
+                        or SKIPPED_TOOL_CALL_TEMPLATE.format(
+                            max_tool_calls=max_tool_calls
+                        ),
+                        tool_call_id=tool_call["id"],
+                    )
+                )
+                continue
+
             tools_run.append(tool_call["name"])
 
             if tool_call["name"] not in tool_names:
@@ -4041,11 +4145,13 @@ def compile_graph_recording_visited_nodes(
                     tool_name=tool_call["name"],
                 )
             )
-        return {
-            "conversation_history": {"test_prompt": results},
-            "ui_chat_log": cards,
-            "status": WorkflowStatusEnum.EXECUTION,
-        }
+        # The shape ToolsExecutor.run returns: one update per result, then a Command.
+        return [
+            {"conversation_history": {"test_prompt": results}},
+            Command(
+                update={"ui_chat_log": cards, "status": WorkflowStatusEnum.EXECUTION}
+            ),
+        ]
 
     agent = MagicMock()
     agent.name = "test_prompt"
@@ -4289,14 +4395,228 @@ async def test_a_tool_the_model_chose_still_returns_to_it(
     assert state.next == ()
 
 
+@pytest.fixture(name="tool_call_limits_enabled")
+def tool_call_limits_enabled_fixture():
+    token = current_feature_flag_context.set(
+        {FeatureFlag.DUO_CHAT_TOOL_CALL_LIMITS.value}
+    )
+    yield
+    current_feature_flag_context.reset(token)
+
+
+def tool_calling_reply(reply_id, call_count=1):
+    return AIMessage(
+        content="",
+        id=f"reply-{reply_id}",
+        tool_calls=[
+            {
+                "name": "gitlab_list_duo_agents_and_flows",
+                "args": {},
+                "id": f"call-{reply_id}-{index}",
+                "type": "tool_call",
+            }
+            for index in range(call_count)
+        ],
+    )
+
+
+def model_that_never_stops_calling_tools():
+    reply_id = 0
+    while True:
+        reply_id += 1
+        yield tool_calling_reply(reply_id)
+
+
+async def drain_within_recursion_limit(graph, workflow, graph_input, thread_id):
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": workflow._recursion_limit(),
+    }
+    async for _ in graph.astream(graph_input, config=config):
+        pass
+    return await graph.aget_state(config)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("tool_call_limits_enabled")
+@patch("duo_workflow_service.entities.state.MAX_TOOL_CALLS_PER_MODEL_CALL", 3)
+@patch("duo_workflow_service.entities.state.MAX_TOOL_CALLS_PER_USER_MESSAGE", 10)
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_skipped_tool_calls_do_not_spend_the_user_message_budget(
+    mock_tools_executor, mock_create_agent, workflow_with_project
+):
+    graph, _visited, tools_run = compile_graph_recording_visited_nodes(
+        workflow_with_project,
+        mock_tools_executor,
+        mock_create_agent,
+        agent_replies=[
+            tool_calling_reply("first", call_count=8),
+            tool_calling_reply("second", call_count=3),
+            tool_calling_reply("third", call_count=3),
+        ],
+    )
+    graph_input = await workflow_with_project.get_graph_input(
+        "summarize issues 1 to 8", WorkflowStatusEventEnum.START, None
+    )
+
+    state = await drain_within_recursion_limit(
+        graph, workflow_with_project, graph_input, "budget-skipped"
+    )
+
+    assert len(tools_run) == 9
+    assert state.values["tool_call_budget"] == {"used": 9, "wrap_up_notices": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("tool_call_limits_enabled")
+@patch("duo_workflow_service.entities.state.MAX_TOOL_CALLS_PER_USER_MESSAGE", 3)
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_a_model_call_past_the_user_message_limit_runs_only_what_is_left(
+    mock_tools_executor, mock_create_agent, workflow_with_project
+):
+    graph, visited, tools_run = compile_graph_recording_visited_nodes(
+        workflow_with_project,
+        mock_tools_executor,
+        mock_create_agent,
+        agent_replies=[tool_calling_reply("many", call_count=5)],
+    )
+    graph_input = await workflow_with_project.get_graph_input(
+        "list my flows", WorkflowStatusEventEnum.START, None
+    )
+
+    state = await drain_within_recursion_limit(
+        graph, workflow_with_project, graph_input, "budget-2"
+    )
+
+    assert visited == ["agent", "run_tools", "agent"]
+    assert len(tools_run) == 3
+    history = state.values["conversation_history"]["test_prompt"]
+    assert [message.content for message in history[-3:-1]] == [
+        TOOL_CALL_WRAP_UP_NOTICE,
+        TOOL_CALL_WRAP_UP_NOTICE,
+    ]
+    assert state.values["tool_call_budget"] == {"used": 3, "wrap_up_notices": 1}
+    assert state.next == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("tool_call_limits_enabled")
+@patch("duo_workflow_service.entities.state.MAX_TOOL_CALLS_PER_USER_MESSAGE", 3)
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_a_model_that_never_stops_calling_tools_ends_its_answer(
+    mock_tools_executor, mock_create_agent, workflow_with_project
+):
+    graph, visited, tools_run = compile_graph_recording_visited_nodes(
+        workflow_with_project,
+        mock_tools_executor,
+        mock_create_agent,
+        agent_replies=model_that_never_stops_calling_tools(),
+    )
+    graph_input = await workflow_with_project.get_graph_input(
+        "list my flows", WorkflowStatusEventEnum.START, None
+    )
+
+    state = await drain_within_recursion_limit(
+        graph, workflow_with_project, graph_input, "budget-3"
+    )
+
+    assert len(tools_run) == 3
+    assert visited == ["agent", "run_tools"] * 5
+    assert state.values["tool_call_budget"] == {"used": 3, "wrap_up_notices": 2}
+    assert state.values["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    last_message = state.values["conversation_history"]["test_prompt"][-1]
+    assert last_message.content == TOOL_CALL_LIMIT_REACHED_REPLY
+    assert state.values["ui_chat_log"][-1]["content"] == TOOL_CALL_LIMIT_REACHED_REPLY
+    assert state.next == ()
+
+
+def test_tool_call_limit_reached_leaves_a_failed_turn_alone(workflow_with_project):
+    """Overwriting ERROR with INPUT_REQUIRED would report a failed turn to Rails as one waiting on the user."""
+    workflow_with_project._agent = MagicMock()
+    workflow_with_project._agent.name = "test_prompt"
+    state = ChatWorkflowState(
+        conversation_history={"test_prompt": []}, status=WorkflowStatusEnum.ERROR
+    )
+
+    assert workflow_with_project._tool_call_limit_reached(state) == {}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("max_tool_calls", "expected_kwargs"),
-    [(2, {"max_tool_calls": 2}), (None, {})],
-    ids=["limit", "no_limit"],
+    (
+        "max_tool_calls",
+        "requested",
+        "used",
+        "wrap_up_notices",
+        "expected_kwargs",
+        "expected_metric_calls",
+    ),
+    [
+        (
+            2,
+            3,
+            0,
+            0,
+            {"max_tool_calls": 2, "skipped_tool_call_notice": None},
+            0,
+        ),
+        (
+            1,
+            3,
+            9,
+            0,
+            {
+                "max_tool_calls": 1,
+                "skipped_tool_call_notice": TOOL_CALL_WRAP_UP_NOTICE,
+            },
+            1,
+        ),
+        (
+            2,
+            3,
+            8,
+            0,
+            {
+                "max_tool_calls": 2,
+                "skipped_tool_call_notice": TOOL_CALL_WRAP_UP_NOTICE,
+            },
+            1,
+        ),
+        (
+            0,
+            1,
+            10,
+            1,
+            {
+                "max_tool_calls": 0,
+                "skipped_tool_call_notice": TOOL_CALL_WRAP_UP_NOTICE,
+            },
+            0,
+        ),
+        (None, 3, 0, 0, {}, 0),
+    ],
+    ids=[
+        "over_model_call_limit",
+        "budget_runs_out",
+        "budget_runs_out_at_the_model_call_limit",
+        "budget_already_out",
+        "no_limit",
+    ],
 )
+@patch("duo_workflow_service.entities.state.MAX_TOOL_CALLS_PER_USER_MESSAGE", 10)
+@patch("duo_workflow_service.workflows.chat.workflow.duo_workflow_metrics")
 async def test_run_tools_applies_the_limit_stored_for_the_response(
-    workflow_with_project, max_tool_calls, expected_kwargs
+    mock_metrics,
+    workflow_with_project,
+    max_tool_calls,
+    requested,
+    used,
+    wrap_up_notices,
+    expected_kwargs,
+    expected_metric_calls,
 ):
     """The stored limit applies with the flag off too, so turning it off after an approval cannot run more calls."""
     workflow_with_project._agent = MagicMock()
@@ -4309,12 +4629,13 @@ async def test_run_tools_applies_the_limit_stored_for_the_response(
                     content="",
                     tool_calls=[
                         {"name": "read_file", "args": {}, "id": f"call-{index}"}
-                        for index in range(3)
+                        for index in range(requested)
                     ],
                 )
             ]
         },
         max_tool_calls=max_tool_calls,
+        tool_call_budget={"used": used, "wrap_up_notices": wrap_up_notices},
     )
 
     await workflow_with_project._run_tools(state)
@@ -4322,6 +4643,71 @@ async def test_run_tools_applies_the_limit_stored_for_the_response(
     workflow_with_project._tools_executor.run.assert_awaited_once_with(
         state, **expected_kwargs
     )
+    assert (
+        mock_metrics.count_chat_tool_call_budget_exhausted.call_args_list
+        == [call(flow_type=workflow_with_project._workflow_type.value)]
+        * expected_metric_calls
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scope", "expected_entity"),
+    [
+        ({"project": {"id": 7}, "namespace": {"id": 3}}, (7, "Project")),
+        ({"project": None, "namespace": {"id": 3}}, (3, "Namespace")),
+    ],
+    ids=["project", "namespace"],
+)
+@patch("duo_workflow_service.workflows.chat.workflow.duo_workflow_metrics")
+async def test_running_out_of_the_tool_call_budget_logs_a_security_event(
+    _mock_metrics, workflow_with_project, scope, expected_entity
+):
+    workflow_with_project._agent = MagicMock()
+    workflow_with_project._agent.name = "test_prompt"
+    workflow_with_project._tools_executor = MagicMock(run=AsyncMock(return_value=[]))
+    state = ChatWorkflowState(
+        conversation_history={
+            "test_prompt": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "read_file", "args": {}, "id": f"call-{index}"}
+                        for index in range(2)
+                    ],
+                )
+            ]
+        },
+        max_tool_calls=1,
+        tool_call_budget={"used": 999, "wrap_up_notices": 0},
+        **scope,
+    )
+
+    workflow_with_project._user = CloudConnectorUser(
+        authenticated=True, global_user_id="user-1"
+    )
+
+    with capture_logs() as cap_logs:
+        await workflow_with_project._run_tools(state)
+
+    events = [log for log in cap_logs if log.get("event_type")]
+    assert events == [
+        {
+            "event": "Chat tool call budget exhausted",
+            "log_level": "warning",
+            "event_type": "security.rate_limit.block",
+            "author_id": "user-1",
+            "entity_id": expected_entity[0],
+            "entity_type": expected_entity[1],
+            "workflow_id": workflow_with_project._workflow_id,
+            "details": {"outcome": "failure", "reason": "rate_limited"},
+            "gitlab": {
+                "control_name": "chat_tool_call_budget",
+                "control_type": "rate_limit",
+                "threshold": 1000,
+            },
+        }
+    ]
 
 
 @pytest.mark.parametrize(

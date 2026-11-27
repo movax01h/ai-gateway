@@ -205,6 +205,13 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             registry=registry,
         )
 
+        self.chat_tool_call_budget_exhausted_counter = Counter(
+            "agent_platform_chat_tool_call_budget_exhausted_total",
+            "Count of Agentic Chat user requests that ran out of their tool call budget",
+            ["flow_type"] + METADATA_LABELS,
+            registry=registry,
+        )
+
         self.compaction_execution_counter = Counter(
             "compaction_execution_total",
             "Count of compaction LLM call executions",
@@ -457,6 +464,12 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
         flow_type: str = "unknown",
     ) -> None:
         self.agent_platform_receive_start_counter.labels(
+            flow_type=flow_type,
+            **build_metadata_labels(),
+        ).inc()
+
+    def count_chat_tool_call_budget_exhausted(self, flow_type: str = "unknown") -> None:
+        self.chat_tool_call_budget_exhausted_counter.labels(
             flow_type=flow_type,
             **build_metadata_labels(),
         ).inc()

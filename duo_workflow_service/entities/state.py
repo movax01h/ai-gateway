@@ -429,8 +429,25 @@ class ApprovalStateRejection(BaseModel):
     message: Optional[str]
 
 
-# Agentic Chat runs at most this many of the tool calls in one model response.
+# Agentic Chat runs at most this many tool calls per user message, and per model response.
+MAX_TOOL_CALLS_PER_USER_MESSAGE = 1000
 MAX_TOOL_CALLS_PER_MODEL_CALL = 25
+
+
+class ToolCallBudget(TypedDict):
+    # Calls skipped by the limit do not count, so the model can re-send them.
+    used: int
+    wrap_up_notices: int
+
+
+def remaining_tool_calls(budget: Optional[ToolCallBudget]) -> int:
+    """Return how many tool calls are left for the current user message."""
+    return max(MAX_TOOL_CALLS_PER_USER_MESSAGE - (budget["used"] if budget else 0), 0)
+
+
+def tool_calls_to_run(budget: Optional[ToolCallBudget]) -> int:
+    """Return how many tool calls of the next model response can run."""
+    return min(MAX_TOOL_CALLS_PER_MODEL_CALL, remaining_tool_calls(budget))
 
 
 class ChatWorkflowState(TypedDict):
@@ -458,6 +475,8 @@ class ChatWorkflowState(TypedDict):
     # Approval source of each call in that AIMessage that skipped approval, keyed by tool-call
     # id; replayed on approval resume since the per-invocation registry doesn't survive it.
     tool_call_skip_sources: NotRequired[dict[str, str] | None]
+    # Reset only by a new user message, so approving tools cannot restart the count.
+    tool_call_budget: NotRequired[ToolCallBudget]
 
 
 DuoWorkflowStateType = Union[WorkflowState, ChatWorkflowState]

@@ -97,6 +97,7 @@ change for existing dashboards and alert rules.
 | `duo_workflow_compute_seconds` | Histogram | `operation_type` | Around agent processing in `Agent.run`. `operation_type` is `<agent name>_processing`. |
 | `agent_platform_response_schema_output_total` | Counter | `flow_type`, `component_name`, `<metadata>` | A structured response schema output is produced by an agent component's final response node. |
 | `agent_platform_flow_route_decision_total` | Counter | `flow_type`, `component_name`, `route_value`, `is_default_route`, `<metadata>` | A router picks an edge. `is_default_route` is the string `true` or `false`. |
+| `agent_platform_chat_tool_call_budget_exhausted_total` | Counter | `flow_type`, `<metadata>` | An Agentic Chat user request runs out of its tool call budget, behind the `duo_chat_tool_call_limits` flag. Incremented once per request. |
 
 ## Conversation compaction metrics
 

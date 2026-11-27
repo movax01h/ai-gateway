@@ -57,6 +57,7 @@ SKIPPED_TOOL_CALL_TEMPLATE = (
     "Skipped: only the first {max_tool_calls} tool calls in a response run. "
     "Request fewer tool calls at once."
 )
+SKIPPED_TOOL_CALL_CARD_TEXT = "Skipped: the tool call limit was reached."
 
 TIER_ACCESS_DENIED_LEARN_MORE_URL = "https://docs.gitlab.com/user/duo_agent_platform/"
 
@@ -112,6 +113,7 @@ class ToolsExecutor:
         self,
         state: DuoWorkflowStateType,
         max_tool_calls: Optional[int] = None,
+        skipped_tool_call_notice: Optional[str] = None,
     ) -> list[dict[str, Any] | Command]:
         last_message = state["conversation_history"][self._tools_agent_name][-1]
         tool_calls: list[ToolCall] = getattr(last_message, "tool_calls", [])
@@ -245,6 +247,7 @@ class ToolsExecutor:
             self._skip_tool_calls(
                 tool_calls,
                 max_tool_calls,
+                skipped_tool_call_notice,
                 project,
                 ui_chat_logs,
             )
@@ -325,6 +328,7 @@ class ToolsExecutor:
         self,
         tool_calls: list[ToolCall],
         max_tool_calls: Optional[int],
+        notice: Optional[str],
         project: Optional[Project],
         ui_chat_logs: List[UiChatLog],
     ) -> list[Command | dict[str, Any]]:
@@ -335,7 +339,9 @@ class ToolsExecutor:
         if max_tool_calls is None:
             return []
 
-        message = SKIPPED_TOOL_CALL_TEMPLATE.format(max_tool_calls=max_tool_calls)
+        message = notice or SKIPPED_TOOL_CALL_TEMPLATE.format(
+            max_tool_calls=max_tool_calls
+        )
         responses = []
         for tool_call in tool_calls[max_tool_calls:]:
             self._add_tool_ui_chat_log(
@@ -344,7 +350,9 @@ class ToolsExecutor:
                 ui_chat_logs=ui_chat_logs,
                 error_message="Skipped",
                 project_name=resolve_project_name_for_tool(project, tool_call),
-                tool_error=build_tool_error(message, tool_call["name"]),
+                tool_error=build_tool_error(
+                    SKIPPED_TOOL_CALL_CARD_TEXT, tool_call["name"]
+                ),
             )
             responses.append(self._process_response(tool_call, message))
         return responses

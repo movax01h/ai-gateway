@@ -52,12 +52,15 @@ from duo_workflow_service.entities.attachments import (
 )
 from duo_workflow_service.entities.message_ingestion import assemble_user_message
 from duo_workflow_service.entities.state import (
+    MAX_TOOL_CALLS_PER_USER_MESSAGE,
     ApprovalStateRejection,
     ChatWorkflowState,
     MessageTypeEnum,
+    ToolCallBudget,
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
+    remaining_tool_calls,
     resolve_approval_attribution,
 )
 from duo_workflow_service.errors.typing import (
@@ -66,6 +69,7 @@ from duo_workflow_service.errors.typing import (
 )
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
+from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking.errors import log_workflow_failure
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.chat.commands import (
@@ -137,6 +141,22 @@ class Routes(StrEnum):
     SHOW_AGENT_MESSAGE = "show_agent_message"
     TOOL_USE = "tool_use"
     STOP = "stop"
+    TOOL_CALL_LIMIT = "tool_call_limit"
+
+
+TOOL_CALL_WRAP_UP_NOTICE = (
+    "Skipped: the tool call limit for this user message is reached. Do not call any more tools. "
+    "Answer with what you have, say what you did not get to, and tell the user to reply "
+    '"continue" so you can finish it.'
+)
+TOOL_CALL_LIMIT_REACHED_REPLY = (
+    "I reached the tool call limit for this message, so I stopped before finishing. "
+    'Reply "continue" and I will pick up where I left off.'
+)
+
+
+def _empty_tool_call_budget() -> ToolCallBudget:
+    return ToolCallBudget(used=0, wrap_up_notices=0)
 
 
 # Simple read-only tools that can be replaced by generic gitlab_api_get/gitlab_graphql
@@ -375,6 +395,11 @@ class Workflow(AbstractWorkflow):
         if self._turn_completed_a_forced_call(state):
             return Routes.STOP
 
+        # After the first notice the model gets one more turn to answer without tools.
+        budget = state.get("tool_call_budget") or _empty_tool_call_budget()
+        if budget["wrap_up_notices"] > 1:
+            return Routes.TOOL_CALL_LIMIT
+
         return Routes.CONTINUE
 
     async def _run_agent_with_session_files(
@@ -456,18 +481,108 @@ class Workflow(AbstractWorkflow):
         if max_tool_calls is None:
             return await self._tools_executor.run(state)
 
+        budget = state.get("tool_call_budget") or _empty_tool_call_budget()
         last_message = state["conversation_history"][self._agent.name][-1]
-        # Malformed calls never run, so the limit does not count them.
+        # Malformed calls never run, so the limit does not count them. A response with only malformed calls
+        # is not a wrap-up notice either, so the recursion limit ends that loop.
         requested = len(getattr(last_message, "tool_calls", []))
-        if requested > max_tool_calls:
+
+        skipped = max(requested - max_tool_calls, 0)
+        # The user message budget set the limit when it allows no more than the stored one.
+        over_user_message_limit = (
+            skipped > 0 and max_tool_calls >= remaining_tool_calls(budget)
+        )
+        if skipped:
             logger.warning(
                 "Skipping chat tool calls over the limit",
                 workflow_id=self._workflow_id,
                 requested=requested,
                 limit=max_tool_calls,
+                used_this_user_message=budget["used"],
+                user_message_limit_reached=over_user_message_limit,
             )
 
-        return await self._tools_executor.run(state, max_tool_calls=max_tool_calls)
+        responses = await self._tools_executor.run(
+            state,
+            max_tool_calls=max_tool_calls,
+            skipped_tool_call_notice=(
+                TOOL_CALL_WRAP_UP_NOTICE if over_user_message_limit else None
+            ),
+        )
+
+        if over_user_message_limit and budget["wrap_up_notices"] == 0:
+            duo_workflow_metrics.count_chat_tool_call_budget_exhausted(
+                flow_type=self._workflow_type.value
+            )
+            self._log_tool_call_budget_exhausted(state)
+        return [
+            *responses,
+            Command(
+                update={
+                    "tool_call_budget": ToolCallBudget(
+                        used=budget["used"] + requested - skipped,
+                        wrap_up_notices=budget["wrap_up_notices"]
+                        + int(over_user_message_limit),
+                    )
+                }
+            ),
+        ]
+
+    def _log_tool_call_budget_exhausted(self, state: ChatWorkflowState) -> None:
+        """Emit the security event for a user request that ran out of its tool call budget."""
+        entity_type, entity = (
+            ("Project", state.get("project"))
+            if state.get("project")
+            else ("Namespace", state.get("namespace"))
+        )
+        logger.warning(
+            "Chat tool call budget exhausted",
+            event_type="security.rate_limit.block",
+            author_id=self._user.global_user_id,
+            entity_id=entity["id"] if entity else None,
+            entity_type=entity_type if entity else None,
+            workflow_id=self._workflow_id,
+            details={"outcome": "failure", "reason": "rate_limited"},
+            gitlab={
+                "control_name": "chat_tool_call_budget",
+                "control_type": "rate_limit",
+                "threshold": MAX_TOOL_CALLS_PER_USER_MESSAGE,
+            },
+        )
+
+    def _tool_call_limit_reached(self, state: ChatWorkflowState) -> dict[str, Any]:
+        """End the turn with a reply asking the user to continue."""
+        if state["status"] == WorkflowStatusEnum.ERROR:
+            return {}
+
+        budget = state.get("tool_call_budget") or _empty_tool_call_budget()
+        logger.warning(
+            "Ending chat turn at the tool call limit",
+            workflow_id=self._workflow_id,
+            used_this_user_message=budget["used"],
+        )
+        message_id = f"tool-call-limit-{uuid4()!s}"
+        return {
+            "conversation_history": {
+                self._agent.name: [
+                    AIMessage(content=TOOL_CALL_LIMIT_REACHED_REPLY, id=message_id)
+                ]
+            },
+            "ui_chat_log": [
+                UiChatLog(
+                    message_type=MessageTypeEnum.AGENT,
+                    message_sub_type=None,
+                    content=TOOL_CALL_LIMIT_REACHED_REPLY,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status=ToolStatus.SUCCESS,
+                    correlation_id=None,
+                    tool_info=None,
+                    additional_context=None,
+                    message_id=message_id,
+                )
+            ],
+            "status": WorkflowStatusEnum.INPUT_REQUIRED,
+        }
 
     def _turn_completed_a_forced_call(self, state: ChatWorkflowState) -> bool:
         """Whether the tool results just written answer a call the client chose, and that call succeeded.
@@ -675,6 +790,7 @@ class Workflow(AbstractWorkflow):
             approval=None,
             preapproved_tools=self._preapproved_tools or [],
             denied_tools=self._denied_tools or [],
+            tool_call_budget=_empty_tool_call_budget(),
         )
 
     async def get_graph_input(
@@ -783,6 +899,9 @@ class Workflow(AbstractWorkflow):
                             state_update["conversation_history"] = {
                                 self._agent.name: new_messages
                             }
+                            state_update["tool_call_budget"] = _empty_tool_call_budget()
+                            # A forced call skips ChatAgent, so it must not inherit the last response's limit.
+                            state_update["max_tool_calls"] = None
 
                 discarded_log: list[UiChatLog] = []
                 if dropped:
@@ -1078,6 +1197,7 @@ class Workflow(AbstractWorkflow):
         graph.add_node("agent", self._run_agent_with_session_files)
         graph.add_node("run_tools", self._run_tools)
         graph.add_node("forced_call_complete", self._forced_call_complete)
+        graph.add_node("tool_call_limit_reached", self._tool_call_limit_reached)
 
         graph.set_conditional_entry_point(
             self._entry_route,
@@ -1101,9 +1221,11 @@ class Workflow(AbstractWorkflow):
             {
                 Routes.CONTINUE: "agent",
                 Routes.STOP: "forced_call_complete",
+                Routes.TOOL_CALL_LIMIT: "tool_call_limit_reached",
             },
         )
         graph.add_edge("forced_call_complete", END)
+        graph.add_edge("tool_call_limit_reached", END)
 
         return graph.compile(checkpointer=checkpointer)
 
