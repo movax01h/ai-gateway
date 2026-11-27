@@ -71,8 +71,9 @@ class PostDuoCodeReviewFindingsInput(BaseModel):
     existing_discussions: Optional[Any] = Field(
         default=None,
         description=(
-            "The `list_mr_discussions` output the reviewer reconciled against. Previous "
-            "findings on threads it marks resolved are left out of the list."
+            "The `list_mr_discussions` output the reviewer reconciled against. Fixed and "
+            "verified findings on threads it marks resolved are left out of the list; "
+            "findings that still need attention stay listed."
         ),
     )
     min_confidence: int = Field(

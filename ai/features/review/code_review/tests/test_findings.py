@@ -262,10 +262,10 @@ class TestRenderPreviousFindings:
 
         assert rendered == "- **Still outstanding:** `b.rb`: Still nil."
 
-    def test_items_on_resolved_threads_are_left_out(self):
+    def test_settled_items_on_resolved_threads_are_left_out(self):
         rendered = render_previous_findings(
             [
-                {**previous("still_outstanding", file="a.rb"), "discussion_id": "d1"},
+                {**previous("fixed", file="a.rb"), "discussion_id": "d1"},
                 {**previous("still_outstanding", file="b.rb"), "discussion_id": "d2"},
                 previous("fixed", file="c.rb"),
             ],
@@ -279,28 +279,24 @@ class TestRenderPreviousFindings:
             "1 resolved thread is not listed.",
         ]
 
-    def test_counts_several_resolved_threads(self):
+    def test_resolving_a_thread_does_not_settle_it(self):
+        """Resolving a thread without a fix must not turn the re-review into a clean one, which Rails approves."""
         rendered = render_previous_findings(
             [
-                {**previous("still_outstanding"), "discussion_id": "d1"},
-                {**previous("fixed"), "discussion_id": "d2"},
-                {**previous("still_outstanding", file="b.rb"), "discussion_id": "d3"},
+                {**previous("still_outstanding", file="a.rb"), "discussion_id": "d1"},
+                {**previous("partially_fixed", file="b.rb"), "discussion_id": "d2"},
+                {**previous("fixed", file="c.rb"), "discussion_id": "d3"},
+                {**previous("verified", file="d.rb"), "discussion_id": "d4"},
             ],
-            resolved_ids={"d1", "d2"},
+            resolved_ids={"d1", "d2", "d3", "d4"},
         )
 
-        assert rendered.splitlines()[-1] == "2 resolved threads are not listed."
-
-    def test_withheld_when_only_resolved_threads_need_attention(self):
-        rendered = render_previous_findings(
-            [
-                {**previous("still_outstanding"), "discussion_id": "d1"},
-                previous("fixed", file="c.rb"),
-            ],
-            resolved_ids={"d1"},
-        )
-
-        assert rendered is None
+        assert rendered.splitlines() == [
+            "- **Partially fixed:** `b.rb`: Nil check on `user`.",
+            "- **Still outstanding:** `a.rb`: Nil check on `user`.",
+            "",
+            "2 resolved threads are not listed.",
+        ]
 
 
 class TestResolvedDiscussionIds:
