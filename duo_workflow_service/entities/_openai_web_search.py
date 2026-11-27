@@ -11,9 +11,9 @@ from duo_workflow_service.entities.state import ToolStatus
 
 __all__ = [
     "card_fields",
-    "fetched_url",
     "is_call_block",
     "is_known_action",
+    "read_urls",
     "results_by_call_id",
     "tool_name",
 ]
@@ -110,16 +110,26 @@ def _merge_items_into_results(
 
 
 def _call_sources(call_block: dict) -> list[dict]:
-    """Return reported sources, adding the action URL for completed non-search page actions."""
+    """Return reported sources, adding the pages that completed non-search page actions read."""
     action = _action(call_block)
     sources = list(action.get("sources") or [])
-    if (
-        _tool_name(action) != "web_search"
-        and call_block.get("status") == "completed"
-        and action.get("url")
-    ):
-        sources.append({"url": action["url"]})
-    return sources
+    if _tool_name(action) == "web_search" or call_block.get("status") != "completed":
+        return sources
+    return sources + _pages_read(call_block)
+
+
+def _pages_read(call_block: dict) -> list[dict]:
+    """``action.url``, plus the results of a completed ``open_page``, as ``{"url": ...}`` items."""
+    action = _action(call_block)
+    pages = [{"url": action.get("url")}]
+    # One `open_page` can read several pages, but `action.url` names only one of them.
+    if _tool_name(action) == "web_fetch" and call_block.get("status") == "completed":
+        pages.extend(call_block.get("results") or [])
+    return [
+        page
+        for page in pages
+        if isinstance(page, dict) and isinstance(page.get("url"), str) and page["url"]
+    ]
 
 
 def results_by_call_id(content: list) -> dict[str, list[dict]]:
@@ -164,12 +174,24 @@ def _tool_name(action: dict) -> str:
     return _ACTION_TOOL_NAMES.get(action.get("type", ""), "web_search")
 
 
+def read_urls(call_block: dict) -> list[str]:
+    """The URLs of the pages a call read, each named once."""
+    urls: dict[str, str] = {}
+    for page in _pages_read(call_block):
+        urls.setdefault(_url_key(page["url"]), page["url"])
+    return list(urls.values())
+
+
 def card_fields(call_block: dict) -> tuple[str, dict, ToolStatus]:
     """The ``(name, args, status)`` a TOOL card takes from one call block."""
     action = _action(call_block)
+    name = _tool_name(action)
+    args = _args(action)
+    if name == "web_fetch" and (urls := read_urls(call_block)):
+        args["url"] = ", ".join(urls)
     return (
-        _tool_name(action),
-        _args(action),
+        name,
+        args,
         _STATUSES.get(call_block.get("status", ""), ToolStatus.PENDING),
     )
 
@@ -177,7 +199,3 @@ def card_fields(call_block: dict) -> tuple[str, dict, ToolStatus]:
 def tool_name(call_block: dict) -> str:
     """The card name for one call block."""
     return _tool_name(_action(call_block))
-
-
-def fetched_url(call_block: dict) -> Optional[str]:
-    return _action(call_block).get("url")

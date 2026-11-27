@@ -11,7 +11,7 @@ from duo_workflow_service.entities.server_tool_blocks import (
     FIND_IN_PAGE_TOOL_NAME,
     WEB_FETCH_TOOL_NAME,
     WEB_SEARCH_TOOL_NAME,
-    fetched_url,
+    fetched_urls,
     native_web_call,
     native_web_call_succeeded,
 )
@@ -65,12 +65,13 @@ def capture_native_web_calls(content: Any, model_name: Optional[str] = None) -> 
                     )
                 )
         elif name in (WEB_FETCH_TOOL_NAME, FIND_IN_PAGE_TOOL_NAME):
-            url = fetched_url(block)
+            urls = fetched_urls(block)
             # OpenAI `find_in_page` searches a page; it is a fetch only on a URL not yet read.
-            if name == FIND_IN_PAGE_TOOL_NAME and (not url or url in fetched):
-                continue
-            if url:
-                fetched.add(url)
+            if name == FIND_IN_PAGE_TOOL_NAME:
+                urls = [url for url in urls if url not in fetched]
+                if not urls:
+                    continue
+            fetched.update(urls)
             track_web_tool_invoked(
                 WEB_FETCH_TOOL_NAME,
                 NATIVE_SEARCH_SOURCE,
@@ -78,7 +79,10 @@ def capture_native_web_calls(content: Any, model_name: Optional[str] = None) -> 
                 model_name,
                 provider,
             )
-            if collector is not None:
+            if collector is None:
+                continue
+            pages: list[Optional[str]] = [*urls] or [None]
+            for url in pages:
                 collector.capture(
                     WebFetchInvokedEvent(
                         workflow_id=collector.workflow_id,
