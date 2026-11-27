@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 __all__ = [
     "MAX_REASON_CHARS",
@@ -88,6 +88,11 @@ class ToolApprovalRequest:
             for who writes them.
         recent_actions: The agent's latest tool calls before the pending one, as ``name {args}``, oldest first, each
             bounded. Calls batched with the pending one are included.
+        truncated: Whether the pending call's arguments were cut, per value or as a whole, so a backend saw only part
+            of them. ``ToolApprovalClassifier`` turns an ``allow`` on such a call into ``ask``.
+        flow_context: The calling flow's ``context``, without the calling agent's own entry. A backend that runs a
+            flow component reads its inputs from it, such as the project and the workspace rules. Never render it
+            whole.
     """
 
     tool_name: str
@@ -97,3 +102,5 @@ class ToolApprovalRequest:
     display_message: Optional[str] = None
     user_messages: tuple[str, ...] = field(default_factory=tuple)
     recent_actions: tuple[str, ...] = field(default_factory=tuple)
+    truncated: bool = False
+    flow_context: Mapping[str, Any] = field(default_factory=dict, repr=False)

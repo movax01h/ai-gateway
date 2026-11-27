@@ -1,0 +1,19 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "tool_approval_review_response",
+    "description": "Your verdict on the pending tool call, and why. Call this exactly once, when you have decided.",
+    "type": "object",
+    "properties": {
+        "verdict": {
+            "type": "string",
+            "enum": ["allow", "ask", "deny"],
+            "description": "allow: the call runs now, without asking the human. ask: it goes to the human with your reason. deny: it is rejected and the calling agent is told not to retry it."
+        },
+        "reason": {
+            "type": "string",
+            "description": "1-3 sentences tied to this specific call: the concrete risk, or the concrete reason it is safe. Shown to the human on ask and to the calling agent on deny.",
+            "examples": ["`make test` runs the project's own test suite inside the workspace and changes nothing outside it."]
+        }
+    },
+    "required": ["verdict", "reason"]
+}

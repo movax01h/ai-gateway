@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from typing_extensions import TypedDict
 
+from duo_workflow_service.agent_platform.constants import TOOL_APPROVAL_REVIEW_TAG
 from duo_workflow_service.checkpointer.node_lifecycle import (
     NodeEvent,
     NodeEventLog,
@@ -248,6 +249,45 @@ async def test_handler_against_real_langgraph_stream():
         ("build_context", NodePhase.ENDED),
         ("researcher", NodePhase.STARTED),
         ("researcher", NodePhase.ENDED),
+    ]
+    assert _open_run_ids(log) == set()
+
+
+@pytest.mark.asyncio
+async def test_handler_against_real_langgraph_ignores_a_tool_approval_review():
+    # The classifier runs the reviewer agent's graph inside the calling node, with a config tagged
+    # TOOL_APPROVAL_REVIEW_TAG. Its nodes carry graph:step tags too, but are no component of the flow.
+    class State(TypedDict):
+        steps: Annotated[list, lambda a, b: a + b]
+
+    reviewer = StateGraph(State)
+    reviewer.add_node("reviewer#agent", lambda _state: {"steps": ["reviewer#agent"]})
+    reviewer.add_node("terminate_flow", lambda _state: {"steps": ["terminate_flow"]})
+    reviewer.add_edge(START, "reviewer#agent")
+    reviewer.add_edge("reviewer#agent", "terminate_flow")
+    reviewer.add_edge("terminate_flow", END)
+    compiled_reviewer = reviewer.compile(checkpointer=False)
+
+    async def developer_tool_approval_request(_state: State, config) -> dict:
+        review_config = {
+            **config,
+            "tags": [*config.get("tags", []), TOOL_APPROVAL_REVIEW_TAG],
+        }
+        await compiled_reviewer.ainvoke({"steps": []}, review_config)
+        return {"steps": ["developer#tool_approval_request"]}
+
+    graph = StateGraph(State)
+    graph.add_node("developer#tool_approval_request", developer_tool_approval_request)
+    graph.add_edge(START, "developer#tool_approval_request")
+    graph.add_edge("developer#tool_approval_request", END)
+
+    log = NodeEventLog()
+    handler = NodeLifecycleCallbackHandler(log)
+    await graph.compile().ainvoke({"steps": []}, config={"callbacks": [handler]})
+
+    assert _tuples(log) == [
+        ("developer", NodePhase.STARTED),
+        ("developer", NodePhase.ENDED),
     ]
     assert _open_run_ids(log) == set()
 
