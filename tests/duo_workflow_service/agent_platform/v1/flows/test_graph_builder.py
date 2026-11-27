@@ -107,6 +107,11 @@ class _LoopComponent(_NodeComponent):
             graph.add_conditional_edges(tools, router.route)
 
 
+def _router_stub() -> Mock:
+    """A built router, for the tests that patch ``Router``: the loop check reads its two ends."""
+    return Mock(spec=Router, from_component=Mock(), to_component=Mock())
+
+
 def _config(**overrides: Any) -> FlowConfig:
     """A minimal single-component config, overridable per test."""
     params: dict[str, Any] = {
@@ -834,7 +839,7 @@ class TestFlowGraphBuilder:
             ),
             patch(f"{_MODULE}.Router") as mock_router_class,
         ):
-            mock_router_class.return_value = Mock(spec=Router)
+            mock_router_class.return_value = _router_stub()
 
             builder.build(config)
 
@@ -870,7 +875,7 @@ class TestFlowGraphBuilder:
             ),
             patch(f"{_MODULE}.Router") as mock_router_class,
         ):
-            mock_router_class.return_value = Mock(spec=Router)
+            mock_router_class.return_value = _router_stub()
 
             builder.build(config)
 
@@ -910,7 +915,7 @@ class TestFlowGraphBuilder:
             ),
             patch(f"{_MODULE}.Router") as mock_router_class,
         ):
-            mock_router_class.return_value = Mock(spec=Router)
+            mock_router_class.return_value = _router_stub()
 
             builder.build(_config())
 
@@ -944,6 +949,37 @@ class TestFlowGraphBuilder:
             "agent_entry_node",
             "reviewer_entry_node",
         ]
+
+    def test_derived_recursion_limit_requires_a_finished_build(self, builder):
+        with pytest.raises(RuntimeError, match="requires a finished build"):
+            builder.derived_recursion_limit()
+
+    @pytest.mark.parametrize(
+        "broken",
+        [
+            {"flow": {}},
+            {
+                "components": [
+                    {"name": "agent", "type": "NodeComponent"},
+                    {"name": "agent", "type": "NodeComponent"},
+                ]
+            },
+        ],
+        ids=["missing_entry_point", "duplicate_component_name"],
+    )
+    def test_a_failed_build_leaves_no_limit_to_read(self, builder, broken):
+        """The old limit belongs to a graph that a failed build replaced, so it isn't served."""
+        with _component_classes({"NodeComponent": _NodeComponent}):
+            builder.build(
+                _config(components=[{"name": "agent", "type": "NodeComponent"}])
+            )
+            assert builder.derived_recursion_limit()
+
+            with pytest.raises(ValueError):
+                builder.build(_config(**broken))
+
+        with pytest.raises(RuntimeError, match="requires a finished build"):
+            builder.derived_recursion_limit()
 
     def test_derived_recursion_limit_sums_components_and_does_not_carry_over(
         self, builder
@@ -1063,6 +1099,7 @@ class TestFlowGraphBuilder:
     def test_a_loop_through_human_input_keeps_the_derived_limit(self, builder):
         """The run pauses at human input, and a resumed run starts with a new step count."""
         human = MagicMock(spec=HumanInputComponent)
+        human.name = "human"
         human.__entry_hook__.return_value = "human_entry_node"
         human.graph_steps.side_effect = lambda added_nodes: added_nodes
         human.inputs = []  # The conditional router revalidates its targets.

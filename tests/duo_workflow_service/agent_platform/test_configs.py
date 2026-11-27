@@ -5,13 +5,14 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast, get_args
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 import yaml
 from pydantic import ValidationError
 
 from ai_gateway.prompts.registry import LocalPromptRegistry
+from duo_workflow_service.agent_platform.constants import CHAT_PARTIAL_ENVIRONMENT
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig as ExperimentalFlowConfig,
 )
@@ -31,6 +32,10 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfigMetadata,
     config_from_data,
 )
+from duo_workflow_service.agent_platform.v1.flows.graph_builder import (
+    _edges,
+    declared_edges,
+)
 from duo_workflow_service.agent_platform.v1.flows.validation import (
     DryRunFlowValidator,
     _make_validation_tools_registry,
@@ -42,6 +47,7 @@ from lib.internal_events.client import InternalEventsClient
 
 # Legacy root plus moved features' config/ dirs, so a moved flow keeps validation.
 # Reuse the loader's own root derivation so this sweep cannot silently diverge.
+_GRAPH_BUILDER = "duo_workflow_service.agent_platform.v1.flows.graph_builder"
 _FEATURES_DIR = default_features_dir()
 V1_CONFIGS = sorted(FlowConfig.DIRECTORY_PATH.glob("**/*.yml")) + sorted(
     _FEATURES_DIR.glob("*/*/config/*.yml")
@@ -63,6 +69,15 @@ V1_CATALOG_ITEM_CONFIGS = [
     path
     for path in V1_CONFIGS
     if (yaml.safe_load(path.read_text()) or {}).get("include")
+]
+
+# Configs that the flow builder builds. A chat-partial flow is built by the chat engine at run time, and a dry run of
+# the flow builder can't build the ones that use `template`.
+V1_FLOW_BUILDER_CONFIGS = [
+    path
+    for path in V1_CONFIGS
+    if (yaml.safe_load(path.read_text()) or {}).get("environment")
+    != CHAT_PARTIAL_ENVIRONMENT
 ]
 
 TOOL_NAME_PATTERN = re.compile(r"[a-z0-9_]+")
@@ -451,6 +466,31 @@ class TestValidateFlowConfigs:
             internal_event_client=Mock(spec=InternalEventsClient),
             catalog_items=items,
         ).validate()
+
+    @pytest.mark.parametrize(
+        "config_path",
+        V1_FLOW_BUILDER_CONFIGS,
+        ids=_config_id,
+    )
+    def test_v1_config_edges_from_the_built_routers_match_the_config(
+        self, config_path: Path
+    ):
+        """The loop check reads the built routers, so they must declare the edges the config wrote.
+
+        ``declared_edges`` reads the raw router entries. If the two disagree for a shipped flow, the
+        ``RECURSION_LIMIT`` floor could drop without an error.
+        """
+        config = _load_flow_config(config_path)
+
+        with patch(f"{_GRAPH_BUILDER}._edges", wraps=_edges) as spy:
+            DryRunFlowValidator(
+                config=config,
+                prompt_registry=_make_local_prompt_registry(),
+                internal_event_client=Mock(spec=InternalEventsClient),
+            ).validate()
+
+        (built_routers,) = spy.call_args.args
+        assert _edges(built_routers) == declared_edges(config.routers)
 
     @pytest.mark.parametrize(
         "config_path",
