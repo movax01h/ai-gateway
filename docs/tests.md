@@ -204,11 +204,23 @@ Pass-rate summaries, generated artifacts, and a JUnit report are published as jo
 
 ## Sanity test
 
-The `sanity-tests` CI job submits a SWE-bench evaluation to the
+The sanity test submits a SWE-bench evaluation to the
 [CEF service](https://cef.runway.gitlab.net) via `scripts/submit_cef_eval.sh` and polls until it
 completes. It runs in a child pipeline (`.gitlab/ci/sanity-check.gitlab-ci.yml`) started by the
 `sanity-check-trigger` job (`.gitlab/ci/test.gitlab-ci.yml`) on MR pipelines and pushes to
-`main` that change Duo Workflow Service dependencies. The trigger waits for `tests:unit` and
+`main` that change Duo Workflow Service dependencies. The child pipeline has two jobs:
+
+1. `sanity-tests:register` registers the evaluation and passes its request ID to the next job
+   in a dotenv report. It takes a few seconds.
+1. `sanity-tests` starts 20 minutes later (`when: delayed`) and polls every 60 seconds until
+   the evaluation completes or fails. CEF needs about 20 minutes to set up its VM, so no runner
+   waits during that time. If the registration fails, `sanity-tests` does not run.
+
+To run the evaluation again, retry `sanity-tests:register`, then retry `sanity-tests`. A retry of
+`sanity-tests` alone polls the same evaluation again. Use it after a failed status request or a
+timeout.
+
+The trigger waits for `tests:unit` and
 then succeeds as soon as the child pipeline starts (fire-and-forget), so the ~30 min eval never
 blocks or delays the parent pipeline; the result appears as a downstream pipeline. The wait on
 unit tests is deliberate: a registered CEF experiment cannot be canceled and consumes a
