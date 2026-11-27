@@ -99,9 +99,13 @@ class FlowGraphBuilder:
         # Set by `build`, read by `derived_recursion_limit`.
         self._graph_steps = 0
         self._loops_without_human_input = False
+        # True only after a `build` has finished. A build that fails halfway leaves a partial step count behind, so the
+        # count can't tell `derived_recursion_limit` whether it is valid.
+        self._built = False
 
     def build(self, flow_config: FlowConfig) -> FlowGraph:
         """Build the graph for ``flow_config``, entry point set, ready to compile."""
+        self._built = False
         if flow_config.flow.entry_point is None:
             raise ValueError(
                 "Can not build flow graph: entry_point is not defined in the flow config."
@@ -112,13 +116,11 @@ class FlowGraphBuilder:
         self._graph_steps = 0
         components = self._build_components(flow_config, graph)
         self._build_routers(flow_config, components, graph)
-        self._loops_without_human_input = _has_loop_without_human_input(
-            flow_config.routers, components
-        )
 
         entry_component = components[flow_config.flow.entry_point]
         graph.set_entry_point(entry_component.__entry_hook__())
 
+        self._built = True
         return graph
 
     def derived_recursion_limit(self) -> int:
@@ -132,7 +134,15 @@ class FlowGraphBuilder:
         It counts one pass through each component. A loop through a ``HumanInputComponent`` fits, because the run
         pauses there and a resumed run starts with a new step count. A router loop without one can run any number of
         times, so nothing bounds it. A flow with such a loop keeps at least ``RECURSION_LIMIT``.
+
+        Raises:
+            RuntimeError: If no ``build()`` has finished on this builder.
         """
+        if not self._built:
+            raise RuntimeError(
+                "derived_recursion_limit() requires a finished build() first."
+            )
+
         derived = END_NODE_STEPS + self._graph_steps
         if self._loops_without_human_input:
             return max(RECURSION_LIMIT, derived)
@@ -291,6 +301,9 @@ class FlowGraphBuilder:
         Creates routers that orders components in the flow graph.
         Supports conditional routing based on component outputs.
 
+        Also sets ``_loops_without_human_input`` from the routers it built, so a subclass that overrides this method
+        must call ``super()`` or the flow loses its ``RECURSION_LIMIT`` floor without an error.
+
         Args:
             flow_config: The flow config whose ``routers`` to attach
             components: Dictionary of component instances keyed by name
@@ -305,6 +318,7 @@ class FlowGraphBuilder:
                     "Execution": "agent"
                     "default_route": "end"
         """
+        routers: list[Router] = []
         for router_config in flow_config.routers:
             from_comp = components[router_config["from"]]
 
@@ -335,12 +349,17 @@ class FlowGraphBuilder:
                 to_comp = components[router_config["to"]]
                 router = Router(from_component=from_comp, to_component=to_comp)
 
+            routers.append(router)
             # `Router.attach` calls `from_comp.attach(graph, router)`, so the node delta
             # is exactly what that component added.
             nodes_before = len(graph.nodes)
             router.attach(graph)
             added_nodes = len(graph.nodes) - nodes_before
             self._graph_steps += from_comp.graph_steps(added_nodes)
+
+        self._loops_without_human_input = _has_loop_without_human_input(
+            _edges(routers), components
+        )
 
     def _parse_toolset(self, toolset_config: list, flow_config: FlowConfig) -> Toolset:
         """Parse toolset configuration and extract tool options.
@@ -432,22 +451,42 @@ def reachable(start: str, edges: dict[str, set[str]]) -> set[str]:
     return seen
 
 
+def _edges(routers: list[Router]) -> dict[str, set[str]]:
+    """Return the edges that the built ``routers`` declare, as source component name to target component names.
+
+    It reads the routers that ``_build_routers`` made, so a new router form in the flow config reaches the loop check
+    through the one parser that builds them. ``declared_edges`` reads the raw config for ``ChatGraphBuilder``, which
+    needs the edges before any router attaches.
+    """
+    edges: dict[str, set[str]] = {}
+    for router in routers:
+        targets = (
+            router.to_component.values()
+            if isinstance(router.to_component, dict)
+            else [router.to_component]
+        )
+        edges.setdefault(router.from_component.name, set()).update(
+            target.name for target in targets
+        )
+    return edges
+
+
 def _has_loop_without_human_input(
-    routers: list[dict], components: dict[str, BaseComponent]
+    edges: dict[str, set[str]], components: dict[str, BaseComponent]
 ) -> bool:
-    """Return True when the routers form a loop that passes through no ``HumanInputComponent``."""
+    """Return True when ``edges`` form a loop that passes through no ``HumanInputComponent``."""
     pauses = {
         name
         for name, component in components.items()
         if isinstance(component, HumanInputComponent)
     }
-    edges = {
+    unpaused = {
         source: targets - pauses
-        for source, targets in declared_edges(routers).items()
+        for source, targets in edges.items()
         if source not in pauses
     }
     return any(
-        source in reachable(target, edges)
-        for source, targets in edges.items()
+        source in reachable(target, unpaused)
+        for source, targets in unpaused.items()
         for target in targets
     )

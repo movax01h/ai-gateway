@@ -950,9 +950,13 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_agent_class = Mock(return_value=mock_agent_component)
         mock_human_input_class = Mock(return_value=mock_human_input_component)
 
-        # Create mock router instances
-        mock_simple_router = Mock(spec=Router)
-        mock_conditional_router = Mock(spec=Router)
+        # Create mock router instances. The builder reads the two ends of each for its loop check.
+        mock_simple_router = Mock(
+            spec=Router, from_component=Mock(), to_component=Mock()
+        )
+        mock_conditional_router = Mock(
+            spec=Router, from_component=Mock(), to_component=Mock()
+        )
 
         # Setup tools registry mocks
         mock_tools_registry.toolset.return_value = ["read_file", "edit_file"]
