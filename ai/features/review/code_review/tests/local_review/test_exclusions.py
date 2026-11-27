@@ -5,15 +5,15 @@ from unittest.mock import patch
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.tools.code_review.local_review import (
+from ai.features.review.code_review.components.local_review import (
     LocalReviewContextBuilder,
 )
-from duo_workflow_service.tools.code_review.local_review.exclusions import (
+from ai.features.review.code_review.components.local_review.exclusions import (
     CHECK_ATTR_BATCH,
     MAX_DIFF_LINES_PER_FILE,
     MAX_UNTRACKED_FILES,
 )
-from tests.duo_workflow_service.tools.code_review.conftest import (
+from ai.features.review.code_review.tests.conftest import (
     APP_DIFF,
     BASE_SHA,
     DIFF,
@@ -482,7 +482,7 @@ async def test_check_attr_failure_is_not_swallowed(metadata, mode):
 
     tool = LocalReviewContextBuilder(metadata, metadata["project"])
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=failing,
     ):
         with pytest.raises(ToolException, match="check-attr exploded"):

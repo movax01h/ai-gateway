@@ -1,13 +1,10 @@
 from typing import Any
 
-from .build_review_merge_request_context import BuildReviewMergeRequestContext
-
-__all__ = [
-    "BuildReviewMergeRequestContext",
-]
+__all__: list[str] = []
 
 # Moved to the code_review feature package. Resolve lazily, so importing this package at startup does not warn.
 _MOVED_TOOLS = {
+    "BuildReviewMergeRequestContext": "ai.features.review.code_review.components",
     "DetectReviewContextTruncation": "ai.features.review.code_review.components",
     "FinalizeCodeReviewFindings": "ai.features.review.code_review.components",
     "PostDuoCodeReview": "ai.features.review.code_review.components",

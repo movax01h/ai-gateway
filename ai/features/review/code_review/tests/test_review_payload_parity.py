@@ -16,17 +16,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
+from ai.features.review.code_review.components.build_review_merge_request_context import (
     BuildReviewMergeRequestContext,
 )
-from tests.duo_workflow_service.tools.code_review.conftest import (
+from ai.features.review.code_review.tests.conftest import (
     BASE_SHA,
     DIFF,
     FakeGit,
     numstat,
     responses,
 )
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 PATH = "calculator.rb"
 
@@ -112,7 +112,7 @@ async def _local_payload(metadata) -> str:
     tool = BuildReviewMergeRequestContext(metadata=metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=fake,
     ):
         return await tool.ainvoke(

@@ -17,8 +17,8 @@ omits the tag.
 import html
 from typing import Dict, List, Optional, Tuple
 
-from duo_workflow_service.tools.code_review.diff_format import format_renamed_files
-from duo_workflow_service.tools.code_review.local_review.git_output import (
+from ai.features.review.code_review.components.diff_format import format_renamed_files
+from ai.features.review.code_review.components.local_review.git_output import (
     WorkingTreeStatus,
 )
 

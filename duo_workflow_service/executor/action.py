@@ -9,10 +9,6 @@ from prometheus_client import Histogram
 from contract import contract_pb2
 from duo_workflow_service.executor.image_result import ImageActionResult
 from duo_workflow_service.executor.outbox import Outbox, OutgoingMessageTooLargeError
-from duo_workflow_service.tools.tool_output_manager import (
-    TruncationConfig,
-    truncate_string,
-)
 from duo_workflow_service.workflows.type_definitions import (
     MAX_MESSAGE_SIZE,
 )
@@ -92,6 +88,12 @@ async def _execute_action_and_get_action_response(
             response = None
             # Some actions (e.g. RunCommand) can have important error information in the `response` field.
             if event.actionResponse.plainTextResponse.response:
+                # Imported here: duo_workflow_service.tools imports this module, so a top-level import is circular.
+                from duo_workflow_service.tools.tool_output_manager import (  # pylint: disable=import-outside-toplevel
+                    TruncationConfig,
+                    truncate_string,
+                )
+
                 response = truncate_string(
                     text=event.actionResponse.plainTextResponse.response,
                     tool_name=action_class,

@@ -7,16 +7,16 @@ from langchain_core.tools import ToolException
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from structlog.testing import capture_logs
 
+from ai.features.review.code_review.components.build_review_merge_request_context import (
+    BuildReviewMergeRequestContext,
+    BuildReviewMergeRequestContextInput,
+)
+from ai.features.review.code_review.components.diff_format import walk_diff_lines
 from duo_workflow_service.agent_platform.v1.components.deterministic_step.validation import (
     validate_against_schema,
 )
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.security.prompt_security import PromptSecurity
-from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
-    BuildReviewMergeRequestContext,
-    BuildReviewMergeRequestContextInput,
-)
-from duo_workflow_service.tools.code_review.diff_format import walk_diff_lines
 
 
 @pytest.fixture(name="mr_data")
@@ -985,7 +985,7 @@ class TestFormatDiffLinks:
 
 @pytest.mark.asyncio
 @patch(
-    "duo_workflow_service.tools.code_review.build_review_merge_request_context"
+    "ai.features.review.code_review.components.build_review_merge_request_context"
     ".supports_group_level_custom_instructions",
     return_value=True,
 )
@@ -1026,7 +1026,7 @@ async def test_group_level_custom_instructions_decodes_encoded_project_path(
 
 @pytest.mark.asyncio
 @patch(
-    "duo_workflow_service.tools.code_review.build_review_merge_request_context"
+    "ai.features.review.code_review.components.build_review_merge_request_context"
     ".supports_group_level_custom_instructions",
     return_value=True,
 )

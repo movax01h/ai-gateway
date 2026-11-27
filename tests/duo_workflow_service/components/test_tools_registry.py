@@ -15,6 +15,7 @@ from ai.features.chat.duo_permissions_assistant.components import (
     UpdateFormPermissions,
 )
 from ai.features.review.code_review.components import (
+    BuildReviewMergeRequestContext,
     DetectReviewContextTruncation,
     FinalizeCodeReviewFindings,
     PostDuoCodeReview,
@@ -64,9 +65,6 @@ from duo_workflow_service.tools.ascp import (
     ListAscpScans,
 )
 from duo_workflow_service.tools.branch import CreateBranch
-from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
-    BuildReviewMergeRequestContext,
-)
 from duo_workflow_service.tools.command import RunCommand, ShellCommand
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.findings.get_security_finding_details import (

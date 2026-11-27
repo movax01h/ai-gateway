@@ -6,13 +6,12 @@ Formatted with the same helpers the merge-request path uses, so both surfaces pr
 
 from typing import Dict, List, Tuple
 
-from duo_workflow_service.bl_security.executor_output import executor_truncated
-from duo_workflow_service.tools.code_review.diff_format import (
+from ai.features.review.code_review.components.diff_format import (
     format_file_diff,
     is_binary_diff,
     split_unified_diff,
 )
-from duo_workflow_service.tools.code_review.local_review.exclusions import (
+from ai.features.review.code_review.components.local_review.exclusions import (
     EXCLUSION_NO_DIFF,
     EXCLUSION_NON_TEXT,
     EXCLUSION_OVERSIZED,
@@ -20,15 +19,16 @@ from duo_workflow_service.tools.code_review.local_review.exclusions import (
     EXCLUSION_UNREADABLE,
     MAX_DIFF_LINES_PER_FILE,
 )
-from duo_workflow_service.tools.code_review.local_review.git_output import (
+from ai.features.review.code_review.components.local_review.git_output import (
     FileChange,
     is_text,
 )
-from duo_workflow_service.tools.code_review.local_review.target import ReviewTarget
-from duo_workflow_service.tools.code_review.local_review.transport import (
+from ai.features.review.code_review.components.local_review.target import ReviewTarget
+from ai.features.review.code_review.components.local_review.transport import (
     DIFF_FLAGS,
     GitRunner,
 )
+from duo_workflow_service.bl_security.executor_output import executor_truncated
 
 
 async def fetch_diffs(

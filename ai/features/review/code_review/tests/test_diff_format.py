@@ -1,6 +1,6 @@
 import pytest
 
-from duo_workflow_service.tools.code_review.diff_format import (
+from ai.features.review.code_review.components.diff_format import (
     format_diff_lines,
     format_file_diff,
     format_file_diffs,

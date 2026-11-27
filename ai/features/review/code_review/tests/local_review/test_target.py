@@ -5,13 +5,13 @@ from unittest.mock import patch
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.tools.code_review.local_review import (
+from ai.features.review.code_review.components.local_review import (
     LocalReviewContextBuilder,
 )
-from duo_workflow_service.tools.code_review.local_review.transport import (
+from ai.features.review.code_review.components.local_review.transport import (
     GitCommandError,
 )
-from tests.duo_workflow_service.tools.code_review.conftest import (
+from ai.features.review.code_review.tests.conftest import (
     APP_DIFF,
     BASE_SHA,
     DIFF,
@@ -108,7 +108,7 @@ async def test_a_failure_other_than_a_missing_ref_is_not_read_as_missing(
         return fake(_metadata, action)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=failing,
     ):
         with pytest.raises(ToolException, match=match):

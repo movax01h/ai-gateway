@@ -5,10 +5,10 @@ from typing import Dict
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.tools.code_review.local_review.transport import (
+from ai.features.review.code_review.components.local_review.transport import (
     DIFF_FLAGS,
 )
-from tests.duo_workflow_service.tools.code_review.conftest import (
+from ai.features.review.code_review.tests.conftest import (
     BASE_SHA,
     DIFF,
     FakeGit,

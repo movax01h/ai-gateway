@@ -1,6 +1,6 @@
 import pytest
 
-from duo_workflow_service.tools.code_review.custom_instructions import (
+from ai.features.review.code_review.components.custom_instructions import (
     filter_matching_instructions,
     format_instructions,
     parse_instructions,

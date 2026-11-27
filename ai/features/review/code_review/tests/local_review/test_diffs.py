@@ -2,7 +2,7 @@
 
 import pytest
 
-from tests.duo_workflow_service.tools.code_review.conftest import (
+from ai.features.review.code_review.tests.conftest import (
     APP_DIFF,
     BASE_SHA,
     DIFF,
