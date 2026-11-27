@@ -7,7 +7,7 @@ from duo_workflow_service.entities.server_tool_blocks import (
     ServerToolResults,
     _is_anthropic_server_tool_result_block,
     _is_anthropic_server_tool_use_block,
-    fetched_url,
+    fetched_urls,
     native_web_call,
     split_content_around_server_tools,
     warn_unmatched_server_tool_results,
@@ -437,16 +437,16 @@ def test_native_web_call(block, expected):
                 "name": "web_fetch",
                 "input": {"url": "https://x"},
             },
-            "https://x",
+            ["https://x"],
         ),
         (
             {
                 "type": "web_search_call",
                 "action": {"type": "open_page", "url": "https://x"},
             },
-            "https://x",
+            ["https://x"],
         ),
-        ({"type": "server_tool_use", "name": "web_fetch", "input": {}}, None),
+        ({"type": "server_tool_use", "name": "web_fetch", "input": {}}, []),
         (
             {
                 "type": "server_tool_use",
@@ -454,7 +454,7 @@ def test_native_web_call(block, expected):
                 "input": {},
                 "partial_json": '{"url": "https://x"}',
             },
-            "https://x",
+            ["https://x"],
         ),
         (
             {
@@ -463,15 +463,15 @@ def test_native_web_call(block, expected):
                 "input": {},
                 "partial_json": '{"url": "https:',
             },
-            None,
+            [],
         ),
-        ({"type": "web_search_call", "action": {"type": "open_page"}}, None),
-        ({"type": "server_tool_use", "name": "web_fetch", "input": {"url": 1}}, None),
+        ({"type": "web_search_call", "action": {"type": "open_page"}}, []),
+        ({"type": "server_tool_use", "name": "web_fetch", "input": {"url": 1}}, []),
         (
             {"type": "web_search_call", "action": {"type": "open_page", "url": {}}},
-            None,
+            [],
         ),
     ],
 )
-def test_fetched_url(block, expected):
-    assert fetched_url(block) == expected
+def test_fetched_urls(block, expected):
+    assert fetched_urls(block) == expected

@@ -25,6 +25,16 @@ FETCH_BLOCK = {
     "name": "web_fetch",
     "input": {"url": "https://example.com"},
 }
+PAGES = [{"url": "https://a"}, {"url": "https://b"}]
+
+
+def _openai_call(action_type, status="completed", results=None, **action):
+    block = {
+        "type": "web_search_call",
+        "status": status,
+        "action": {"type": action_type, **action},
+    }
+    return {**block, "results": results} if results else block
 
 
 @pytest.fixture(name="internal_event_client")
@@ -183,17 +193,43 @@ class TestNativeWebToolUsageEvent:
             e["additional_properties"].property for e in _tracked(internal_event_client)
         ] == ["web_search", "web_fetch"]
 
-    def test_tracks_the_same_calls_the_audit_log_records(self, internal_event_client):
-        """OpenAI find_in_page on an already-read URL is no new fetch, for either sink."""
-
-        def call(action):
-            return {"type": "web_search_call", "status": "completed", "action": action}
-
-        blocks = [
-            call({"type": "open_page", "url": "https://x"}),
-            call({"type": "find_in_page", "url": "https://x", "pattern": "CVE"}),
-            call({"type": "find_in_page", "url": "https://y", "pattern": "CVE"}),
-        ]
+    @pytest.mark.parametrize(
+        ("blocks", "expected_urls", "expected_tracked"),
+        [
+            pytest.param(
+                [
+                    _openai_call("open_page", url="https://x"),
+                    _openai_call("find_in_page", url="https://x"),
+                    _openai_call("find_in_page"),
+                    _openai_call("find_in_page", url="https://y"),
+                ],
+                ["https://x", "https://y"],
+                2,
+                id="find-in-page-fetches-only-an-unread-page",
+            ),
+            pytest.param(
+                [
+                    _openai_call("open_page", url="https://a", results=PAGES),
+                    _openai_call("find_in_page", url="https://b"),
+                ],
+                ["https://a", "https://b"],
+                1,
+                id="open-page-reads-every-page-in-its-results",
+            ),
+            pytest.param(
+                [_openai_call("open_page", "failed", url="https://a", results=PAGES)],
+                ["https://a"],
+                1,
+                id="failed-open-page-reads-only-its-url",
+            ),
+            pytest.param(
+                [{**FETCH_BLOCK, "input": {}}], [None], 1, id="fetch-without-a-url"
+            ),
+        ],
+    )
+    def test_audits_each_page_and_tracks_each_call(
+        self, internal_event_client, blocks, expected_urls, expected_tracked
+    ):
         collector = AuditEventCollector(
             client=Mock(), workflow_id="42", flush_interval_seconds=1_000
         )
@@ -204,7 +240,8 @@ class TestNativeWebToolUsageEvent:
             audit_collector_context.reset(token)
 
         audited = collector._buffer  # pylint: disable=protected-access
-        assert len(_tracked(internal_event_client)) == len(audited) == 2
+        assert [event.url for event in audited] == expected_urls
+        assert len(_tracked(internal_event_client)) == expected_tracked
 
     def test_ignores_the_client_executed_fallback_tool(self, internal_event_client):
         """AgentCore searches are tracked by the tool itself."""

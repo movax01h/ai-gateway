@@ -67,14 +67,13 @@ def native_web_call_succeeded(call_block: dict, content: list) -> bool:
     )
 
 
-def fetched_url(call_block: dict) -> Optional[str]:
-    """The URL a fetch call read, when the block carries one as a string."""
+def fetched_urls(call_block: dict) -> list[str]:
+    """Every page a fetch call read; one OpenAI ``open_page`` can read several."""
     if openai_web_search.is_call_block(call_block):
-        url = openai_web_search.fetched_url(call_block)
-    else:
-        tool_input = call_block.get("input") or _streamed_input(call_block)
-        url = tool_input.get("url") if isinstance(tool_input, dict) else None
-    return url if isinstance(url, str) else None
+        return openai_web_search.read_urls(call_block)
+    tool_input = call_block.get("input") or _streamed_input(call_block)
+    url = tool_input.get("url") if isinstance(tool_input, dict) else None
+    return [url] if isinstance(url, str) and url else []
 
 
 def _is_anthropic_server_tool_use_block(block: Any) -> TypeGuard[dict]:

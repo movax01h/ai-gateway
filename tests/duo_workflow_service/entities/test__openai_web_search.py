@@ -197,9 +197,44 @@ def _result(url, title=None):
             id="open-page-without-citation",
         ),
         pytest.param(
-            [_call(status="failed", type="open_page", url="https://a")],
+            [
+                _call(
+                    type="open_page",
+                    url="https://a",
+                    results=[
+                        _result("https://a", "A"),
+                        "not-a-dict",
+                        {"url": 7},
+                        _result("https://b", "B"),
+                    ],
+                )
+            ],
+            {"ws_1": [_result("https://a", "A"), _result("https://b", "B")]},
+            id="open-page-lists-every-page-it-read",
+        ),
+        pytest.param(
+            [
+                _call(
+                    status="failed",
+                    type="open_page",
+                    url="https://a",
+                    results=[_result("https://b")],
+                )
+            ],
             {"ws_1": []},
             id="failed-open-page-has-no-sources",
+        ),
+        pytest.param(
+            [
+                _call(
+                    type="find_in_page",
+                    url="https://a",
+                    pattern="p",
+                    results=[_result("https://b")],
+                )
+            ],
+            {"ws_1": [_result("https://a")]},
+            id="find-in-page-takes-only-its-url",
         ),
         pytest.param(
             [
@@ -294,3 +329,39 @@ def test_card_fields_from_action(action, expected_name, expected_args):
     )
 
     assert (name, args) == (expected_name, expected_args)
+
+
+@pytest.mark.parametrize(
+    ("status", "results", "expected_url"),
+    [
+        pytest.param(
+            "completed",
+            [_result("https://a/", "A"), _result("https://b", "B")],
+            "https://a/, https://b",
+            id="lists-every-page-it-read",
+        ),
+        pytest.param(
+            "completed",
+            [_result("https://a/?utm_source=openai")],
+            "https://a/",
+            id="names-a-page-once",
+        ),
+        pytest.param("completed", [], "https://a/", id="blocked-page"),
+        pytest.param(
+            "completed",
+            ["not-a-dict", {"title": "No URL"}, {"url": 7}],
+            "https://a/",
+            id="results-naming-no-url-are-skipped",
+        ),
+        pytest.param(
+            "in_progress", [_result("https://b")], "https://a/", id="still-running"
+        ),
+        pytest.param("failed", [_result("https://b")], "https://a/", id="failed"),
+    ],
+)
+def test_card_fields_open_page_url(status, results, expected_url):
+    _, args, _ = card_fields(
+        _call(status=status, results=results, type="open_page", url="https://a/")
+    )
+
+    assert args == {"url": expected_url}
