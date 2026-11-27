@@ -63,12 +63,12 @@ from typing import Any, Dict, Optional, Set, Tuple
 import structlog
 from langchain_core.tools import ToolException
 
+from ai.features.review.code_review.components.custom_instructions import (
+    INSTRUCTIONS_FILE_PATH,
+)
 from contract import contract_pb2
 from duo_workflow_service.bl_security.executor_output import executor_truncated
 from duo_workflow_service.executor.action import _execute_action, _read_file_fully
-from duo_workflow_service.tools.code_review.custom_instructions import (
-    INSTRUCTIONS_FILE_PATH,
-)
 from duo_workflow_service.tools.filesystem import validate_duo_context_exclusions
 from duo_workflow_service.tools.read_only_git import (
     GIT_GLOBAL_FLAGS as HARDENED_GIT_GLOBAL_FLAGS,

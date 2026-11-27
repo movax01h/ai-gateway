@@ -59,6 +59,7 @@ _MOVED_TOOLS = {
     "GetGlqlSchemaInput": "ai.features.insights.analytics_agent.components.get_glql_schema",
     "RunGLQLQuery": "ai.features.insights.analytics_agent.components.run_glql_query",
     "GLQLQueryInput": "ai.features.insights.analytics_agent.components.run_glql_query",
+    "BuildReviewMergeRequestContext": "ai.features.review.code_review.components",
     "DetectReviewContextTruncation": "ai.features.review.code_review.components",
     "FinalizeCodeReviewFindings": "ai.features.review.code_review.components",
     "PostDuoCodeReview": "ai.features.review.code_review.components",

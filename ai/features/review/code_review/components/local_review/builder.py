@@ -23,29 +23,29 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.tools.code_review.custom_instructions import (
+from ai.features.review.code_review.components.custom_instructions import (
     INSTRUCTIONS_FILE_PATH,
     filter_matching_instructions,
     format_instructions,
     parse_instructions,
 )
-from duo_workflow_service.tools.code_review.local_review import exclusions, render
-from duo_workflow_service.tools.code_review.local_review.diffs import (
+from ai.features.review.code_review.components.local_review import exclusions, render
+from ai.features.review.code_review.components.local_review.diffs import (
     fetch_diffs,
     fetch_untracked_diffs,
 )
-from duo_workflow_service.tools.code_review.local_review.git_output import (
+from ai.features.review.code_review.components.local_review.git_output import (
     FileChange,
     WorkingTreeStatus,
     complete_listing,
     parse_numstat,
     parse_status,
 )
-from duo_workflow_service.tools.code_review.local_review.target import (
+from ai.features.review.code_review.components.local_review.target import (
     ReviewTarget,
     resolve_target,
 )
-from duo_workflow_service.tools.code_review.local_review.transport import (
+from ai.features.review.code_review.components.local_review.transport import (
     DIFF_FLAGS,
     STATUS_FLAGS,
     GitRunner,

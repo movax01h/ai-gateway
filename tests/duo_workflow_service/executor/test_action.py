@@ -11,6 +11,7 @@ from structlog.testing import capture_logs
 
 from contract import contract_pb2
 from duo_workflow_service.executor.action import _read_file_fully, _split_read_page
+from tests.fresh_interpreter import run_in_fresh_interpreter
 
 
 class _PaginatingExecutor:
@@ -258,3 +259,18 @@ class TestDegenerateResponses:
 
         with pytest.raises(ToolException, match="non-string NoneType"):
             await _read_file_fully({}, "spill.json", execute=_not_a_string)
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "duo_workflow_service.executor.action",
+        # Imports the executor before anything loads duo_workflow_service.tools.
+        "ai.features.review.code_review.components",
+    ],
+)
+def test_fresh_import(module):
+    # duo_workflow_service.tools imports the executor, so the executor must not import that package at load time.
+    result = run_in_fresh_interpreter(f"import {module}")
+
+    assert result.returncode == 0, result.stderr

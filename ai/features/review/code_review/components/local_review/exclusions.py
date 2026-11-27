@@ -40,18 +40,18 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import structlog
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
-from duo_workflow_service.tools.code_review.local_review.git_output import (
+from ai.features.review.code_review.components.local_review.git_output import (
     FILTER_ATTRIBUTE,
     GENERATED_ATTRIBUTES,
     FileChange,
     complete_listing,
     parse_check_attr,
 )
-from duo_workflow_service.tools.code_review.local_review.transport import (
+from ai.features.review.code_review.components.local_review.transport import (
     GitRunner,
     is_denylisted,
 )
+from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
 
 logger = structlog.stdlib.get_logger(__name__)
 

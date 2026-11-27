@@ -23,8 +23,8 @@ from typing import Any, List, Optional, Tuple
 from langchain_core.tools import ToolException
 from pydantic import BaseModel
 
-from duo_workflow_service.tools.code_review.local_review.render import escape_text
-from duo_workflow_service.tools.code_review.local_review.transport import (
+from ai.features.review.code_review.components.local_review.render import escape_text
+from ai.features.review.code_review.components.local_review.transport import (
     GitCommandError,
     GitRunner,
 )

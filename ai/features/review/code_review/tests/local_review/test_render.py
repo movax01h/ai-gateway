@@ -2,11 +2,11 @@
 
 import pytest
 
-from duo_workflow_service.tools.code_review.local_review.exclusions import (
+from ai.features.review.code_review.components.local_review.exclusions import (
     MAX_DIFF_LINES_PER_FILE,
 )
-from duo_workflow_service.tools.code_review.local_review.render import render_list
-from tests.duo_workflow_service.tools.code_review.conftest import (
+from ai.features.review.code_review.components.local_review.render import render_list
+from ai.features.review.code_review.tests.conftest import (
     BASE_SHA,
     DIFF,
     FakeGit,

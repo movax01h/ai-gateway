@@ -6,11 +6,10 @@ from unittest.mock import patch
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.bl_security.executor_output import executor_truncated
-from duo_workflow_service.tools.code_review.custom_instructions import (
+from ai.features.review.code_review.components.custom_instructions import (
     INSTRUCTIONS_FILE_PATH,
 )
-from duo_workflow_service.tools.code_review.local_review.transport import (
+from ai.features.review.code_review.components.local_review.transport import (
     ALLOWED_GIT_SUBCOMMANDS,
     DIFF_FLAGS,
     GIT_GLOBAL_FLAGS,
@@ -20,10 +19,7 @@ from duo_workflow_service.tools.code_review.local_review.transport import (
     _filter_driver_names,
     is_denylisted,
 )
-from duo_workflow_service.tools.read_only_git import (
-    GIT_GLOBAL_FLAGS as READ_ONLY_GIT_GLOBAL_FLAGS,
-)
-from tests.duo_workflow_service.tools.code_review.conftest import (
+from ai.features.review.code_review.tests.conftest import (
     APP_DIFF,
     BASE_SHA,
     DIFF,
@@ -32,6 +28,10 @@ from tests.duo_workflow_service.tools.code_review.conftest import (
     numstat,
     responses,
     run_tool,
+)
+from duo_workflow_service.bl_security.executor_output import executor_truncated
+from duo_workflow_service.tools.read_only_git import (
+    GIT_GLOBAL_FLAGS as READ_ONLY_GIT_GLOBAL_FLAGS,
 )
 
 
@@ -71,7 +71,7 @@ async def test_denylisted_file_read_returns_nothing_without_an_action(metadata):
     git = GitRunner(metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=fake,
     ):
         assert await git.read_file(".env") is None
@@ -86,7 +86,7 @@ async def test_unreadable_file_is_not_an_error(metadata):
     git = GitRunner(metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=fake,
     ):
         assert await git.read_file("gone.txt") is None
@@ -99,7 +99,7 @@ async def test_a_write_subcommand_is_refused_before_it_reaches_the_executor(meta
     git = GitRunner(metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=fake,
     ):
         with pytest.raises(ToolException, match="not a read-only command"):
@@ -108,7 +108,9 @@ async def test_a_write_subcommand_is_refused_before_it_reaches_the_executor(meta
     assert fake.actions == []
 
 
-PATCH = "duo_workflow_service.tools.code_review.local_review.transport._execute_action"
+PATCH = (
+    "ai.features.review.code_review.components.local_review.transport._execute_action"
+)
 
 
 @pytest.mark.asyncio
@@ -236,7 +238,7 @@ async def test_config_is_allowed_only_as_the_read_only_filter_query(metadata, ar
     git = GitRunner(metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=fake,
     ):
         with pytest.raises(ToolException, match="read-only query"):
@@ -266,7 +268,7 @@ async def test_a_non_zero_exit_is_not_read_as_data(metadata):
     git = GitRunner(metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=lambda *_: "Exit code: 128\nfatal: not a git repository\n",
     ):
         with pytest.raises(ToolException, match="exited with 128"):
@@ -279,7 +281,7 @@ async def test_the_exit_code_envelope_is_stripped_before_parsing(metadata):
     git = GitRunner(metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=lambda *_: (
             "Exit code: 0\n1111111111111111111111111111111111111111\n"
         ),
@@ -296,7 +298,7 @@ async def test_no_configured_filters_is_not_an_error(metadata):
 
     # A non-zero exit arrives as a *successful* action carrying the code in the body.
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=lambda *_: "Exit code: 1\n",
     ):
         assert await git.filter_drivers() == ()
@@ -308,7 +310,7 @@ async def test_the_prefix_is_the_executor_directory_below_the_repository_root(me
     git = GitRunner(metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=lambda *_: "Exit code: 0\nsub/deep/\n",
     ):
         assert await git.prefix() == "sub/deep/"
@@ -390,7 +392,7 @@ async def test_an_executor_that_does_not_wrap_output_still_works(metadata):
     git = GitRunner(metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=lambda *_: "no envelope here\n",
     ):
         assert await git.run("rev-parse", "HEAD") == "no envelope here\n"
@@ -405,7 +407,7 @@ async def test_a_config_failure_other_than_no_match_is_not_swallowed(metadata):
     git = GitRunner(metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=lambda *_: "Exit code: 128\nfatal: bad config line 1\n",
     ):
         with pytest.raises(ToolException, match="exited with 128"):
@@ -418,7 +420,7 @@ async def test_a_transport_failure_is_not_read_as_no_filters(metadata):
     git = GitRunner(metadata)
 
     with patch(
-        "duo_workflow_service.tools.code_review.local_review.transport._execute_action",
+        "ai.features.review.code_review.components.local_review.transport._execute_action",
         side_effect=ToolException("Action error: executor unreachable"),
     ):
         with pytest.raises(ToolException, match="executor unreachable"):

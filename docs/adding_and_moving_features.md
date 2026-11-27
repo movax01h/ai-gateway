@@ -206,6 +206,9 @@ lint rejects it, so move the feature first.
    }
    ```
 
+   A tool that several features use goes in the `components/` of the feature that owns it,
+   because tool discovery does not scan `ai/shared/`.
+
 1. Put the tests in `tests/`. `pytest` collects `ai/features/*/*/tests`.
 
 1. Declare the serving surface in `serving.py`, with `transport="grpc"` and

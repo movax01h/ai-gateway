@@ -7,6 +7,7 @@ from duo_workflow_service.tools import code_review
 @pytest.mark.parametrize(
     "name",
     [
+        "BuildReviewMergeRequestContext",
         "DetectReviewContextTruncation",
         "FinalizeCodeReviewFindings",
         "PostDuoCodeReview",

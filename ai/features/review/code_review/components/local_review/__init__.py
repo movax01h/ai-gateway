@@ -16,7 +16,7 @@ Read in this order:
 - `builder` -- the orchestration that calls all of the above in order.
 """
 
-from duo_workflow_service.tools.code_review.local_review.builder import (
+from ai.features.review.code_review.components.local_review.builder import (
     LocalReviewContextBuilder,
 )
 

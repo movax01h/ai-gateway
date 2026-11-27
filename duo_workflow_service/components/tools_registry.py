@@ -195,7 +195,6 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ResolveVulnerabilityTargetBranch,
     tools.ExtractLinesFromText,
     tools.FetchGlqlSchema,
-    tools.BuildReviewMergeRequestContext,
     tools.GetSecurityFindingDetails,
     tools.ListSecurityFindings,
     tools.ListAscpScans,
