@@ -56,6 +56,10 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
     approval_requests_key_for,
     approval_skip_sources_key_for,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.tool_approval_classifier import (
+    READ_ONLY_REVIEWER_TOOLS,
+    TOOL_APPROVAL_REVIEW_SCHEMA_ID,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
     agent_tools_ui_log_writer_class,
@@ -127,6 +131,11 @@ RUNTIME_INJECTED_VARS = (
 # `default_iteration_warning_offset`, which uses this for budgets of 20 or more and
 # half the budget below that, never dropping below one cycle.
 _DEFAULT_ITERATION_WARNING_OFFSET: int = 10
+
+
+# Most cycles a tool approval reviewer may run. A review must reach a verdict well inside the classifier's timeout, so
+# its own loop bound, not the timeout, should end it: past it, the agent is told to wrap up and answer.
+MAX_TOOL_APPROVAL_REVIEWER_CYCLES: int = 10
 
 
 def default_iteration_warning_offset(threshold: int) -> Optional[int]:
@@ -300,6 +309,8 @@ class AgentComponentBase(PromptReference, BaseComponent):
     _iteration_warning_offset: Optional[int] = PrivateAttr()
     # Set for a subagent, whose address its dispatcher makes for each run of it.
     _run_address: Optional[Callable[[FlowState], Address]] = PrivateAttr(default=None)
+    # Set for the auto mode classifier's reviewer, which runs inside another agent's turn.
+    _reviews_tool_approvals: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
     def initialize_tool_approval_decision_key(self) -> Self:
@@ -658,9 +669,10 @@ class AgentComponentBase(PromptReference, BaseComponent):
     def _accepts_unaddressed(self) -> bool:
         """Whether this component takes inbox messages that name no recipient.
 
-        A subagent never does.
+        A subagent never does, and neither does a tool approval reviewer: it runs inside the calling agent's turn, so a
+        message the user sends meanwhile is for that agent.
         """
-        return not self._is_subagent()
+        return not self._is_subagent() and not self._reviews_tool_approvals
 
     def _claimant(self, state: FlowState) -> Claimant:
         """Which inbox messages this component's agent takes."""
@@ -1067,6 +1079,59 @@ class AgentComponent(AgentComponentBase):
             )
 
         self._run_address = address
+        return self._compile_standalone()
+
+    def compile_as_tool_approval_reviewer(self) -> CompiledStateGraph:
+        """Compile this component's ReAct loop as the auto mode classifier's reviewer.
+
+        The same isolated graph as ``compile_as_subagent``, with these differences:
+
+        - ``checkpointer=False``: a review is a throwaway run inside ``ToolApprovalRequestNode``, never resumed. So one
+            node can run several reviews, since LangGraph allows only one checkpointed subgraph call per node, and an
+            ``interrupt()`` inside the reviewer, such as an approval for one of its own tools, is an error the
+            classifier treats as no verdict, instead of a pause of the whole flow.
+        - Its toolset must be read-only (``READ_ONLY_REVIEWER_TOOLS``): the reviewer only inspects the workspace.
+        - No ``description`` is needed: nothing delegates to it.
+        - It never takes an inbox message that names no recipient (see ``_accepts_unaddressed``).
+        - ``max_cycles`` must be at most ``MAX_TOOL_APPROVAL_REVIEWER_CYCLES``, so a review ends on its own loop bound
+            rather than being cancelled by the classifier's timeout.
+        - It must answer through the ``TOOL_APPROVAL_REVIEW_SCHEMA_ID`` response schema, which the LLM backend reads
+            its verdict from. Past ``max_cycles``, only that schema's tool stays bound, so the reviewer must answer.
+
+        Raises:
+            ValueError: If the toolset holds a tool outside ``READ_ONLY_REVIEWER_TOOLS``, ``max_cycles`` is above
+                ``MAX_TOOL_APPROVAL_REVIEWER_CYCLES``, or the response schema isn't ``TOOL_APPROVAL_REVIEW_SCHEMA_ID``.
+        """
+        writable = sorted(set(self.toolset) - READ_ONLY_REVIEWER_TOOLS)
+        if writable:
+            raise ValueError(
+                f"AgentComponent '{self.name}' reviews tool calls for auto mode, so it may only hold read-only "
+                f"tools ({', '.join(sorted(READ_ONLY_REVIEWER_TOOLS))}), but it holds {', '.join(writable)}."
+            )
+
+        if self.response_schema_id != TOOL_APPROVAL_REVIEW_SCHEMA_ID:
+            raise ValueError(
+                f"AgentComponent '{self.name}' reviews tool calls for auto mode, so its response_schema_id must be "
+                f"'{TOOL_APPROVAL_REVIEW_SCHEMA_ID}', but it is {self.response_schema_id!r}."
+            )
+
+        if self._max_cycles_threshold > MAX_TOOL_APPROVAL_REVIEWER_CYCLES:
+            raise ValueError(
+                f"AgentComponent '{self.name}' reviews tool calls for auto mode, so its max_cycles must be at most "
+                f"{MAX_TOOL_APPROVAL_REVIEWER_CYCLES}, but it is {self._max_cycles_threshold}."
+            )
+
+        self._reviews_tool_approvals = True
+        return self._compile_standalone(checkpointer=False)
+
+    def _compile_standalone(
+        self, checkpointer: Optional[Literal[False]] = None
+    ) -> CompiledStateGraph:
+        """Compile this component as an independent graph, terminated by its own ``EndComponent``.
+
+        ``None`` inherits the parent's checkpointer when the graph is invoked with the parent's config (see
+        ``compile_as_subagent``); ``False`` opts out of checkpointing (see ``compile_as_tool_approval_reviewer``).
+        """
         self._session_id_key = RuntimeIOKey(
             alias="session_id",
             factory=lambda _: IOKey(
@@ -1093,7 +1158,7 @@ class AgentComponent(AgentComponentBase):
         # one.
         Router(from_component=self, to_component=end_component).attach(graph)
         graph.set_entry_point(self.__entry_hook__())
-        return graph.compile()
+        return graph.compile(checkpointer=checkpointer)
 
     def _agent_node_router(self, state: FlowState) -> str:
         history_iokey = self._conversation_history_key.to_iokey(state)

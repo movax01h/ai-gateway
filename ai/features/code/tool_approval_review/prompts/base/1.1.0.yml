@@ -1,0 +1,8 @@
+---
+name: Tool Approval Review
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'tool_approval_review/system/1.1.0.jinja' %}
+  user: |
+    {% include 'tool_approval_review/user/1.1.0.jinja' %}

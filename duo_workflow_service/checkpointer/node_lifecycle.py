@@ -29,6 +29,7 @@ from uuid import UUID
 from langchain_core.callbacks import AsyncCallbackHandler
 from langgraph.errors import GraphInterrupt
 
+from duo_workflow_service.agent_platform.constants import TOOL_APPROVAL_REVIEW_TAG
 from duo_workflow_service.agent_platform.node_naming import component_name_from_node
 
 
@@ -110,6 +111,10 @@ class NodeLifecycleCallbackHandler(AsyncCallbackHandler):  # pylint: disable=too
     via ``on_chain_error``. That is a *pause*, not a failure — the run genuinely
     ends and resuming re-runs the node under a new run id — so it is recorded as
     ``ENDED``. Only non-interrupt errors are recorded as ``ERRORED``.
+
+    Runs inside an auto mode tool approval review (tagged ``TOOL_APPROVAL_REVIEW_TAG``) aren't recorded. The reviewer
+    agent runs as a graph of its own inside the calling node, and its nodes, such as its ``terminate_flow``, are no
+    component of the flow's canvas.
     """
 
     def __init__(self, event_log: NodeEventLog) -> None:
@@ -127,7 +132,7 @@ class NodeLifecycleCallbackHandler(AsyncCallbackHandler):  # pylint: disable=too
         metadata: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ) -> None:
-        if not _is_node_boundary(tags):
+        if not _is_node_boundary(tags) or TOOL_APPROVAL_REVIEW_TAG in (tags or []):
             return
         component = component_name_from_node((metadata or {}).get("langgraph_node"))
         if not component:

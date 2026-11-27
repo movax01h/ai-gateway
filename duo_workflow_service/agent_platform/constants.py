@@ -3,6 +3,10 @@
 # before it recovers the design-time component name.
 NODE_ROLE_SEPARATOR = "#"
 
+# Tags every run inside an auto mode tool approval review, and the runs it makes, such as the reviewer agent's nodes,
+# model calls and reads. Callback handlers use it to tell a review's runs apart from the calling agent's own.
+TOOL_APPROVAL_REVIEW_TAG = "tool_approval_review"
+
 # Number of steps LangGraph is allowed to execute in a single workflow run before raising
 # a GraphRecursionError. Raised from 300 to 600 in
 # gitlab-org/modelops/applied-ml/code-suggestions/ai-assist#2590: 300 react
