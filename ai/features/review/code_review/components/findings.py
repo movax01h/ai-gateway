@@ -186,13 +186,17 @@ def render_previous_findings(
     verified items reads as if there were something left to do, so a re-review that closed everything is published as
     a clean review instead.
 
-    Items on threads in `resolved_ids` are left out: a resolved thread is one the author has settled, and repeating it
-    on every re-review buries what changed. A closing line counts them so the list is not read as complete.
+    Settled items on threads in `resolved_ids` are left out, as repeating them on every re-review buries what changed.
+    A closing line counts them so the list is not read as complete. Items that still need attention stay listed even
+    when their thread is resolved: resolving a thread is not a fix, and dropping them would publish a clean review.
     """
     resolved_ids = resolved_ids or set()
     visible = [item for item in items if item.get("status") not in HIDDEN]
     items = [
-        item for item in visible if str(item.get("discussion_id")) not in resolved_ids
+        item
+        for item in visible
+        if str(item.get("discussion_id")) not in resolved_ids
+        or item.get("status") in NEEDS_ATTENTION
     ]
     if not any(item.get("status") in NEEDS_ATTENTION for item in items):
         return None
