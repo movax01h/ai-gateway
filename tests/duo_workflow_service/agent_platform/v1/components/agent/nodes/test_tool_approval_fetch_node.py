@@ -4,6 +4,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
 
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
@@ -17,7 +19,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
-from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
+from duo_workflow_service.agent_platform.v1.state import FlowState, FlowStateKeys
 from duo_workflow_service.agent_platform.v1.state.base import (
     FlowEvent,
     FlowEventType,
@@ -953,3 +955,66 @@ class TestToolApprovalFetchNodeTracking:
             ),
             category=flow_type.value,
         )
+
+
+class TestToolApprovalFetchNodeYieldsWhileTheTurnIsBeingRecovered:
+    """The node is attached to a real graph with a checkpointer, as it runs: a pause is what a recovery must prevent."""
+
+    @pytest.fixture(name="history")
+    def history_fixture(self, component_name):
+        message = AIMessage(
+            content="",
+            tool_calls=[{"id": "call_1", "name": "test_tool", "args": {}}],
+        )
+        return {component_name: [message]}
+
+    @staticmethod
+    async def _run(node, state):
+        graph = StateGraph(FlowState)
+        graph.add_node("fetch", node.run)
+        graph.add_edge(START, "fetch")
+        graph.add_edge("fetch", END)
+        config = {"configurable": {"thread_id": "t"}}
+
+        compiled = graph.compile(checkpointer=InMemorySaver())
+        result = await compiled.ainvoke(state, config)
+        return result, await compiled.aget_state(config)
+
+    @pytest.mark.asyncio
+    async def test_it_does_not_pause_while_the_turn_is_being_recovered(
+        self, tool_approval_fetch_node, base_flow_state, history
+    ):
+        state = {
+            **base_flow_state,
+            FlowStateKeys.STATUS: WorkflowStatusEnum.RECOVERY,
+            FlowStateKeys.CONVERSATION_HISTORY: history,
+        }
+
+        result, snapshot = await self._run(tool_approval_fetch_node, state)
+
+        # Nothing waits for an approval: the run reached its end.
+        assert snapshot.next == ()
+        assert snapshot.interrupts == ()
+        # The reject route sends the flow to the agent. The status stays RECOVERY: only the agent that claims the
+        # message ends a recovery, and a subagent's agent node reads it to leave the message to its supervisor.
+        assert result[FlowStateKeys.STATUS] == WorkflowStatusEnum.RECOVERY
+        assert result[FlowStateKeys.CONTEXT]["test_agent"][
+            "tool_approval_decision"
+        ] == (FlowEventType.REJECT)
+        # The agent closes each open call, so no rejection result is written here.
+        assert result[FlowStateKeys.CONVERSATION_HISTORY] == history
+
+    @pytest.mark.asyncio
+    async def test_it_pauses_for_the_approval_otherwise(
+        self, tool_approval_fetch_node, base_flow_state, history
+    ):
+        state = {
+            **base_flow_state,
+            FlowStateKeys.STATUS: WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+            FlowStateKeys.CONVERSATION_HISTORY: history,
+        }
+
+        _, snapshot = await self._run(tool_approval_fetch_node, state)
+
+        assert snapshot.next == ("fetch",)
+        assert len(snapshot.interrupts) == 1

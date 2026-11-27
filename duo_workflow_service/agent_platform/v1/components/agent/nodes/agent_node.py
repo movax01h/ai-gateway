@@ -42,6 +42,10 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._base import (
     BaseAgentComponentNode,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._recovery import (
+    RECOVERED_STATUS,
+    is_recovering,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
     DEFAULT_SESSION_ID_KEY,
 )
@@ -726,6 +730,38 @@ class AgentNode(BaseAgentComponentNode):  # pylint: disable=too-many-instance-at
 
         return [rendered]
 
+    @staticmethod
+    def _recovered_update(state: FlowState) -> dict[str, Any]:
+        """The state update that ends a recovery, and nothing when none was under way.
+
+        The status is the one a running turn has. A turn that wasn't recovering keeps whatever status it had, so an
+        agent that never saw a recovery writes nothing new.
+        """
+        if not is_recovering(state):
+            return {}
+        return IOKey(target="status").to_nested_dict(RECOVERED_STATUS)
+
+    @property
+    def _ends_recovery(self) -> bool:
+        """The agent that claims the message that recovers the turn ends the recovery, so it doesn't step aside.
+
+        A subagent takes only what is addressed to its own run, so that message is its supervisor's, and calling the
+        model would answer nothing: it steps aside like every other node, and the supervisor's agent ends the recovery.
+        """
+        return not self.is_subagent
+
+    def _skip_for_recovery(self, state: FlowState) -> dict:
+        """Leave the history as it is, because the message that recovers the turn is the supervisor's.
+
+        The component's router sends the subagent to its recovery exit, which the supervisor reads as a delegation that
+        ended without an answer.
+        """
+        log.info(
+            "Not calling the model: the message that recovers the turn is the supervisor's",
+            agent=self.name,
+        )
+        return {}
+
     async def _run(
         self,
         state: FlowState,
@@ -901,7 +937,10 @@ class AgentNode(BaseAgentComponentNode):  # pylint: disable=too-many-instance-at
                     state_update,
                     self._agent_context_limits_update(history_iokey),
                 )
-                return merge_nested_dict(result, cycle_count_state_update)
+                return merge_nested_dict(
+                    merge_nested_dict(result, cycle_count_state_update),
+                    self._recovered_update(state),
+                )
             except ContextOverflowError as e:
                 model_error = ModelError(
                     error_type=ModelErrorType.REQUEST_TOO_LARGE,

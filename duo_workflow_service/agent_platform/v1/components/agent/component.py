@@ -648,12 +648,19 @@ class AgentComponentBase(PromptReference, BaseComponent):
             return self._run_address(state)
         return Address.of(self.name)
 
+    def _is_subagent(self) -> bool:
+        """Whether a supervisor bound or compiled this component to run as its subagent.
+
+        Known once the supervisor has done so, which is before ``attach``.
+        """
+        return self._run_address is not None
+
     def _accepts_unaddressed(self) -> bool:
         """Whether this component takes inbox messages that name no recipient.
 
         A subagent never does.
         """
-        return self._run_address is None
+        return not self._is_subagent()
 
     def _claimant(self, state: FlowState) -> Claimant:
         """Which inbox messages this component's agent takes."""
@@ -902,8 +909,9 @@ class AgentComponent(AgentComponentBase):
         return self
 
     @override
-    def _accepts_unaddressed(self) -> bool:
-        return super()._accepts_unaddressed() and not self._is_bound_to_supervisor
+    def _is_subagent(self) -> bool:
+        # Bound to a supervisor that flattens it into its own graph, or compiled for one that dispatches it.
+        return super()._is_subagent() or self._is_bound_to_supervisor
 
     def bind_to_supervisor(
         self,
@@ -1270,6 +1278,8 @@ class AgentComponent(AgentComponentBase):
         )
 
         node_agent.claimant = self._claimant
+        node_agent.is_subagent = self._is_subagent()
+        node_final_response.is_subagent = self._is_subagent()
         graph.add_node(self.__entry_hook__(), node_agent.run)
         graph.add_node(node_tools.name, node_tools.run)
         graph.add_node(node_final_response.name, node_final_response.run)

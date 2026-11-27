@@ -1994,6 +1994,36 @@ class TestAgentComponentClaimant:
             recipient=Address.of(component_name), accepts_unaddressed=False
         )
 
+    @pytest.mark.parametrize("bound", [False, True], ids=["top_level", "bound"])
+    def test_the_component_tells_its_nodes_whether_they_run_for_a_supervisor(
+        self,
+        make_agent_component,
+        mock_agent_node_cls,
+        mock_tool_node_cls,  # pylint: disable=unused-argument  # activates the node mock
+        mock_final_response_node_cls,
+        mock_router,
+        bound,
+    ):
+        component = make_agent_component(description="A test subagent.")
+        if bound:
+            component.bind_to_supervisor(
+                conversation_history_key=RuntimeIOKey(
+                    alias="conversation_history", factory=Mock()
+                ),
+                output_key=RuntimeIOKey(alias="final_answer", factory=Mock()),
+                goal_key=RuntimeIOKey(alias="goal", factory=Mock()),
+                tool_approval_decision_key=RuntimeIOKey(
+                    alias="tool_approval_decision", factory=Mock()
+                ),
+                cycle_count_key=RuntimeIOKey(alias="cycle_count", factory=Mock()),
+            )
+
+        component.attach(StateGraph(FlowState), mock_router)
+
+        # Both nodes decide whether to yield from this one fact, and not from what the claimant would take.
+        assert mock_agent_node_cls.return_value.is_subagent is bound
+        assert mock_final_response_node_cls.return_value.is_subagent is bound
+
 
 class TestAgentComponentBindToSupervisor:
     """Test suite for AgentComponent.bind_to_supervisor functionality."""

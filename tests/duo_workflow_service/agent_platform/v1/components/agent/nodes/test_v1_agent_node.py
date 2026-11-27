@@ -73,7 +73,12 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
 from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionResult,
 )
-from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
+from duo_workflow_service.entities import (
+    MessageTypeEnum,
+    ToolStatus,
+    UiChatLog,
+    WorkflowStatusEnum,
+)
 from duo_workflow_service.entities.image_blocks import (
     IMAGE_LIMIT_LATEST_MESSAGE,
     IMAGE_LIMIT_SEEN_MESSAGE,
@@ -4850,18 +4855,63 @@ class TestTheAgentRendersWhatItReceives:
             "answer",
         ]
 
+    @staticmethod
+    def _recovering(history: list[Any]) -> dict[str, Any]:
+        return {
+            **TestTheAgentRendersWhatItReceives._state(history),
+            FlowStateKeys.STATUS: WorkflowStatusEnum.RECOVERY,
+        }
+
     @pytest.mark.asyncio
-    async def test_an_agent_that_does_not_take_unaddressed_messages_leaves_one(
+    async def test_a_subagent_yields_while_the_turn_is_being_recovered(self, node):
+        # The component says it is a subagent: the message that recovers the turn is its supervisor's.
+        node.is_subagent = True
+        inbox = _inbox(*_messages("fix the pipeline"))
+
+        result = await self._run(
+            node, self._recovering([HumanMessage(content="hi")]), inbox
+        )
+
+        # It did not call the model, and it wrote nothing: its history is as it was and nothing was claimed.
+        assert result[FlowStateKeys.CONVERSATION_HISTORY]["agent"][0].text == "hi"
+        assert len(result[FlowStateKeys.CONVERSATION_HISTORY]["agent"]) == 1
+        assert result[FlowStateKeys.STATUS] == WorkflowStatusEnum.RECOVERY
+        assert inbox.claim(TaskId("later"), Claimant(accepts_unaddressed=True))
+
+    @pytest.mark.asyncio
+    async def test_an_agent_that_is_not_a_subagent_reads_the_message_and_ends_the_recovery(
         self, node
     ):
-        # A subagent: the user's message isn't its to take.
-        node.claimant = lambda _state: Claimant(recipient=Address.of("agent"))
+        # It is the next agent to run, so the message is its own: it claims it, answers, and the turn is running again.
+        # The node has no cycle budget, so ending the recovery is the agent's own step and not a side effect of counting.
+        node.is_subagent = False
         inbox = _inbox(*_messages("fix the pipeline"))
+
+        result = await self._run(
+            node, self._recovering([HumanMessage(content="hi")]), inbox
+        )
+
+        assert self._texts(result) == ["hi", "<msg>fix the pipeline</msg>", "answer"]
+        assert result[FlowStateKeys.STATUS] == WorkflowStatusEnum.EXECUTION
+
+    @pytest.mark.asyncio
+    async def test_a_subagent_that_is_not_recovering_runs_as_before(self, node):
+        # The status is what says so, and a waiting message in the inbox isn't: a steer is for whoever claims it.
+        node.is_subagent = True
+        node.claimant = lambda _state: Claimant(recipient=Address.of("agent"))
+        inbox = _inbox(*_messages("use bar"))
 
         result = await self._run(node, self._state([HumanMessage(content="hi")]), inbox)
 
         assert self._texts(result) == ["hi", "answer"]
-        assert inbox.claim(TaskId("later"), Claimant(accepts_unaddressed=True))
+
+    @pytest.mark.asyncio
+    async def test_an_agent_that_was_not_recovering_leaves_the_status_alone(self, node):
+        result = await self._run(
+            node, self._state([HumanMessage(content="hi")]), _inbox()
+        )
+
+        assert result[FlowStateKeys.STATUS] == "Execution"
 
     @pytest.mark.asyncio
     async def test_an_agent_no_component_gave_a_claimant_fails_the_run(self, node):

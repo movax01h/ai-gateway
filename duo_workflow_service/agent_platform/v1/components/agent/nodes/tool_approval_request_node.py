@@ -166,6 +166,12 @@ class ToolApprovalRequestNode(BaseAgentComponentNode):
             return TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT.format(tool_name=call["name"])
         return str(invalid_by_id[call["id"]])
 
+    def _skip_for_recovery(self, state: FlowState) -> dict[str, Any]:
+        """Ask for nothing: the user interrupted these calls, so asking to approve them would bring back what they
+        stepped in to stop. The router sends the flow on to the agent, which closes each call as interrupted."""
+        log.info("Not requesting tool approval: the turn is being recovered")
+        return {}
+
     async def _run(self, state: FlowState, runtime: Any = None) -> dict[str, Any]:
         """Validate tool calls and request approval."""
         # Get conversation history

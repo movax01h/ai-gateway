@@ -2,6 +2,7 @@ __all__ = ["ToolApprovalFetchNode"]
 
 from typing import Any
 
+import structlog.stdlib
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 from langgraph.types import interrupt
 
@@ -33,6 +34,8 @@ from duo_workflow_service.errors.typing import InvalidRequestException
 from duo_workflow_service.tools.toolset import Toolset
 from lib.context import record_approval_policy_ref, record_approval_source
 from lib.internal_events.event_enum import EventEnum, EventPropertyEnum
+
+log = structlog.stdlib.get_logger(__name__)
 
 
 class ToolApprovalFetchNode(BaseAgentComponentNode):
@@ -205,6 +208,24 @@ class ToolApprovalFetchNode(BaseAgentComponentNode):
             )
             for tool_call in tool_calls
         ]
+
+    def _skip_for_recovery(self, state: FlowState) -> dict[str, Any]:
+        """Stop waiting for the approval, because the turn it belonged to is being recovered.
+
+        The turn stopped or failed, and the entry continued it from where it ended with ``status = RECOVERY``. A stop
+        ends what a turn waited for: the message is not the approval's answer, and a decision that arrives later has
+        nothing to answer. So the node does not pause, and takes the reject route to the agent: no tool runs. It adds no
+        rejection result, because the agent that claims the message closes each open call as interrupted when it renders
+        its history.
+
+        The status stays ``RECOVERY``. Only the agent that claims the message ends a recovery, and a subagent's agent
+        node reads the status to leave the message to its supervisor, so ``EXECUTION`` set here would have it call the
+        model instead.
+        """
+        log.info("Not waiting for tool approval: the turn is being recovered")
+        return self._approval_decision_key.to_iokey(state).to_nested_dict(
+            FlowEventType.REJECT
+        )
 
     async def _run(self, state: FlowState, runtime: Any = None) -> dict[str, Any]:
         """Wait for approval decision and process response."""

@@ -61,6 +61,12 @@ __all__ = ["ToolNode"]
 IDENTICAL_CALL_MAX_NUDGES = 2
 
 
+# Shown to the user in place of the result of a call the turn's interruption skipped.
+INTERRUPTED_CALL_SKIPPED_UI_MESSAGE = (
+    "Skipped {tool_name}: the turn was interrupted before it ran."
+)
+
+
 class ToolNode(BaseAgentComponentNode):
     """LangGraph node that executes tool calls from the last AIMessage in conversation history.
 
@@ -194,6 +200,40 @@ class ToolNode(BaseAgentComponentNode):
             **history_iokey.to_nested_dict(conversation_history + tools_responses),
             **context_updates,
         }
+
+    def _skip_for_recovery(self, state: FlowState) -> dict:
+        """Run none of the calls, because the user interrupted them and the turn is being recovered.
+
+        The turn these calls belong to stopped or failed, and the entry continued it from where it ended with
+        ``status = RECOVERY``. A tool that ran now would act on what the user just stepped in to stop, so the node
+        answers nothing and leaves the history as it is: the agent that claims the message closes each open
+        call as interrupted when it renders its history, so the model reads the calls as unanswered and then the
+        message.
+
+        A card was streamed as pending for each call when the stopped run's agent produced it, and only an entry with
+        the same ``message_id`` replaces it, so each call logs a failure under its own ID. Without it the cards would
+        spin until the session ends.
+        """
+        history = self._history_iokey(state).value_from_state(state) or []
+        tool_calls = getattr(history[-1], "tool_calls", []) if history else []
+        session_id = self._session_id(state)
+        self._logger.info(
+            "Skipping tool calls: the turn is being recovered",
+            tool_names=", ".join(tool_call["name"] for tool_call in tool_calls),
+        )
+        for tool_call in tool_calls:
+            tool = self._toolset.get(tool_call["name"])
+            if tool is None:
+                continue
+            self._ui_history.log.error(
+                tool=tool,
+                tool_call_args=tool_call.get("args", {}),
+                message=INTERRUPTED_CALL_SKIPPED_UI_MESSAGE.format(tool_name=tool.name),
+                event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+                message_id=tool_call.get("id"),
+                subsession_id=session_id,
+            )
+        return self._ui_history.pop_state_updates()
 
     def _handle_identical_call_loop(
         self,

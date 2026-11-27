@@ -431,6 +431,63 @@ class TestFinalResponseNode:
         assert result["context"]["result"] == "Last response"
 
 
+class TestFinalResponseNodeWhileTheTurnIsBeingRecovered:
+    """While a turn is being recovered the node finishes nothing: no agent has read the message that recovers it."""
+
+    @staticmethod
+    def _node(component_name, simple_output, ui_history, *, is_subagent):
+        node = FinalResponseNode(
+            name="test_node",
+            conversation_history_key=_make_conversation_history_key(component_name),
+            output_key=_make_output_key(simple_output),
+            ui_history=ui_history,
+            response_schema=AgentFinalOutput,
+            component_name=component_name,
+        )
+        node.is_subagent = is_subagent
+        return node
+
+    @staticmethod
+    def _recovering(state):
+        return {**state, FlowStateKeys.STATUS: WorkflowStatusEnum.RECOVERY}
+
+    @pytest.mark.asyncio
+    async def test_a_top_level_agent_writes_nothing_and_logs_no_answer(
+        self, component_name, simple_output, flow_state_with_message, ui_history
+    ):
+        """The component's router sends it back to its agent node, so no answer is final yet."""
+        node = self._node(component_name, simple_output, ui_history, is_subagent=False)
+
+        result = await node.run(self._recovering(flow_state_with_message))
+
+        assert result == {}
+        ui_history.log.success.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_subagent_writes_no_answer_explicitly(
+        self, component_name, simple_output, flow_state_with_message, ui_history
+    ):
+        """A supervisor reads a missing output as a broken run and an explicit None as a delegation with no answer."""
+        node = self._node(component_name, simple_output, ui_history, is_subagent=True)
+
+        result = await node.run(self._recovering(flow_state_with_message))
+
+        assert result == {"context": {"result": None}}
+        ui_history.log.success.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_turn_that_is_not_recovering_finishes_as_before(
+        self, component_name, simple_output, flow_state_with_message, ui_history
+    ):
+        """Control: the same node and the same history finish the turn when nothing is being recovered."""
+        node = self._node(component_name, simple_output, ui_history, is_subagent=False)
+
+        result = await node.run(flow_state_with_message)
+
+        assert FlowStateKeys.CONVERSATION_HISTORY in result
+        ui_history.log.success.assert_called_once()
+
+
 class TestResponseSchemaTracking:
     """Test suite for response schema tracking in FinalResponseNode."""
 
