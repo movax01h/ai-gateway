@@ -23,7 +23,10 @@ from pydantic import BaseModel, Field, ValidationError
 
 from contract import contract_pb2
 from duo_workflow_service.agents import ToolsExecutor
-from duo_workflow_service.agents.tools_executor import SKIPPED_TOOL_CALL_TEMPLATE
+from duo_workflow_service.agents.tools_executor import (
+    SKIPPED_TOOL_CALL_CARD_TEXT,
+    SKIPPED_TOOL_CALL_TEMPLATE,
+)
 from duo_workflow_service.entities.state import (
     TOOL_RESPONSE_MAX_DISPLAY_MSG,
     MessageTypeEnum,
@@ -1750,10 +1753,52 @@ async def test_tool_calls_past_max_tool_calls_are_answered_without_running(
     card = result["ui_chat_log"][-1]
     assert card["message_id"] == "call-b"
     assert card["status"] == ToolStatus.FAILURE
-    assert card["tool_info"]["error"]["message"] == SKIPPED_TOOL_CALL_TEMPLATE.format(
-        max_tool_calls=1
-    )
+    assert card["tool_info"]["error"]["message"] == SKIPPED_TOOL_CALL_CARD_TEXT
+    assert card["tool_info"]["tool_response"].content == SKIPPED_TOOL_CALL_CARD_TEXT
     assert_client_valid_tool_info(card["tool_info"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "all_tools",
+    [
+        {
+            "a": mock_tool(name="a", content="tool a"),
+            "b": mock_tool(name="b", content="tool b"),
+        }
+    ],
+)
+async def test_skipped_tool_calls_get_the_given_notice(
+    workflow_state, tools_executor, all_tools
+):
+    graph_builder = StateGraph(WorkflowState)
+    graph_builder.add_node(
+        "exec",
+        partial(
+            tools_executor.run,
+            max_tool_calls=1,
+            skipped_tool_call_notice="Skipped: limit reached.",
+        ),
+    )
+    graph_builder.set_entry_point("exec")
+    graph_builder.set_finish_point("exec")
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"id": "call-a", "name": "a", "args": {}},
+                {"id": "call-b", "name": "b", "args": {}},
+            ],
+        )
+    ]
+
+    result = await graph_builder.compile().ainvoke(workflow_state)
+
+    assert result["conversation_history"]["planner"][-1] == ToolMessage(
+        content="Skipped: limit reached.", tool_call_id="call-b"
+    )
+    card = result["ui_chat_log"][-1]
+    assert card["tool_info"]["error"]["message"] == SKIPPED_TOOL_CALL_CARD_TEXT
 
 
 @pytest.mark.asyncio

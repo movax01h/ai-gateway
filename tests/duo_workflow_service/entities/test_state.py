@@ -20,6 +20,7 @@ from duo_workflow_service.entities.state import (
     build_tool_info,
     policy_ref_to_log_dict,
     render_for_display,
+    tool_calls_to_run,
 )
 from duo_workflow_service.security.secret_redaction import (
     REDACTED_PLACEHOLDER,
@@ -698,3 +699,14 @@ class TestBuildToolInfoStructuredContent:
 
         assert info["tool_response"] == "ordinary text output"
         assert_client_valid_tool_info(info)
+
+
+@pytest.mark.parametrize(
+    ("used", "expected"),
+    [(None, 25), (990, 10), (1000, 0)],
+    ids=["no_budget_yet", "budget_below_model_call_limit", "budget_spent"],
+)
+def test_tool_calls_to_run(used, expected):
+    budget = None if used is None else {"used": used, "wrap_up_notices": 0}
+
+    assert tool_calls_to_run(budget) == expected

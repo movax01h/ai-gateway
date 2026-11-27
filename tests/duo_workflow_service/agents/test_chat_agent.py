@@ -3306,7 +3306,7 @@ class TestToolApprovalRequestTracking:
     ],
     ids=["flag_on", "flag_on_old_gitlab", "flag_on_unknown_gitlab", "flag_off"],
 )
-@patch("duo_workflow_service.agents.chat_agent.MAX_TOOL_CALLS_PER_MODEL_CALL", 2)
+@patch("duo_workflow_service.entities.state.MAX_TOOL_CALLS_PER_MODEL_CALL", 2)
 async def test_approval_is_requested_only_for_tool_calls_that_will_run(
     input, mock_toolset, flag_enabled, version, expected_limit, expected_requested
 ):
@@ -3350,3 +3350,61 @@ async def test_approval_is_requested_only_for_tool_calls_that_will_run(
 
     assert result["max_tool_calls"] == expected_limit
     assert result["tool_call_approval_requested"] == expected_requested
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("used", "expected_limit", "expected_status", "expected_requested"),
+    [
+        (9, 1, WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED, ["call_0"]),
+        (10, 0, WorkflowStatusEnum.EXECUTION, None),
+    ],
+    ids=["budget_nearly_spent", "budget_spent"],
+)
+@patch("duo_workflow_service.entities.state.MAX_TOOL_CALLS_PER_USER_MESSAGE", 10)
+@patch("duo_workflow_service.entities.state.MAX_TOOL_CALLS_PER_MODEL_CALL", 2)
+async def test_the_user_message_budget_shrinks_the_limit_for_the_response(
+    input, mock_toolset, used, expected_limit, expected_status, expected_requested
+):
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+    mock_toolset.resolve_approval_source = AsyncMock(return_value=None)
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=Mock(spec=ToolsRegistry),
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        return_value=AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "tool_requiring_approval",
+                    "args": {"param": index},
+                    "id": f"call_{index}",
+                    "type": "tool_call",
+                }
+                for index in range(4)
+            ],
+        )
+    )
+    input["tool_call_budget"] = {"used": used, "wrap_up_notices": 0}
+
+    token = current_feature_flag_context.set(
+        {FeatureFlag.DUO_CHAT_TOOL_CALL_LIMITS.value}
+    )
+    version_token = gitlab_version.set("19.6.0")
+    try:
+        result = await chat_agent.run(input)
+    finally:
+        gitlab_version.reset(version_token)
+        current_feature_flag_context.reset(token)
+
+    assert result["max_tool_calls"] == expected_limit
+    assert result["status"] == expected_status
+    assert result.get("tool_call_approval_requested") == expected_requested

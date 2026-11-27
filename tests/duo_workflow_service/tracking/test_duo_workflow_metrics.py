@@ -40,6 +40,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "agent_platform_receive_start_counter",
             "agent_platform_response_schema_output_counter",
             "agent_platform_flow_route_decision_counter",
+            "chat_tool_call_budget_exhausted_counter",
             "compaction_execution_counter",
             "compaction_llm_duration",
             "audit_events_captured_counter",
@@ -447,6 +448,21 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             flow_type="fix_pipeline",
             component_name="decide_approach",
             route_value="create_fix",
+        )
+
+    def test_chat_tool_call_budget_exhausted_counter(self):
+        self._assert_counter_called(
+            "chat_tool_call_budget_exhausted_counter",
+            "count_chat_tool_call_budget_exhausted",
+            {
+                "flow_type": "chat",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+                "gitlab_realm": "unknown",
+                "is_gitlab_team_member": "unknown",
+            },
+            flow_type="chat",
         )
 
     def test_count_response_schema_output(self):

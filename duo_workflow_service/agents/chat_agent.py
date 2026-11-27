@@ -42,7 +42,6 @@ from duo_workflow_service.entities.server_tool_blocks import (
     warn_unmatched_server_tool_results,
 )
 from duo_workflow_service.entities.state import (
-    MAX_TOOL_CALLS_PER_MODEL_CALL,
     TIER_ACCESS_DENIED_SUB_TYPE,
     ApprovalSource,
     ApprovalStateRejection,
@@ -52,6 +51,7 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
+    tool_calls_to_run,
 )
 from duo_workflow_service.errors.typing import (
     NotifiableAgentException,
@@ -510,7 +510,7 @@ class ChatAgent:
     ):
         result["status"] = WorkflowStatusEnum.EXECUTION
         max_tool_calls = (
-            MAX_TOOL_CALLS_PER_MODEL_CALL
+            tool_calls_to_run(state.get("tool_call_budget"))
             if is_feature_enabled(FeatureFlag.DUO_CHAT_TOOL_CALL_LIMITS)
             and supports_chat_tool_call_limits()
             else None

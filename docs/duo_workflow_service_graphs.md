@@ -118,6 +118,7 @@ graph TD;
     agent(agent)
     run_tools(run_tools)
     forced_call_complete(forced_call_complete)
+    tool_call_limit_reached(tool_call_limit_reached)
     __end__([<p>__end__</p>]):::last
     __start__ -. &nbsp;continue&nbsp; .-> agent;
     __start__ -. &nbsp;tool_use&nbsp; .-> run_tools;
@@ -125,7 +126,9 @@ graph TD;
     agent -. &nbsp;tool_use&nbsp; .-> run_tools;
     run_tools -. &nbsp;continue&nbsp; .-> agent;
     run_tools -. &nbsp;stop&nbsp; .-> forced_call_complete;
+    run_tools -. &nbsp;tool_call_limit&nbsp; .-> tool_call_limit_reached;
     forced_call_complete --> __end__;
+    tool_call_limit_reached --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2
     classDef first fill-opacity:0
     classDef last fill:#bfb6fc
