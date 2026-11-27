@@ -513,8 +513,10 @@ Lefthook automatically runs on commit (skipped on `main`), scoped to staged file
 1. **Proto files** (`contract/*.proto`): `lint-proto` (buf lint)
 1. **Markdown files** (`*.md`): `lint-doc` (vale, markdownlint, lychee)
 1. **All other files**: `check-codespell`, `check-editorconfig`
-1. **Path-scoped checks**: `check-legacy-roots` when legacy prompt or flow roots change, and
-   `check-duo-workflow-flow-schema` when flow config or schema sources change
+1. **Path-scoped checks**: `check-legacy-roots` when legacy prompt or flow roots change,
+   `check-duo-workflow-flow-schema` when flow config or schema sources change, and
+   `check-dws-dependencies` when Duo Workflow Service or `ai_gateway` files change. If
+   `check-dws-dependencies` fails, stage `.gitlab/ci/dws-dependencies.yml` and commit again.
 1. **Pre-push**: `lint-commit` validates commit messages with `commitlint` against `main`
 
 `lint-commit` checks every commit since the merge base, not only the ones you

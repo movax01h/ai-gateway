@@ -36,6 +36,24 @@ pre-commit:
         if echo '{staged_files}' | tr ' ' '\n' | grep -qE '^(duo_workflow_service/agent_platform/v1/flows/flow_config\.py|duo_workflow_service/schemas/.*|ai_gateway/prompts/config/base\.py|ai_gateway/response_schemas/config\.py)$'; then
           make check-duo-workflow-flow-schema
         fi
+    # The CI lint job fails when .gitlab/ci/dws-dependencies.yml is out of date.
+    # The file lists the ai_gateway modules that Duo Workflow Service imports.
+    check-dws-dependencies:
+      run: |
+        # Fail when the generator fails: without this, only the exit status of
+        # the last command counts.
+        set -e
+
+        # Use git, not the staged_files template: the template leaves out deleted
+        # files and the old path of a moved file, and lefthook skips the command
+        # when the template is empty. These changes can change the dependencies.
+        if git diff --cached --name-only --no-renames | grep -qE '^(duo_workflow_service/|ai/apps/dws/|ai_gateway/)|^(scripts/generate_dws_change_patterns\.py|\.gitlab/ci/dws-dependencies\.yml)$'; then
+          poetry run python scripts/generate_dws_change_patterns.py
+          git diff --exit-code .gitlab/ci/dws-dependencies.yml || {
+            echo "ERROR: .gitlab/ci/dws-dependencies.yml was out of date and is now updated. Stage it and commit again."
+            exit 1
+          }
+        fi
     check-legacy-roots:
       run: |
         if echo '{staged_files}' | tr ' ' '\n' | grep -qE '^(ai_gateway/prompts/definitions/|duo_workflow_service/agent_platform/v1/flows/configs/)|^scripts/(check_legacy_roots\.py|legacy_roots_allowlist\.txt)$'; then
