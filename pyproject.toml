@@ -175,6 +175,10 @@ ignore-multiline-regex = "codespell:ignore-begin.*\n.*codespell:ignore-end"
 
 [tool.pytest.ini_options]
 addopts = "--disable-warnings --import-mode=importlib"
+# Import the packages from this checkout. The editable install in a shared
+# .venv points at the checkout that last ran `poetry install`, so without this,
+# tests in a git worktree import another checkout's code.
+pythonpath = ["."]
 testpaths = ["tests", "ai/features/*/*/tests"]
 filterwarnings = [
   "error::UserWarning",
