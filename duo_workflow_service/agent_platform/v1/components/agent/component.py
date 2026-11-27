@@ -1231,6 +1231,7 @@ class AgentComponent(AgentComponentBase):
             trim_ui_chat_log=self._trim_ui_chat_log,
             prompt_template_inputs={"tools_enabled": self._tools_enabled(prompt)},
             wrap_up_prompt=wrap_up_prompt,
+            session_id_key=self._session_id_key,
         )
         node_tools = ToolNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",

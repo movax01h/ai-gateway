@@ -1,6 +1,7 @@
 """Subsession attribution shared by agent nodes.
 
-A module-level function rather than a mixin: these nodes share no base class.
+A module-level function: it is a pure lookup that needs no node state. ``BaseAgentComponentNode`` calls it for the
+nodes that share that base, and the experimental components re-export it for theirs.
 """
 
 from typing import Optional
