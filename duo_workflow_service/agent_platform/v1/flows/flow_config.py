@@ -211,6 +211,17 @@ class BaseFlowConfig(BaseModel):
     _config_id: Optional[str] = PrivateAttr(default=None)
     _config_version: Optional[str] = PrivateAttr(default=None)
 
+    def set_registry_identity(
+        self, flow_id: Optional[str], version: Optional[str]
+    ) -> None:
+        """Record the registry flow id and concrete version this config was loaded from.
+
+        The only writer of ``_config_id`` and ``_config_version``. It takes no part in validation, so no input
+        can reach it: only ``load_registry_file`` and ``_complete_as`` call it.
+        """
+        self._config_id = flow_id
+        self._config_version = version
+
     @property
     def config_id(self) -> Optional[str]:
         """The registry flow id this config was loaded from; ``None`` when not loaded from the registry."""
@@ -459,8 +470,7 @@ def load_registry_file(
     config = parse(
         _read_registry_file(path, flow_id, version) or {}, resolved_version=version
     )
-    config._config_id = flow_id
-    config._config_version = version
+    config.set_registry_identity(flow_id, version)
     return config
 
 
@@ -627,8 +637,7 @@ class ChatPartialMixin:
         )
         # Validation builds the config from public fields only, so carry the private
         # registry identity over explicitly.
-        config._config_id = self._config_id
-        config._config_version = self._config_version
+        config.set_registry_identity(self._config_id, self._config_version)
         return config
 
 
