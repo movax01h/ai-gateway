@@ -20,6 +20,10 @@ from ai.features.review.code_review.components import (
     PostDuoCodeReview,
     PostDuoCodeReviewFindings,
 )
+from ai.features.review.recommend_reviewers.components import (
+    AddMergeRequestReviewers,
+    PostSuggestedReviewers,
+)
 from ai.features.review.risk_assessment.components import (
     SubmitMergeRequestRiskAssessment,
 )
@@ -569,12 +573,10 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             metadata=expected_metadata
         ),
         "update_merge_request": tools.UpdateMergeRequest(metadata=expected_metadata),
-        "add_merge_request_reviewers": tools.AddMergeRequestReviewers(
+        "add_merge_request_reviewers": AddMergeRequestReviewers(
             metadata=expected_metadata
         ),
-        "post_suggested_reviewers": tools.PostSuggestedReviewers(
-            metadata=expected_metadata
-        ),
+        "post_suggested_reviewers": PostSuggestedReviewers(metadata=expected_metadata),
         "get_pipeline_failing_jobs": tools.GetPipelineFailingJobs(
             metadata=expected_metadata
         ),

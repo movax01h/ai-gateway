@@ -1,11 +1,10 @@
 import json
-from typing import Any, Literal, Optional, Type
+from typing import Any, Optional, Type
 
 import structlog
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field, field_validator
 
-from duo_workflow_service.gitlab.resource_resolver import resolve_identifier_to_path
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import (
@@ -13,12 +12,6 @@ from duo_workflow_service.tools.duo_base_tool import (
     DuoBaseTool,
 )
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
-from duo_workflow_service.tools.queries.merge_requests import SET_REVIEWERS_MUTATION
-from duo_workflow_service.tools.version_compatibility import (
-    get_gitlab_version,
-    supports_set_reviewers_mutation,
-    supports_suggested_reviewers_endpoint,
-)
 
 log = structlog.stdlib.get_logger("workflow")
 
@@ -605,210 +598,32 @@ For example:
         return f"Update merge request !{args.merge_request_iid} in project {args.project_id}"
 
 
-class AddMergeRequestReviewersInput(MergeRequestResourceInput):
-    reviewer_usernames: list[str] = Field(
-        description="Usernames of the reviewers to add. Reviewers already assigned to the merge request are "
-        "kept. Pass an empty list when there is nobody to add.",
+# Moved to the recommend_reviewers feature package. Resolve lazily: the feature modules import this one.
+_MOVED_TOOLS = {
+    "AddMergeRequestReviewers": "ai.features.review.recommend_reviewers.components",
+    "AddMergeRequestReviewersInput": "ai.features.review.recommend_reviewers.components",
+    "PostSuggestedReviewers": "ai.features.review.recommend_reviewers.components",
+    "PostSuggestedReviewersInput": "ai.features.review.recommend_reviewers.components",
+    "SuggestedReviewerInput": "ai.features.review.recommend_reviewers.components",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module_path = _MOVED_TOOLS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    import importlib  # pylint: disable=import-outside-toplevel
+    import warnings  # pylint: disable=import-outside-toplevel
+
+    warnings.warn(
+        f"duo_workflow_service.tools.merge_request.{name} moved to {module_path}",
+        DeprecationWarning,
+        stacklevel=2,
     )
+    return getattr(importlib.import_module(module_path), name)
 
 
-# Appending reviewers is its own tool rather than an option on update_merge_request,
-# for two reasons:
-#
-#   1. Tools are part of the stable v1 Flow Registry surface, so they carry the same
-#      backwards-compatibility guarantee as the rest of it, and update_merge_request
-#      is called by flows we don't own. Teaching it a second, GraphQL-backed code
-#      path changes an existing tool's behaviour for every one of those callers.
-#      A new tool is purely additive and cannot break them.
-#   2. mergeRequestSetReviewers is an implementation detail we expect to replace —
-#      suggested-reviewer records are the intended destination. Behind a tool whose
-#      contract is only "add these reviewers, keep the ones already there", that
-#      swap touches no flow config and no prompt.
-class AddMergeRequestReviewers(DuoBaseTool):
-    name: str = "add_merge_request_reviewers"
-    # pylint: disable=line-too-long
-    description: str = f"""Adds reviewers to a merge request, keeping the reviewers that are already assigned.
-
-Use this rather than update_merge_request whenever you want to request more reviews: update_merge_request's
-reviewer_ids replaces the whole reviewer list, so it removes reviewers somebody else assigned.
-
-{MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
-
-For example:
-- Given project_id 13, merge_request_iid 9, and reviewer "jdoe", the tool call would be:
-    add_merge_request_reviewers(project_id=13, merge_request_iid=9, reviewer_usernames=["jdoe"])
-- Given the URL https://gitlab.com/namespace/project/-/merge_requests/103, the tool call would be:
-    add_merge_request_reviewers(url="https://gitlab.com/namespace/project/-/merge_requests/103", reviewer_usernames=["jdoe"])
-- Given there is nobody to add, the tool call would be:
-    add_merge_request_reviewers(project_id=13, merge_request_iid=9, reviewer_usernames=[])
-    """
-    # pylint: enable=line-too-long
-    args_schema: Type[BaseModel] = AddMergeRequestReviewersInput
-
-    async def _execute(self, reviewer_usernames: list[str], **kwargs: Any) -> str:
-        url = kwargs.pop("url", None)
-        project_id = kwargs.pop("project_id", None)
-        merge_request_iid = kwargs.pop("merge_request_iid", None)
-
-        validation_result = self._validate_merge_request_url(
-            url, project_id, merge_request_iid
-        )
-
-        if validation_result.errors:
-            raise ToolException("; ".join(validation_result.errors))
-
-        if not reviewer_usernames:
-            return json.dumps(
-                {"requested_reviewers": [], "message": "No reviewers to add."}
-            )
-
-        # Gated before the two network calls below: an unsupported instance rejects the
-        # mutation as a top-level GraphQL error, which tells the model nothing about
-        # what to do differently.
-        if not supports_set_reviewers_mutation():
-            raise ToolException(
-                "Adding reviewers requires GitLab 19.2 or later. "
-                f"This instance reports {get_gitlab_version()}."
-            )
-
-        # The mutation takes a namespace path (e.g. "group/subgroup/project"), so
-        # resolve it from the project identifier validation already produced.
-        # resolve_identifier_to_path reads path_with_namespace from the API for a
-        # numeric id — the canonical namespace path, so relative URL roots on
-        # self-managed instances can't skew it — and unquotes an already-path
-        # identifier.
-        project_path = await resolve_identifier_to_path(
-            self.gitlab_client, str(validation_result.project_id), "project"
-        )
-        variables = {
-            "input": {
-                "projectPath": project_path,
-                "iid": str(validation_result.merge_request_iid),
-                "reviewerUsernames": reviewer_usernames,
-                "operationMode": "APPEND",
-            }
-        }
-        # operationMode APPEND unions the usernames with the merge request's live
-        # reviewers server-side in one atomic call, so a reviewer somebody assigned
-        # while this workflow was running is never dropped.
-        response = await self.gitlab_client.graphql(SET_REVIEWERS_MUTATION, variables)
-
-        payload = (response or {}).get("mergeRequestSetReviewers")
-        if payload is None:
-            raise ToolException(f"Failed to add reviewers: empty response {response}")
-        if errors := payload.get("errors"):
-            raise ToolException(f"Failed to add reviewers: {errors}")
-
-        # "requested", not "added": the mutation drops usernames that don't resolve to
-        # a visible user and still returns no errors, so empty errors is not proof the
-        # assignment happened. Reporting back what was actually assigned needs
-        # gitlab-org/gitlab#611232.
-        return json.dumps({"requested_reviewers": reviewer_usernames})
-
-    def format_display_message(
-        self, args: AddMergeRequestReviewersInput, _tool_response: Any = None
-    ) -> str:
-        reviewers = ", ".join(args.reviewer_usernames) or "no reviewers"
-        if args.url:
-            return f"Add reviewers ({reviewers}) to merge request {args.url}"
-        return (
-            f"Add reviewers ({reviewers}) to merge request !{args.merge_request_iid} "
-            f"in project {args.project_id}"
-        )
-
-
-class SuggestedReviewerInput(BaseModel):
-    user_id: int = Field(
-        description="The numeric ID of the user being suggested as a reviewer."
-    )
-    reason: Optional[str] = Field(
-        default=None,
-        max_length=2048,
-        description="Optional short rationale explaining why the user is suggested. "
-        "At most 2048 characters.",
-    )
-    approval_rule_id: Optional[int] = Field(
-        default=None,
-        description="Optional ID of the approval rule the user was drawn from.",
-    )
-    approval_rule_type: Optional[Literal["merge_request_rule", "project_rule"]] = Field(
-        default=None,
-        description="Optional type of the approval rule the user was drawn from.",
-    )
-
-
-class PostSuggestedReviewersInput(BaseModel):
-    project_id: int = Field(
-        description="The numeric ID of the project the merge request belongs to."
-    )
-    merge_request_iid: int = Field(
-        description="The internal ID (iid) of the merge request within the project."
-    )
-    suggestions: list[SuggestedReviewerInput] = Field(
-        max_length=50,
-        description="The suggested reviewers to persist, at most 50.",
-    )
-
-
-class PostSuggestedReviewers(DuoBaseTool):
-    name: str = "post_suggested_reviewers"
-    description: str = """Persist AI-suggested reviewers for a merge request via GitLab's API.
-
-    Stores the suggested reviewers without assigning them, replacing any suggestions
-    already stored for the merge request.
-
-    For example:
-    - Given project_id 13, merge_request_iid 9, and two suggestions, the tool call would be:
-        post_suggested_reviewers(
-            project_id=13,
-            merge_request_iid=9,
-            suggestions=[
-                {"user_id": 42, "reason": "Owns the affected module"},
-                {"user_id": 57, "reason": "Recently reviewed related code"}
-            ]
-        )
-    """
-    args_schema: Type[BaseModel] = PostSuggestedReviewersInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
-
-    async def _execute(
-        self,
-        project_id: int,
-        merge_request_iid: int,
-        suggestions: list[SuggestedReviewerInput],
-        **_kwargs: Any,
-    ) -> str:
-        # Gated before the request below: an older instance answers 404, which tells
-        # the model nothing about what to do differently.
-        if not supports_suggested_reviewers_endpoint():
-            raise ToolException(
-                "Saving suggested reviewers requires GitLab 19.4 or later. "
-                f"This instance reports {get_gitlab_version()}."
-            )
-
-        data = {"suggestions": [s.model_dump(exclude_none=True) for s in suggestions]}
-
-        path = (
-            f"{MERGE_REQUESTS_API_PATH.format(project_id=project_id)}/"
-            f"{merge_request_iid}/suggested_reviewers"
-        )
-        response = await self.gitlab_client.apost(
-            path=path,
-            body=json.dumps(data),
-        )
-
-        response = self._process_http_response(
-            identifier=path,
-            response=response,
-            logger=log,
-        )
-
-        return json.dumps({"suggested_reviewers": response})
-
-    def format_display_message(
-        self, args: PostSuggestedReviewersInput, _tool_response: Any = None
-    ) -> str:
-        return (
-            f"Save {len(args.suggestions)} suggested reviewer(s) for "
-            f"merge request !{args.merge_request_iid} in project {args.project_id}"
-        )
+def __dir__() -> list[str]:
+    # Keep the moved names visible to dir() and enumeration-based tooling.
+    return sorted(set(globals()) | set(_MOVED_TOOLS))

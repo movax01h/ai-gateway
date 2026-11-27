@@ -1,16 +1,15 @@
-# pylint: disable=file-naming-for-tests
 import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.tools.base import ToolException
 
-from duo_workflow_service.gitlab.gitlab_api import Project
-from duo_workflow_service.tools.merge_request import (
-    SET_REVIEWERS_MUTATION,
+from ai.features.review.recommend_reviewers.components import (
     AddMergeRequestReviewers,
     AddMergeRequestReviewersInput,
 )
+from duo_workflow_service.gitlab.gitlab_api import Project
+from duo_workflow_service.tools.queries.merge_requests import SET_REVIEWERS_MUTATION
 
 
 @pytest.fixture(name="gitlab_client_mock")

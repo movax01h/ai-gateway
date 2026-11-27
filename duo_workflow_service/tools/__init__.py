@@ -68,6 +68,11 @@ _MOVED_TOOLS = {
     "SubmitMergeRequestRiskClassificationInput": "ai.features.review.risk_classification.components",
     "PostSecretFpAnalysisToGitlab": "ai.features.security.secrets_fp_detection.components",
     "PostSastFpAnalysisToGitlab": "ai.features.security.sast_fp_detection.components",
+    "AddMergeRequestReviewers": "ai.features.review.recommend_reviewers.components",
+    "AddMergeRequestReviewersInput": "ai.features.review.recommend_reviewers.components",
+    "PostSuggestedReviewers": "ai.features.review.recommend_reviewers.components",
+    "PostSuggestedReviewersInput": "ai.features.review.recommend_reviewers.components",
+    "SuggestedReviewerInput": "ai.features.review.recommend_reviewers.components",
 }
 
 
